@@ -1,0 +1,36 @@
+# Dependencies and build output
+node_modules/
+out/
+dist/
+release/
+*.tsbuildinfo
+
+# Test output
+test-results/
+coverage/
+
+# Secrets and local configuration — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+
+# Local notebook data (users' notes live in the OS app-data folder, but guard
+# against data dirs created inside the repo during development)
+Library/
+inkling-data/
+*.conflict-*.json
+*.corrupt-*
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea/

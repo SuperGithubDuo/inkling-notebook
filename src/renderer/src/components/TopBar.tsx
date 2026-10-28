@@ -1,0 +1,375 @@
+import { useRef, useState } from 'react'
+import {
+  FilePlus2,
+  ChevronDown,
+  ChevronLeft,
+  CloudCheck,
+  Ellipsis,
+  Eraser,
+  Hand,
+  Highlighter,
+  Image,
+  Lasso,
+  LoaderCircle,
+  Menu as MenuIcon,
+  Mic,
+  PanelLeft,
+  PenLine,
+  Pencil,
+  Redo2,
+  Settings,
+  Shapes,
+  Share,
+  Sparkles,
+  Star,
+  Trash2,
+  TriangleAlert,
+  Type,
+  Undo2,
+  Waves
+} from 'lucide-react'
+import { HIGHLIGHT_COLORS, INK_COLORS, PEN_SIZES, selectActiveNotebook, selectActivePage, useStore, type Tool } from '@/store/store'
+import { renderPagePng } from '@/canvas/stageRef'
+import { IconButton, InlineEdit, Menu, Popover, Tip, cx } from './ui/primitives'
+import { NotebookIcon } from './NotebookIcon'
+
+const TOOLS: { tool: Tool; label: string; key: string; icon: typeof PenLine }[] = [
+  { tool: 'pen', label: 'Pen', key: 'P', icon: PenLine },
+  { tool: 'highlighter', label: 'Highlighter', key: 'H', icon: Highlighter },
+  { tool: 'eraser', label: 'Eraser', key: 'E', icon: Eraser }
+]
+
+const SOON = 'coming in Phase 2'
+
+const Divider = () => <span className="mx-1.5 h-6 w-px shrink-0 bg-line" aria-hidden />
+
+export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const view = useStore((s) => s.view)
+  const notebook = useStore(selectActiveNotebook)
+  const page = useStore(selectActivePage)
+  const tool = useStore((s) => s.tool)
+  const penColor = useStore((s) => s.penColor)
+  const highlightColor = useStore((s) => s.highlightColor)
+  const tutorOpen = useStore((s) => s.tutorOpen)
+  const canUndo = useStore((s) => !!s.activePageId && (s.history[s.activePageId]?.undo.length ?? 0) > 0)
+  const canRedo = useStore((s) => !!s.activePageId && (s.history[s.activePageId]?.redo.length ?? 0) > 0)
+  const st = useStore.getState()
+
+  const [nameMenu, setNameMenu] = useState<{ x: number; y: number } | null>(null)
+  const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null)
+  const [renaming, setRenaming] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  const inNotebook = view.kind === 'notebook' && !!notebook
+  const colors = tool === 'highlighter' ? HIGHLIGHT_COLORS : INK_COLORS
+  const currentColor = tool === 'highlighter' ? highlightColor : penColor
+
+  async function exportPage(): Promise<void> {
+    if (!page || !notebook) return
+    const png = renderPagePng(page)
+    if (!png) return
+    const idx = notebook.pages.filter((p) => p.deletedAt === null).findIndex((p) => p.id === page.id)
+    const result = await window.inkling.exportPng(`${notebook.name} - page ${idx + 1}`, png)
+    if (result.saved) flash(`Exported to ${result.path}`)
+  }
+
+  function flash(text: string): void {
+    setNotice(text)
+    setTimeout(() => setNotice((n) => (n === text ? null : n)), 3500)
+  }
+
+  return (
+    <header className="relative flex h-[60px] shrink-0 items-center border-b border-line-soft bg-white px-3">
+      {/* Left: navigation + notebook name */}
+      <div className="flex w-[300px] min-w-0 shrink items-center gap-1">
+        <IconButton
+          label={inNotebook ? 'Back to library' : 'Back to notebook'}
+          disabled={!inNotebook && !notebook}
+          onClick={() => (inNotebook ? st.showSection('notebooks') : notebook && void st.openNotebook(notebook.id))}
+        >
+          <ChevronLeft size={20} />
+        </IconButton>
+        <IconButton label="Toggle sidebar" onClick={() => st.toggle('sidebarOpen')}>
+          <MenuIcon size={19} />
+        </IconButton>
+        {inNotebook &&
+          (renaming ? (
+            <div className="ml-2 w-48">
+              <InlineEdit
+                value={notebook.name}
+                onCommit={(v) => {
+                  st.renameNotebook(notebook.id, v)
+                  setRenaming(false)
+                }}
+                onCancel={() => setRenaming(false)}
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              data-testid="notebook-title"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect()
+                setNameMenu({ x: r.left, y: r.bottom + 6 })
+              }}
+              className="ml-1.5 flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[17px] font-semibold text-ink hover:bg-[#f1f2f4]"
+            >
+              <span className="truncate">{notebook.name}</span>
+              <ChevronDown size={16} className="shrink-0 text-ink-2" />
+            </button>
+          ))}
+      </div>
+
+      {/* Center: drawing tools */}
+      {inNotebook && (
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-0.5" role="toolbar" aria-label="Drawing tools">
+          {TOOLS.map(({ tool: t, label, key, icon: Icon }) => (
+            <IconButton key={t} label={label} hint={key} active={tool === t} onClick={() => st.setTool(t)} data-testid={`tool-${t}`}>
+              <Icon size={19} strokeWidth={1.8} />
+            </IconButton>
+          ))}
+          <IconButton label={`Lasso select — ${SOON}`} disabled>
+            <Lasso size={19} strokeWidth={1.8} />
+          </IconButton>
+          <IconButton label={`Shapes — ${SOON}`} disabled>
+            <Shapes size={19} strokeWidth={1.8} />
+          </IconButton>
+          <IconButton label="Text" hint="T" active={tool === 'text'} onClick={() => st.setTool('text')} data-testid="tool-text">
+            <Type size={19} strokeWidth={1.8} />
+          </IconButton>
+          <IconButton label={`Insert image — ${SOON}`} disabled>
+            <Image size={19} strokeWidth={1.8} />
+          </IconButton>
+          <IconButton label="Audio recording — not yet available" disabled>
+            <Mic size={19} strokeWidth={1.8} />
+          </IconButton>
+          <Divider />
+          {colors.map((c) => (
+            <button
+              key={c}
+              type="button"
+              data-testid={`color-${c}`}
+              aria-label={`Colour ${c}`}
+              aria-pressed={currentColor === c}
+              onClick={() => st.setColor(c)}
+              className="group relative flex h-9 w-8 items-center justify-center"
+            >
+              <span
+                className="h-[18px] w-[18px] rounded-full transition-transform group-hover:scale-110"
+                style={{ background: c, boxShadow: currentColor === c && tool !== 'eraser' ? `0 0 0 2px white, 0 0 0 3.5px ${c}` : undefined }}
+              />
+            </button>
+          ))}
+          <CustomColor value={currentColor} onPick={st.setColor} />
+          <SizePicker />
+          <IconButton label={`Pan & zoom — ${SOON}`} disabled>
+            <Hand size={18} strokeWidth={1.8} />
+          </IconButton>
+          <Divider />
+          <IconButton label="Undo" hint="Ctrl+Z" disabled={!canUndo} onClick={st.undo} data-testid="undo">
+            <Undo2 size={19} strokeWidth={1.8} />
+          </IconButton>
+          <IconButton label="Redo" hint="Ctrl+Shift+Z" disabled={!canRedo} onClick={st.redo} data-testid="redo">
+            <Redo2 size={19} strokeWidth={1.8} />
+          </IconButton>
+          <IconButton
+            label="More"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setMoreMenu({ x: r.left, y: r.bottom + 6 })
+            }}
+          >
+            <Ellipsis size={19} />
+          </IconButton>
+        </div>
+      )}
+      {!inNotebook && <div className="flex-1" />}
+
+      {/* Right: status, tutor, export, settings */}
+      <div className="flex w-[300px] shrink items-center justify-end gap-1">
+        <SaveIndicator />
+        <button
+          type="button"
+          data-testid="toggle-tutor"
+          aria-pressed={tutorOpen}
+          onClick={() => st.toggle('tutorOpen')}
+          className={cx(
+            'mx-1 flex h-9 items-center gap-1.5 rounded-[11px] px-3.5 text-[14px] font-medium transition-colors',
+            tutorOpen
+              ? 'bg-gradient-to-r from-[#8d8cf6] to-[#9fa7fb] text-white shadow-[0_2px_8px_-2px_rgb(109_99_240/0.5)]'
+              : 'bg-lav-soft text-lav hover:bg-[#e2dffc]'
+          )}
+        >
+          <Sparkles size={15} />
+          AI Tutor
+        </button>
+        <IconButton label="Export page as PNG" disabled={!inNotebook} onClick={() => void exportPage()}>
+          <Share size={18} strokeWidth={1.8} />
+        </IconButton>
+        <IconButton label="Settings" onClick={onOpenSettings}>
+          <Settings size={19} strokeWidth={1.8} />
+        </IconButton>
+      </div>
+
+      {notice && (
+        <div role="status" className="animate-pop absolute top-[66px] right-4 z-40 max-w-md rounded-lg bg-[#262a33] px-3 py-2 text-[12.5px] text-white shadow-pop">
+          {notice}
+        </div>
+      )}
+
+      {notebook && (
+        <Menu
+          at={nameMenu}
+          onClose={() => setNameMenu(null)}
+          header={
+            <div className="flex items-center gap-2.5 px-2.5 pt-1.5 pb-2.5">
+              <NotebookIcon color={notebook.color} icon={notebook.icon} size={18} />
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-medium">{notebook.name}</div>
+                <div className="text-[11.5px] text-ink-3">
+                  {notebook.pages.filter((p) => p.deletedAt === null).length} pages · edited {new Date(notebook.updatedAt).toLocaleDateString()}
+                </div>
+              </div>
+            </div>
+          }
+          items={[
+            { label: 'Rename notebook', icon: <Pencil size={15} />, onSelect: () => setRenaming(true) },
+            {
+              label: notebook.favorite ? 'Remove from Favourites' : 'Add to Favourites',
+              icon: <Star size={15} />,
+              onSelect: () => st.toggleFavorite(notebook.id)
+            },
+            'separator',
+            ...(useStore.getState().library?.notebooks ?? [])
+              .filter((n) => n.deletedAt === null && n.id !== notebook.id)
+              .slice(0, 8)
+              .map((n) => ({
+                label: n.name,
+                icon: <NotebookIcon color={n.color} icon={n.icon} size={13} />,
+                onSelect: () => void st.openNotebook(n.id)
+              })),
+            'separator',
+            { label: 'Move to Trash', icon: <Trash2 size={15} />, danger: true, onSelect: () => st.trashNotebook(notebook.id) }
+          ]}
+        />
+      )}
+
+      <Menu
+        at={moreMenu}
+        onClose={() => setMoreMenu(null)}
+        items={[
+          { label: 'Add page', hint: 'Ctrl+Enter', icon: <FilePlus2 size={15} />, onSelect: () => st.addPage() },
+          { label: 'Toggle page navigator', icon: <PanelLeft size={15} />, onSelect: () => st.toggle('navigatorOpen') },
+          { label: 'Export page as PNG…', icon: <Share size={15} />, onSelect: () => void exportPage() },
+          'separator',
+          { label: 'Save now', hint: 'Ctrl+S', icon: <CloudCheck size={15} />, onSelect: () => void st.flush() },
+          { label: 'Show data folder', icon: <Settings size={15} />, onSelect: () => void window.inkling.showDataFolder() }
+        ]}
+      />
+    </header>
+  )
+}
+
+function CustomColor({ value, onPick }: { value: string; onPick: (c: string) => void }) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [open, setOpen] = useState(false)
+  const swatches = ['#1f2430', '#4a5060', '#2563eb', '#0ea5e9', '#6d63f0', '#16a34a', '#e5484d', '#ea8a2c', '#d9468f', '#fde047', '#86efac', '#93c5fd']
+  return (
+    <>
+      <button ref={ref} type="button" aria-label="More colours" onClick={() => setOpen((o) => !o)} className="group relative flex h-9 w-8 items-center justify-center">
+        <span className="h-[18px] w-[18px] rounded-full border-2 border-ink-2 p-[2px]">
+          <span className="block h-full w-full rounded-full" style={{ background: value }} />
+        </span>
+        <Tip text="More colours" />
+      </button>
+      <Popover anchor={ref} open={open} onClose={() => setOpen(false)} className="w-[188px] p-3">
+        <div className="grid grid-cols-6 gap-2">
+          {swatches.map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-label={`Colour ${c}`}
+              onClick={() => onPick(c)}
+              className="h-6 w-6 rounded-full transition-transform hover:scale-110"
+              style={{ background: c, boxShadow: value === c ? `0 0 0 2px white, 0 0 0 3.5px ${c}` : 'inset 0 0 0 1px rgb(0 0 0 / 0.08)' }}
+            />
+          ))}
+        </div>
+        <label className="mt-3 flex items-center justify-between rounded-lg border border-line px-2 py-1.5 text-[12.5px] text-ink-2">
+          Custom
+          <input type="color" value={value} onChange={(e) => onPick(e.target.value)} className="h-6 w-9 cursor-pointer rounded border-0 bg-transparent p-0" />
+        </label>
+      </Popover>
+    </>
+  )
+}
+
+function SizePicker() {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [open, setOpen] = useState(false)
+  const tool = useStore((s) => s.tool)
+  const size = useStore((s) => (s.tool === 'highlighter' ? s.highlightSize : s.tool === 'eraser' ? s.eraserSize : s.penSize))
+  const setSize = useStore((s) => s.setSize)
+  const presets = tool === 'highlighter' ? [12, 18, 28] : tool === 'eraser' ? [8, 14, 28] : [...PEN_SIZES]
+  const [min, max] = tool === 'highlighter' ? [6, 48] : tool === 'eraser' ? [4, 60] : [1, 16]
+  const label = tool === 'eraser' ? 'Eraser size' : tool === 'highlighter' ? 'Highlighter thickness' : 'Pen thickness'
+  return (
+    <>
+      <IconButton ref={ref} label={label} onClick={() => setOpen((o) => !o)} disabled={tool === 'text'} data-testid="size-picker">
+        <Waves size={19} strokeWidth={1.8} />
+      </IconButton>
+      <Popover anchor={ref} open={open} onClose={() => setOpen(false)} className="w-[220px] p-3">
+        <div className="mb-2 text-[12px] font-medium text-ink-2">{label}</div>
+        <div className="flex gap-2">
+          {presets.map((p) => (
+            <button
+              key={p}
+              type="button"
+              aria-label={`Size ${p}`}
+              onClick={() => setSize(p)}
+              className={cx(
+                'flex h-10 flex-1 items-center justify-center rounded-lg border',
+                size === p ? 'border-accent/50 bg-accent-softer' : 'border-line hover:bg-[#f6f6f8]'
+              )}
+            >
+              <span className="rounded-full bg-ink" style={{ width: Math.min(26, p * 1.4 + 2), height: Math.min(26, p * 1.4 + 2) }} />
+            </button>
+          ))}
+        </div>
+        <input
+          type="range"
+          aria-label={label}
+          min={min}
+          max={max}
+          step={0.5}
+          value={size}
+          onChange={(e) => setSize(Number(e.target.value))}
+          className="mt-3 w-full accent-[var(--color-accent)]"
+        />
+      </Popover>
+    </>
+  )
+}
+
+function SaveIndicator() {
+  const status = useStore((s) => s.saveStatus)
+  const conflicts = useStore((s) => s.conflicts.length)
+  const state = conflicts ? 'error' : status.state
+  const text =
+    state === 'saving' ? 'Saving…' : state === 'error' ? (conflicts ? 'Conflict' : 'Save failed') : 'Saved'
+  return (
+    <div
+      data-testid="save-status"
+      data-state={state}
+      role="status"
+      className={cx(
+        'group relative flex h-8 items-center gap-1.5 rounded-lg px-2 text-[12.5px]',
+        state === 'error' ? 'bg-[#fdf0f0] text-[#c93a3f]' : 'text-ink-3'
+      )}
+    >
+      {state === 'saving' ? <LoaderCircle size={15} className="animate-spin" /> : state === 'error' ? <TriangleAlert size={15} /> : <CloudCheck size={16} />}
+      <span>{text}</span>
+      <Tip text={status.message ?? (state === 'saved' ? 'All changes saved on this computer' : text)} />
+    </div>
+  )
+}
