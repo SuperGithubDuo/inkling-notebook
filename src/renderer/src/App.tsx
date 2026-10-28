@@ -9,6 +9,7 @@ import { TutorPanel } from './components/TutorPanel'
 import { FloatingToolbar } from './components/FloatingToolbar'
 import { LibraryView } from './components/LibraryView'
 import { SettingsDialog } from './components/SettingsDialog'
+import { SearchPalette } from './components/SearchPalette'
 import { PageCanvas } from './canvas/PageCanvas'
 import { NoteEditor } from './notes/NoteEditor'
 
@@ -22,6 +23,7 @@ export function App() {
   const navigatorOpen = useStore((s) => s.navigatorOpen)
   const tutorOpen = useStore((s) => s.tutorOpen)
   const activeKind = useStore(selectActiveKind)
+  const searchOpen = useStore((s) => s.searchOpen)
   const [settings, setSettings] = useState(false)
   const openSettings = useCallback(() => setSettings(true), [])
 
@@ -77,6 +79,7 @@ export function App() {
         )}
       </div>
       {settings && <SettingsDialog onClose={() => setSettings(false)} />}
+      {searchOpen && <SearchPalette onClose={() => useStore.getState().setSearchOpen(false)} />}
     </div>
   )
 }

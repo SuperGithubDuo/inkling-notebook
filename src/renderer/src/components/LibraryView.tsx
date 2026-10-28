@@ -135,11 +135,10 @@ function Empty({ icon, title, body }: { icon: React.ReactNode; title: string; bo
 
 export function LibraryView({ section }: { section: Section }) {
   const library = useStore((s) => s.library)
-  const search = useStore((s) => s.search.trim().toLowerCase())
   const st = useStore.getState()
   if (!library) return null
 
-  const live = library.notebooks.filter((n) => n.deletedAt === null && (!search || n.name.toLowerCase().includes(search)))
+  const live = library.notebooks.filter((n) => n.deletedAt === null)
   let content: React.ReactNode
 
   if (section === 'notebooks' || section === 'favorites') {

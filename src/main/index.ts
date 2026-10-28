@@ -7,11 +7,40 @@ import { assetNameSchema, idSchema } from '@shared/schema'
 import { createStarterLibrary } from '@shared/factory'
 import { IMAGE_MIME, MAX_IMAGE_BYTES, Storage } from './storage'
 import { exportMarkdownWithImages, importMarkdownImages } from './markdownFiles'
+import { SearchIndex } from './searchIndex'
+import type { Library } from '@shared/schema'
 
 const MAX_MARKDOWN_BYTES = 10 * 1024 * 1024
 
 const dataDir = process.env.INKLING_DATA_DIR ?? join(app.getPath('userData'), 'Library')
 const storage = new Storage(dataDir)
+const index = new SearchIndex()
+let indexReady: Promise<void> = Promise.resolve()
+
+/**
+ * Reads every page and note once at startup so search works across the whole
+ * library. Saves and loads keep it current afterwards; anything they index
+ * first is newer than what this pass would read, so it is left alone.
+ */
+async function buildIndex(library: Library): Promise<void> {
+  index.setLibrary(library)
+  for (const nb of library.notebooks) {
+    for (const meta of nb.pages) {
+      if (index.has(meta.id)) continue
+      try {
+        if (meta.kind === 'note') {
+          const { note } = await storage.loadNote(nb.id, meta.id)
+          if (note && !index.has(meta.id)) index.upsertNote(note)
+        } else {
+          const { page } = await storage.loadPage(nb.id, meta.id)
+          if (page && !index.has(meta.id)) index.upsertPage(page)
+        }
+      } catch {
+        /* unreadable files are reported when the page is opened */
+      }
+    }
+  }
+}
 let mainWindow: BrowserWindow | null = null
 
 // Image assets are served from the notebook folder through a read-only scheme.
@@ -116,18 +145,56 @@ function handle<A extends unknown[], R>(channel: string, args: z.ZodType<A>, fn:
 function registerIpc(): void {
   handle(IPC.loadLibrary, z.tuple([]), async (): Promise<LoadLibraryResult> => {
     const { library, recovered } = await storage.loadLibrary()
-    if (library) return { library, recovered: recovered ? ['library.json'] : [], dataDir }
+    if (library) {
+      indexReady = buildIndex(library)
+      return { library, recovered: recovered ? ['library.json'] : [], dataDir }
+    }
     // First run (or unrecoverable library): start fresh and persist immediately.
     const fresh = createStarterLibrary()
     await storage.saveLibrary(fresh)
+    index.setLibrary(fresh)
     return { library: fresh, recovered: recovered ? ['library.json (reset: no valid backup)'] : [], dataDir }
   })
   // Payloads are validated inside Storage against the full schemas.
-  handle(IPC.saveLibrary, z.tuple([z.unknown()]), (library) => storage.saveLibrary(library as never))
-  handle(IPC.loadPage, z.tuple([idSchema, idSchema]), (nb, page) => storage.loadPage(nb, page))
-  handle(IPC.savePage, z.tuple([z.unknown()]), (page) => storage.savePage(page as never))
-  handle(IPC.loadNote, z.tuple([idSchema, idSchema]), (nb, page) => storage.loadNote(nb, page))
-  handle(IPC.saveNote, z.tuple([z.unknown()]), (note) => storage.saveNote(note as never))
+  // The index follows whatever is actually on disk: saved data, or loaded data.
+  handle(IPC.saveLibrary, z.tuple([z.unknown()]), async (library) => {
+    const result = await storage.saveLibrary(library as never)
+    if (result.status === 'saved') index.setLibrary(library as Library)
+    return result
+  })
+  handle(IPC.loadPage, z.tuple([idSchema, idSchema]), async (nb, id) => {
+    const result = await storage.loadPage(nb, id)
+    if (result.page) index.upsertPage(result.page)
+    return result
+  })
+  handle(IPC.savePage, z.tuple([z.unknown()]), async (page) => {
+    const result = await storage.savePage(page as never)
+    if (result.status === 'saved') index.upsertPage(page as never)
+    return result
+  })
+  handle(IPC.loadNote, z.tuple([idSchema, idSchema]), async (nb, id) => {
+    const result = await storage.loadNote(nb, id)
+    if (result.note) index.upsertNote(result.note)
+    return result
+  })
+  handle(IPC.saveNote, z.tuple([z.unknown()]), async (note) => {
+    const result = await storage.saveNote(note as never)
+    if (result.status === 'saved') index.upsertNote(note as never)
+    return result
+  })
+  const searchOptions = z.object({ notebookId: idSchema.optional(), limit: z.number().int().min(1).max(200).optional() })
+  handle(IPC.search, z.tuple([z.string().max(500), searchOptions]), async (query, options) => {
+    await indexReady
+    return index.search(query, options)
+  })
+  handle(IPC.connections, z.tuple([idSchema]), async (pageId) => {
+    await indexReady
+    return index.connections(pageId)
+  })
+  handle(IPC.graph, z.tuple([z.object({ notebookId: idSchema.optional() })]), async (options) => {
+    await indexReady
+    return index.graph(options)
+  })
   handle(IPC.importMarkdown, z.tuple([idSchema]), async (notebookId) => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: 'Import Markdown',
@@ -159,8 +226,14 @@ function registerIpc(): void {
       return { saved: false, error: (err as Error).message }
     }
   })
-  handle(IPC.deletePageFile, z.tuple([idSchema, idSchema]), (nb, page) => storage.deletePageFile(nb, page))
-  handle(IPC.deleteNotebookFiles, z.tuple([idSchema]), (nb) => storage.deleteNotebookFiles(nb))
+  handle(IPC.deletePageFile, z.tuple([idSchema, idSchema]), async (nb, page) => {
+    index.remove(page)
+    await storage.deletePageFile(nb, page)
+  })
+  handle(IPC.deleteNotebookFiles, z.tuple([idSchema]), async (nb) => {
+    index.removeNotebook(nb)
+    await storage.deleteNotebookFiles(nb)
+  })
   handle(IPC.importImage, z.tuple([idSchema]), async (notebookId) => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: 'Insert image',

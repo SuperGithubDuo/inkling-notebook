@@ -1,4 +1,5 @@
 import type { Library, NoteDoc, PageDoc } from './schema'
+import type { Connections, GraphData, SearchHit } from './search'
 
 /** Outcome of a save. `conflict` means the file changed on disk since we last
  * read it; our version was written to a side-by-side conflict copy instead. */
@@ -39,6 +40,12 @@ export interface InklingApi {
   /** Copies assets into another notebook so pasted objects keep working. */
   copyAssets(fromNotebookId: string, toNotebookId: string, assets: string[]): Promise<{ ok: true } | { error: string }>
   exportPng(suggestedName: string, dataUrl: string): Promise<{ saved: boolean; path?: string }>
+  /** Full-text search over titles, tags, notes, canvas text and links. */
+  search(query: string, options?: { notebookId?: string; limit?: number }): Promise<SearchHit[]>
+  /** Outgoing links, backlinks and related pages of a page. */
+  connections(pageId: string): Promise<Connections>
+  /** Pages and links for the knowledge graph. */
+  graph(options?: { notebookId?: string }): Promise<GraphData>
   showDataFolder(): Promise<void>
   /** Main asks the renderer to flush pending saves before the window closes. */
   onFlushRequest(handler: () => Promise<void>): void
@@ -59,6 +66,9 @@ export const IPC = {
   saveImageBytes: 'image:save-bytes',
   copyAssets: 'asset:copy',
   exportPng: 'export:png',
+  search: 'index:search',
+  connections: 'index:connections',
+  graph: 'index:graph',
   showDataFolder: 'app:show-data-folder',
   flushRequest: 'app:flush-request',
   flushDone: 'app:flush-done'

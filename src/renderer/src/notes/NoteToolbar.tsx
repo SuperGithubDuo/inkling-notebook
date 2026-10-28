@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Code,
   FileCode2,
+  FileSymlink,
   Image,
   Italic,
   Link2,
@@ -25,6 +26,7 @@ import { assetUrl } from '@shared/ipc'
 import { selectActiveNotebook, useStore } from '@/store/store'
 import { IconButton, Menu, type MenuEntry } from '@/components/ui/primitives'
 import { useNoteEditor } from './editorStore'
+import { syncSelectionFromDOM } from './syncSelection'
 
 const Divider = () => <span className="mx-1.5 h-6 w-px shrink-0 bg-line" aria-hidden />
 const at = (e: React.MouseEvent<HTMLElement>): { x: number; y: number } => {
@@ -117,7 +119,10 @@ function EditorToolbar({ editor }: { editor: Editor }) {
       data-testid="note-toolbar"
       // Keep focus (and the selection) in the editor when a button is clicked;
       // otherwise the next keystroke could land on the button instead.
-      onMouseDown={(e) => e.preventDefault()}
+      onMouseDown={(e) => {
+        e.preventDefault()
+        syncSelectionFromDOM(editor.view)
+      }}
     >
       <button
         type="button"
@@ -169,6 +174,9 @@ function EditorToolbar({ editor }: { editor: Editor }) {
       </IconButton>
       <IconButton label="Link" hint="Ctrl+K" active={state.link} onClick={openLink} data-testid="fmt-link">
         <Link2 size={17} />
+      </IconButton>
+      <IconButton label="Link to a page or note" hint="[[" onClick={() => useNoteEditor.getState().openPagePicker()} data-testid="fmt-page-link">
+        <FileSymlink size={17} />
       </IconButton>
       <IconButton label="Insert image" onClick={() => void insertImage()}>
         <Image size={17} />

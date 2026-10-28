@@ -52,6 +52,12 @@ const stubSave = (path) =>
   }, path)
 const find = (n, type) => [...(n.type === type ? [n] : []), ...(n.content ?? []).flatMap((c) => find(c, type))]
 const editor = () => win.locator('[data-testid="note-editor"]')
+/** Moves the caret to the end of the note. The editor learns about caret moves
+ * from an asynchronous browser event, so pause briefly like a person would. */
+const caretToEnd = async () => {
+  await editor().press('Control+End')
+  await sleep(60)
+}
 
 
 // ===================================================================== notes
@@ -98,7 +104,7 @@ await win.keyboard.type('x')
 await win.keyboard.press('Tab')
 await win.keyboard.type('f(x)')
 // Link via Ctrl+K on a selection, after the table
-await editor().press('Control+End')
+await caretToEnd()
 await win.keyboard.type('Reference')
 await win.keyboard.down('Shift')
 for (let i = 0; i < 'Reference'.length; i++) await win.keyboard.press('ArrowLeft')
@@ -235,6 +241,155 @@ await win.locator('[data-testid="page-thumb"][data-kind="canvas"]').first().clic
 await win.waitForSelector('[data-testid="page-surface"]')
 assert.equal(await win.locator('[data-testid="tool-pen"]').count(), 1)
 step('switching back to a handwritten page restores the drawing tools')
+
+
+// ===================================================================== search & links
+async function search(q, { filter } = {}) {
+  await win.keyboard.press('Escape')
+  await win.click('[data-testid="open-search"]')
+  await win.waitForSelector('[data-testid="search-palette"]')
+  if (filter) {
+    await win.click('[data-testid="search-filter"]')
+    await win.getByRole('menuitem', { name: filter, exact: true }).click()
+  }
+  await win.fill('[data-testid="search-input"]', q)
+  await sleep(350)
+  return win.locator('[data-testid="search-result"]')
+}
+const openNote = async (title) => {
+  await win.locator(`[data-testid="page-thumb"][data-kind="note"][aria-label$=": ${title}"]`).click()
+  await win.waitForFunction((t) => document.querySelector('[data-testid="note-title"]')?.value === t, title)
+}
+
+// A text box on the handwritten page (searchable), next to plain ink (not searchable).
+await win.click('[data-testid="tool-text"]')
+const surface = await win.locator('[data-testid="page-surface"]').boundingBox()
+await win.mouse.click(surface.x + 120, surface.y + 160)
+await win.waitForSelector('[data-testid="text-editor"]')
+await win.keyboard.type('Discriminant decides how many roots')
+await win.keyboard.press('Escape')
+await waitSaved()
+
+let results = await search('signs')
+assert.equal(await results.count(), 1)
+assert.equal(await results.first().locator('[data-testid="result-title"]').textContent(), 'Quadratic equations')
+assert.equal(await results.first().locator('[data-testid="result-snippet"] mark').first().textContent(), 'signs')
+await win.screenshot({ path: join(shots, 'p3-03-search.png') })
+await win.keyboard.press('Enter')
+await win.waitForFunction(() => document.querySelector('[data-testid="note-title"]')?.value === 'Quadratic equations')
+step('search finds words inside notes, highlights them and opens the note')
+
+results = await search('discriminant')
+assert.equal(await results.count(), 1)
+assert.match(await results.first().textContent(), /Math Notes · page 1/)
+await win.keyboard.press('ArrowDown')
+await win.keyboard.press('Enter')
+await win.waitForSelector('[data-testid="page-surface"]')
+step('search finds text boxes on handwritten pages and opens the page')
+
+await openNote('Vertex form')
+await win.click('[data-testid="tag-input"]')
+await win.keyboard.type('algebra')
+await win.keyboard.press('Enter')
+await waitSaved()
+results = await search('#algebra')
+assert.equal(await results.count(), 2, 'both algebra-tagged notes')
+results = await search('vertex', { filter: 'Physics' })
+assert.equal(await results.count(), 0, 'notebook filter excludes Math Notes')
+await win.click('[data-testid="search-filter"]')
+await win.getByRole('menuitem', { name: 'Math Notes', exact: true }).click()
+await sleep(300)
+assert.equal(await results.count(), 1)
+await win.keyboard.press('Escape')
+step('tag search and notebook filter')
+
+// Link Vertex form → Quadratic equations with [[ and the picker.
+await openNote('Vertex form')
+await caretToEnd()
+await win.keyboard.press('Enter')
+await win.keyboard.type('Compare with [[')
+await win.waitForSelector('[data-testid="page-picker-input"]')
+await win.keyboard.type('quadr')
+await win.keyboard.press('Enter')
+await win.keyboard.type('and the first page ')
+await win.click('[data-testid="fmt-page-link"]')
+await win.keyboard.type('page 1')
+await win.keyboard.press('Enter')
+await waitSaved()
+assert.match(await win.locator('[data-testid="note-editor"] .note-ref').first().textContent(), /Quadratic equations/)
+const linkLine = await win.locator('[data-testid="note-editor"] p', { hasText: 'Compare with' }).textContent()
+assert.equal(linkLine, 'Compare with Quadratic equations and the first page Math Notes · page 1 ', 'picker queries must not leak into the note')
+await win.waitForSelector('[data-testid="outgoing"] [data-testid="connection"]')
+assert.equal(await win.locator('[data-testid="outgoing"] [data-testid="connection"]').count(), 2)
+step('inserted links to a note ([[) and to a handwritten page (toolbar picker)')
+
+// Backlinks appear on the target note…
+await win.locator('[data-testid="note-editor"] .note-ref', { hasText: 'Quadratic equations' }).click()
+await win.waitForFunction(() => document.querySelector('[data-testid="note-title"]')?.value === 'Quadratic equations')
+await win.waitForSelector('[data-testid="backlinks"] [data-testid="connection"]')
+assert.match(await win.locator('[data-testid="backlinks"]').textContent(), /Vertex form/)
+step('clicking a link navigates; the target lists the backlink')
+
+// …and on the handwritten page, via the pill.
+await win.locator('[data-testid="page-thumb"][data-kind="canvas"]').click()
+await win.waitForSelector('[data-testid="backlinks-pill"]')
+assert.match(await win.locator('[data-testid="backlinks-pill"]').textContent(), /1 backlink/)
+await win.click('[data-testid="backlinks-pill"]')
+assert.match(await win.locator('[role="dialog"] [data-testid="backlinks"]').textContent(), /Vertex form/)
+await win.keyboard.press('Escape')
+step('handwritten pages show their backlinks')
+
+// Rename the target: links follow, search follows, Markdown export uses the new title.
+await openNote('Quadratic equations')
+await win.fill('[data-testid="note-title"]', 'Quadratics by factoring')
+await win.keyboard.press('Tab')
+await waitSaved()
+await openNote('Vertex form')
+await win.waitForFunction(() => [...document.querySelectorAll('[data-testid="note-editor"] .note-ref')].some((a) => a.textContent === 'Quadratics by factoring'))
+results = await search('factoring')
+assert.equal(await results.first().locator('[data-testid="result-title"]').textContent(), 'Quadratics by factoring')
+await win.keyboard.press('Escape')
+const linkExport = join(scratch, 'vertex-links.md')
+await stubSave(linkExport)
+await win.click('[data-testid="more-menu"]')
+await win.getByRole('menuitem', { name: /Export note as Markdown/ }).click()
+await sleep(400)
+nb = await notebook('Math Notes')
+const quadId = nb.pages.find((p) => p.title === 'Quadratics by factoring').id
+assert.ok((await readFile(linkExport, 'utf8')).includes(`[Quadratics by factoring](inkling://page/${quadId})`))
+step('renaming a note keeps links valid; search and Markdown export use the new title')
+
+// Trash the linking note: its backlink disappears; restore brings it back.
+await win.locator('[data-testid="page-thumb"][data-kind="note"][aria-label$=": Vertex form"]').click({ button: 'right' })
+await win.getByRole('menuitem', { name: 'Delete page' }).click()
+await waitSaved()
+results = await search('compare with')
+assert.equal(await results.count(), 0, 'trashed notes are not searchable')
+await win.keyboard.press('Escape')
+await openNote('Quadratics by factoring')
+await sleep(400)
+assert.equal(await win.locator('[data-testid="backlinks"] [data-testid="connection"]').count(), 0)
+await win.getByRole('button', { name: /^Trash/ }).click()
+await win.getByRole('button', { name: 'Restore' }).click()
+await waitSaved()
+await win.getByRole('button', { name: 'Notebooks', exact: true }).click()
+await win.locator('[data-testid="notebook-item"]', { hasText: 'Math Notes' }).locator('button').first().click()
+await openNote('Quadratics by factoring')
+await win.waitForSelector('[data-testid="backlinks"] [data-testid="connection"]')
+results = await search('compare with')
+assert.equal(await results.count(), 1, 'restored note is searchable again')
+await win.keyboard.press('Escape')
+step('trash removes a note from search and backlinks; restore brings it back')
+
+await app.close()
+await launch()
+results = await search('compare')
+await win.keyboard.press('Enter')
+await win.waitForFunction(() => document.querySelector('[data-testid="note-title"]')?.value === 'Vertex form')
+await win.waitForFunction(() => [...document.querySelectorAll('[data-testid="note-editor"] .note-ref')].some((a) => a.textContent === 'Quadratics by factoring'))
+await win.waitForSelector('[data-testid="outgoing"] [data-testid="connection"]')
+await win.screenshot({ path: join(shots, 'p3-04-links.png') })
+step('after a restart the search index is rebuilt and links still resolve')
 
 await app.close()
 console.log(`\nPhase 3 acceptance: PASS  (data: ${dataDir})`)

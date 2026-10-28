@@ -157,3 +157,37 @@
   color: #b9bcc5;
   pointer-events: none;
 }
+
+.inkling-prose .note-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0 0.4em;
+  border-radius: 6px;
+  background: var(--color-lav-softer);
+  color: var(--color-lav);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.inkling-prose .note-ref::before {
+  content: '↗';
+  font-size: 0.8em;
+  opacity: 0.7;
+}
+.inkling-prose .note-ref:hover {
+  background: var(--color-lav-soft);
+}
+.inkling-prose .note-ref.ProseMirror-selectednode {
+  outline: 2px solid var(--color-lav);
+}
+.inkling-prose .note-ref--trashed {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.inkling-prose .note-ref--missing {
+  color: var(--color-ink-3);
+  background: #f2f3f5;
+  cursor: not-allowed;
+}

@@ -1,5 +1,5 @@
 /** Small modal dialogs for editing formulas and links in notes. */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import katex from 'katex'
 import { useNoteEditor } from './editorStore'
 
@@ -32,10 +32,11 @@ export function MathDialog() {
   const close = useNoteEditor((s) => s.close)
   const [latex, setLatex] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => {
+  useLayoutEffect(() => {
     setLatex(dialog?.latex ?? '')
-    requestAnimationFrame(() => area.current?.select())
+    area.current?.focus()
   }, [dialog])
+  useEffect(() => area.current?.select(), [dialog])
 
   const preview = useMemo(() => {
     try {
@@ -103,10 +104,11 @@ export function LinkDialog() {
   const close = useNoteEditor((s) => s.close)
   const [href, setHref] = useState('')
   const input = useRef<HTMLInputElement>(null)
-  useEffect(() => {
+  useLayoutEffect(() => {
     setHref(dialog?.href ?? '')
-    requestAnimationFrame(() => input.current?.select())
+    input.current?.focus()
   }, [dialog])
+  useEffect(() => input.current?.select(), [dialog])
   if (!dialog || !editor) return null
 
   const normalized = /^[a-z][a-z0-9+.-]*:/i.test(href.trim()) ? href.trim() : href.trim() ? `https://${href.trim()}` : ''

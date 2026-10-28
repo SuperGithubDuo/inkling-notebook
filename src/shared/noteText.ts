@@ -48,3 +48,18 @@ export function noteToPlainText(doc: NoteNode): string {
 export function noteHeadline(doc: NoteNode): string {
   return noteToPlainText(doc).split('\n', 1)[0]?.slice(0, 120) ?? ''
 }
+
+/** Ids of the pages a note links to (internal links), in document order. */
+export function noteLinks(doc: NoteNode): string[] {
+  const out: string[] = []
+  const walk = (n: NoteNode): void => {
+    if (n.type === 'noteRef' && typeof n.attrs?.pageId === 'string') out.push(n.attrs.pageId)
+    for (const m of n.marks ?? []) {
+      const match = m.type === 'link' && typeof m.attrs?.href === 'string' ? /^inkling:\/\/page\/([A-Za-z0-9_-]{6,64})$/.exec(m.attrs.href) : null
+      if (match) out.push(match[1]!)
+    }
+    n.content?.forEach(walk)
+  }
+  walk(doc)
+  return [...new Set(out)]
+}

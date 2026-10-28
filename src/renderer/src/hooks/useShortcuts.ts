@@ -22,8 +22,7 @@ export function useShortcuts(): void {
       }
       if (mod && key === 'f') {
         e.preventDefault()
-        if (!s.sidebarOpen) s.toggle('sidebarOpen')
-        requestAnimationFrame(() => document.getElementById('notebook-search')?.focus())
+        s.setSearchOpen(true)
         return
       }
       if (isEditable(e.target)) return

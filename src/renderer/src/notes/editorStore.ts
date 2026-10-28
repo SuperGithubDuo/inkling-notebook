@@ -8,9 +8,11 @@ interface EditorState {
   editor: Editor | null
   math: MathDialog | null
   link: { href: string } | null
+  pagePicker: boolean
   setEditor(editor: Editor | null): void
   openMath(dialog: MathDialog): void
   openLink(): void
+  openPagePicker(): void
   close(): void
 }
 
@@ -18,11 +20,13 @@ export const useNoteEditor = create<EditorState>()((set, get) => ({
   editor: null,
   math: null,
   link: null,
+  pagePicker: false,
   setEditor: (editor) => set({ editor }),
-  openMath: (math) => set({ math, link: null }),
+  openMath: (math) => set({ math, link: null, pagePicker: false }),
+  openPagePicker: () => set({ pagePicker: true, math: null, link: null }),
   openLink: () => {
     const href = (get().editor?.getAttributes('link').href as string | undefined) ?? ''
-    set({ link: { href }, math: null })
+    set({ link: { href }, math: null, pagePicker: false })
   },
-  close: () => set({ math: null, link: null })
+  close: () => set({ math: null, link: null, pagePicker: false })
 }))

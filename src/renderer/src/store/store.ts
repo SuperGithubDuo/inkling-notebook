@@ -68,7 +68,8 @@ interface State {
   sidebarOpen: boolean
   navigatorOpen: boolean
   tutorOpen: boolean
-  search: string
+  /** The universal search palette is open. */
+  searchOpen: boolean
 }
 
 interface Actions {
@@ -77,6 +78,8 @@ interface Actions {
   showSection(section: Section): void
   openNotebook(notebookId: string, pageId?: string): Promise<void>
   selectPage(pageId: string): void
+  /** Opens any page or note by id, switching notebooks if needed. */
+  openPage(pageId: string): Promise<void>
 
   createNotebook(name?: string): string
   renameNotebook(id: string, name: string): void
@@ -124,7 +127,7 @@ interface Actions {
   setShapeTool(shape: ShapeTool): void
   setShapeFill(fill: boolean): void
   toggle(panel: 'sidebarOpen' | 'navigatorOpen' | 'tutorOpen'): void
-  setSearch(q: string): void
+  setSearchOpen(open: boolean): void
 }
 
 export type Store = State & Actions
@@ -248,7 +251,7 @@ export const useStore = create<Store>()((set, get) => {
     sidebarOpen: true,
     navigatorOpen: true,
     tutorOpen: true,
-    search: '',
+    searchOpen: false,
 
     async init() {
       try {
@@ -295,6 +298,16 @@ export const useStore = create<Store>()((set, get) => {
         set({ activePageId: pageId, selection: [] })
         writeLastOpened(nbId, pageId)
       })
+    },
+
+    async openPage(pageId) {
+      const found = metaOf(pageId)
+      if (!found) return set({ notice: 'That page no longer exists.' })
+      if (found.notebook.deletedAt !== null || found.meta.deletedAt !== null) {
+        return set({ notice: `“${found.meta.title || 'This page'}” is in the Trash. Restore it from Trash to open it.` })
+      }
+      if (get().activeNotebookId === found.notebook.id && get().view.kind === 'notebook') get().selectPage(pageId)
+      else await get().openNotebook(found.notebook.id, pageId)
     },
 
     createNotebook(name = 'Untitled Notebook') {
@@ -698,8 +711,8 @@ export const useStore = create<Store>()((set, get) => {
       set((s) => ({ [panel]: !s[panel] }) as Partial<State>)
     },
 
-    setSearch(search) {
-      set({ search })
+    setSearchOpen(searchOpen) {
+      set({ searchOpen })
     }
   }
 

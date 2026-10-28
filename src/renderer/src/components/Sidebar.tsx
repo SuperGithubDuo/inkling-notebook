@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, Ellipsis, FileText, LibraryBig, Plus, Search, Star, Trash2, Users, X } from 'lucide-react'
+import { ChevronDown, Ellipsis, FileText, LibraryBig, Plus, Search, Star, Trash2, Users } from 'lucide-react'
 import { useStore, type Section } from '@/store/store'
 import { NotebookIcon } from './NotebookIcon'
 import { NotebookMenu } from './NotebookMenu'
@@ -17,15 +17,13 @@ export function Sidebar() {
   const library = useStore((s) => s.library)
   const view = useStore((s) => s.view)
   const activeId = useStore((s) => s.activeNotebookId)
-  const search = useStore((s) => s.search)
-  const { showSection, openNotebook, renameNotebook, createNotebook, setSearch } = useStore.getState()
+  const { showSection, openNotebook, renameNotebook, createNotebook, setSearchOpen } = useStore.getState()
 
   const [collapsed, setCollapsed] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ id: string; at: { x: number; y: number } } | null>(null)
 
-  const query = search.trim().toLowerCase()
-  const notebooks = (library?.notebooks ?? []).filter((n) => n.deletedAt === null && (!query || n.name.toLowerCase().includes(query)))
+  const notebooks = (library?.notebooks ?? []).filter((n) => n.deletedAt === null)
   const trashCount =
     library?.notebooks.reduce((n, nb) => n + (nb.deletedAt ? 1 : nb.pages.filter((p) => p.deletedAt).length), 0) ?? 0
   const menuNotebook = menu ? library?.notebooks.find((n) => n.id === menu.id) : undefined
@@ -33,22 +31,16 @@ export function Sidebar() {
   return (
     <aside className="flex w-[clamp(180px,14vw,208px)] shrink-0 flex-col border-r border-line-soft bg-panel" aria-label="Library">
       <div className="px-3 pt-3 pb-1">
-        <label className="group flex h-8 items-center gap-2 rounded-lg border border-line bg-white px-2.5 text-ink-3 focus-within:border-accent/50 focus-within:ring-2 focus-within:ring-accent/10">
+        <button
+          type="button"
+          data-testid="open-search"
+          onClick={() => setSearchOpen(true)}
+          className="flex h-8 w-full items-center gap-2 rounded-lg border border-line bg-white px-2.5 text-[13px] text-ink-3 hover:border-[#d9dbe0] hover:text-ink-2"
+        >
           <Search size={14} />
-          <input
-            id="notebook-search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === 'Escape' && (setSearch(''), e.currentTarget.blur())}
-            placeholder="Search notebooks"
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
-          />
-          {search && (
-            <button type="button" aria-label="Clear search" onClick={() => setSearch('')} className="text-ink-3 hover:text-ink">
-              <X size={13} />
-            </button>
-          )}
-        </label>
+          <span className="flex-1 text-left">Search</span>
+          <kbd className="font-sans text-[11px] text-ink-3">Ctrl F</kbd>
+        </button>
       </div>
 
       <nav className="px-3 pt-2">
@@ -139,9 +131,6 @@ export function Sidebar() {
               </div>
             )
           })}
-        {!collapsed && query && notebooks.length === 0 && (
-          <p className="px-2.5 py-2 text-[12.5px] text-ink-3">No notebooks match “{search}”.</p>
-        )}
 
         <button
           type="button"

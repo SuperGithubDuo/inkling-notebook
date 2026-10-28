@@ -6,7 +6,7 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 |---|---|---|
 | 1 | Library, pages, pen/highlighter/eraser, text, undo/redo, local auto-save | ✅ done |
 | 2 | Lasso selection, shapes, images, zoom/pan, precise eraser, page sizes, typed command layer | ✅ done |
-| 3 | Rich-text notes ✅, search, links/backlinks, knowledge graph, PDF | in progress |
+| 3 | Rich-text notes ✅, search ✅, links/backlinks ✅, knowledge graph, PDF | in progress |
 | 4–5 | Claude-powered AI Tutor: chat, practice, edits on the page | planned (panel shown as "not connected") |
 | 6 | Packaging, installers, theming, accessibility pass | planned |
 
@@ -30,7 +30,7 @@ Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Window
 
 ```bash
 npm run typecheck   # strict TypeScript, no emit
-npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets, notes/Markdown
+npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets, notes/Markdown, search/links/graph
 npm run build
 npm run test:e2e    # drives the real Electron app with mouse input (Phase 1, 2, 3 and regression suites)
 ```
@@ -68,6 +68,18 @@ A notebook can mix handwritten pages and rich-text notes. Add a note with **Note
 - Title and `#tags` above the text.
 - **Markdown**: ⋯ → *Import Markdown as note…* copies local images the file references into the notebook. The share button (or ⋯ → *Export note as Markdown…*) writes a `.md` file and puts its images in a `<name>_assets/` folder next to it.
 
+## Search, links and backlinks
+
+- **Search** (`Ctrl+F`, or *Search* at the top of the sidebar) runs as you type and covers:
+  - note text, including formulas' LaTeX
+  - page and note titles, `#tags` and notebook names
+  - text boxes on handwritten pages
+  - the titles of pages a note links to
+
+  Matches are highlighted in titles and excerpts, `↑`/`↓`/`Enter` open a result, and a menu limits search to one notebook. Search ignores case and accents. **Handwritten ink is not searchable**: there is no handwriting recognition yet.
+- **Links**: in a note, type `[[` (or use the *Link to a page* button) to pick any page or note. Links store the target's permanent id and always show its current title, so renaming notes or notebooks never breaks them. In Markdown they export as portable `[Title](inkling://page/<id>)` links and import back as live links.
+- **Backlinks**: every note ends with *Links to*, *Linked from* and *Related* (shared tags, or pages two links away). A handwritten page that is linked from somewhere shows a backlinks pill in its top-left corner.
+
 ## Architecture
 
 ```
@@ -92,6 +104,8 @@ Notes are stored separately, in `notebooks/<id>/notes/<pageId>.json` (`schemaVer
 The editor is TipTap 3 (ProseMirror, MIT) with KaTeX (MIT) for math and TipTap's Markdown extension (MIT). One extension list (`renderer/src/notes/extensions.ts`) serves both the live editor and the headless Markdown converter, so both always agree on the schema. Imported Markdown passes through `sanitizeNoteDoc`, which removes `javascript:`-style links and images.
 
 **Storage.** `src/main/storage.ts` writes atomically (temp file → fsync → rename), keeps the previous version as `.bak` and falls back to it automatically, and refuses to overwrite a file another program changed: your version goes to a `.conflict-<time>.json` copy and the app tells you. Images are copied into `notebooks/<id>/assets/` under a random name after their format is checked from the file bytes, and pages reference them by that name. The renderer reads them through a read-only `inkling-asset://` scheme. Original file paths and temporary browser URLs are never stored.
+
+**Search index.** `src/main/searchIndex.ts` keeps an in-memory index in the main process. At startup it reads every page and note once, then updates on every save, load and delete. Titles, tags and trash state come from the live library at query time, so renames, deletes and restores apply immediately. The same index answers `connections(pageId)` (links, backlinks, related) and `graph()` (nodes, edges, clusters). It is pure TypeScript with no Electron dependency, and unit-tested.
 
 **Command layer (ready for the AI Tutor).** All page edits go through typed, zod-validated commands in `renderer/src/canvas/commands.ts`:
 

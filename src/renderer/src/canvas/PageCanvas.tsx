@@ -30,6 +30,7 @@ import { assetSize } from './assets'
 import { clamp, fitPage, fitWidth, panBy, screenToPage, zoomAt, type Camera, type Size } from './viewport'
 import { SelectionToolbar } from './SelectionToolbar'
 import { ZoomControls } from './ZoomControls'
+import { BacklinksPill } from '@/notes/Connections'
 
 const EMPTY: ReadonlySet<string> = new Set()
 const HIGHLIGHTER_OPACITY = 0.45
@@ -921,6 +922,7 @@ export function PageCanvas({ pageId }: { pageId: string }) {
           )}
 
           <ZoomControls cam={cam} page={pageSize} view={view} onAction={zoomAction} />
+          <BacklinksPill pageId={pageId} />
         </>
       )}
     </div>

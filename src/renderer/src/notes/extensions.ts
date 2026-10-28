@@ -10,10 +10,13 @@ import { TableKit } from '@tiptap/extension-table'
 import Image from '@tiptap/extension-image'
 import { Mathematics } from '@tiptap/extension-mathematics'
 import { Markdown } from '@tiptap/markdown'
+import { NoteRef, type NoteRefOptions } from './noteRef'
 
 export interface NoteExtensionOptions {
   /** Called when the user clicks a formula, to edit its LaTeX. */
   onMathClick?: (kind: 'inline' | 'block', latex: string, pos: number) => void
+  /** Resolution and navigation for internal page links. */
+  pages?: Partial<NoteRefOptions>
 }
 
 export function noteExtensions(options: NoteExtensionOptions = {}): AnyExtension[] {
@@ -39,6 +42,7 @@ export function noteExtensions(options: NoteExtensionOptions = {}): AnyExtension
       inlineOptions: { onClick: (node, pos) => options.onMathClick?.('inline', String(node.attrs.latex ?? ''), pos) },
       blockOptions: { onClick: (node, pos) => options.onMathClick?.('block', String(node.attrs.latex ?? ''), pos) }
     }),
+    NoteRef.configure(options.pages ?? {}),
     Markdown.configure({ markedOptions: { gfm: true } })
   ]
 }

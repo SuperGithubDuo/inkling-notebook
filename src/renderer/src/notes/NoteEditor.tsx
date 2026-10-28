@@ -14,6 +14,10 @@ import { useStore } from '@/store/store'
 import { noteExtensions } from './extensions'
 import { useNoteEditor } from './editorStore'
 import { LinkDialog, MathDialog } from './NoteDialogs'
+import { PagePicker } from './PagePicker'
+import { pageLinkOptions } from './pages'
+import { syncSelectionFromDOM } from './syncSelection'
+import { Connections } from './Connections'
 import 'katex/dist/katex.min.css'
 import './note.css'
 
@@ -32,7 +36,10 @@ function NoteEditorInner({ pageId }: { pageId: string }) {
 
   const extensions = useMemo(
     () => [
-      ...noteExtensions({ onMathClick: (kind, latex, pos) => openMath({ kind, latex, pos }) }),
+      ...noteExtensions({
+        onMathClick: (kind, latex, pos) => openMath({ kind, latex, pos }),
+        pages: pageLinkOptions(() => useNoteEditor.getState().openPagePicker())
+      }),
       Placeholder.configure({ placeholder: 'Start writing… Use the toolbar for headings, lists, tables and formulas.' })
     ],
     [openMath]
@@ -67,12 +74,12 @@ function NoteEditorInner({ pageId }: { pageId: string }) {
         void insertImageFiles(view, files, pos)
         return true
       },
-      handleKeyDown: (_view, event) => {
+      handleKeyDown: (view, event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
           event.preventDefault()
-          // Let the editor read the latest DOM selection (it arrives one event
-          // late) before the dialog takes focus and freezes it.
-          requestAnimationFrame(() => useNoteEditor.getState().openLink())
+          // Take the selection the user sees before the dialog takes focus.
+          syncSelectionFromDOM(view)
+          useNoteEditor.getState().openLink()
           return true
         }
         return false
@@ -108,9 +115,11 @@ function NoteEditorInner({ pageId }: { pageId: string }) {
           }} />
         <TagEditor tags={meta?.tags ?? []} onChange={(t) => setPageTags(pageId, t)} />
         <EditorContent editor={editor} />
+        <Connections pageId={pageId} />
       </article>
       <MathDialog />
       <LinkDialog />
+      <PagePicker currentPageId={pageId} />
     </div>
   )
 }

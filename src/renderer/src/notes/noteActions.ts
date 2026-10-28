@@ -1,6 +1,7 @@
 /** Note-level actions used from menus: Markdown import and export. */
 import { selectActiveMeta, selectActiveNotebook, useStore } from '@/store/store'
 import { docToMarkdown, markdownToDoc } from './format'
+import { resolvePage } from './pages'
 import { noteHeadline } from '@shared/noteText'
 
 /** Picks a Markdown file and adds it to the open notebook as a new note. */
@@ -29,7 +30,7 @@ export async function exportActiveNoteMarkdown(): Promise<void> {
   const meta = selectActiveMeta(s)
   const note = meta?.kind === 'note' ? s.notes[meta.id] : undefined
   if (!meta || !note) return
-  const body = docToMarkdown(note.doc)
+  const body = docToMarkdown(note.doc, { pages: { resolve: resolvePage } })
   const markdown = meta.title ? `# ${meta.title}\n\n${body}` : body
   const result = await window.inkling.exportMarkdown(meta.title || noteHeadline(note.doc) || 'note', markdown)
   if (result.error) s.setNotice(`Export failed: ${result.error}`)

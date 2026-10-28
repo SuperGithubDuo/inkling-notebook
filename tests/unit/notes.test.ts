@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
 import { docToMarkdown, markdownToDoc } from '../../src/renderer/src/notes/format'
-import { noteToPlainText } from '../../src/shared/noteText'
+import { noteLinks, noteToPlainText } from '../../src/shared/noteText'
 import { migrateLibrary } from '../../src/shared/migrate'
 import { librarySchema, noteDocSchema, type NoteNode } from '../../src/shared/schema'
 import { createNoteDoc } from '../../src/shared/factory'
@@ -78,6 +78,24 @@ describe('rich-text notes', () => {
     expect(hrefs).toEqual(['https://a.example'])
     const img = markdownToDoc('![x](javascript:alert(1))\n\n![y](inkling-asset://asset/notebook-1/abcdef123456.png)')
     expect(find(img, 'image').map((i) => i.attrs?.src)).toEqual(['inkling-asset://asset/notebook-1/abcdef123456.png'])
+  })
+})
+
+describe('internal page links', () => {
+  it('parse from portable Markdown links into id-based link nodes', () => {
+    const doc = markdownToDoc('See [Vertex **form**](inkling://page/page-vertex1) and [web](https://a.example).')
+    const refs = find(doc, 'noteRef')
+    expect(refs).toHaveLength(1)
+    expect(refs[0]?.attrs).toEqual({ pageId: 'page-vertex1', label: 'Vertex form' })
+    expect(noteLinks(doc)).toEqual(['page-vertex1'])
+  })
+
+  it('export with the target page\'s current title', () => {
+    const doc = markdownToDoc('See [Old title](inkling://page/page-vertex1).')
+    expect(docToMarkdown(doc)).toContain('[Old title](inkling://page/page-vertex1)')
+    const md = docToMarkdown(doc, { pages: { resolve: () => ({ title: 'Renamed [v2]', trashed: false }) } })
+    expect(md).toContain('[Renamed \\[v2\\]](inkling://page/page-vertex1)')
+    expect(markdownToDoc(md)).toEqual(markdownToDoc('See [Renamed \\[v2\\]](inkling://page/page-vertex1).'))
   })
 })
 
