@@ -96,7 +96,20 @@ function Notices() {
   const recovered = useStore((s) => s.recovered)
   const conflict = useStore((s) => s.conflicts.find((c) => c.pageId === s.activePageId))
   const resolve = useStore((s) => s.resolveConflictWithDisk)
+  const notice = useStore((s) => s.notice)
+  const setNotice = useStore((s) => s.setNotice)
   const [dismissed, setDismissed] = useState(false)
+  if (notice) {
+    return (
+      <div role="alert" className="absolute top-3 right-3 left-3 z-20 flex items-center gap-3 rounded-xl border border-line bg-white px-4 py-2.5 text-[13px] shadow-float">
+        <TriangleAlert size={16} className="shrink-0 text-[#c27c0e]" />
+        <span className="flex-1">{notice}</span>
+        <button type="button" onClick={() => setNotice(null)} className="text-ink-3 hover:text-ink">
+          Dismiss
+        </button>
+      </div>
+    )
+  }
   if (conflict) {
     return (
       <div role="alert" className="absolute top-3 right-3 left-3 z-20 flex items-center gap-3 rounded-xl border border-[#f3d39a] bg-[#fff8e8] px-4 py-2.5 text-[13px] shadow-float">

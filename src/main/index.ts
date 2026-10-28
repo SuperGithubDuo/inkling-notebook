@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { ASSET_SCHEME, IPC, type ImportImageResult, type LoadLibraryResult } from '@shared/ipc'
-import { idSchema } from '@shared/schema'
+import { assetNameSchema, idSchema } from '@shared/schema'
 import { createStarterLibrary } from '@shared/factory'
 import { IMAGE_MIME, MAX_IMAGE_BYTES, Storage } from './storage'
 
@@ -142,6 +142,14 @@ function registerIpc(): void {
   handle(IPC.saveImageBytes, z.tuple([idSchema, z.instanceof(Uint8Array)]), (notebookId, bytes) =>
     storeImage(notebookId, async () => bytes)
   )
+  handle(IPC.copyAssets, z.tuple([idSchema, idSchema, z.array(assetNameSchema).max(5000)]), async (from, to, assets) => {
+    try {
+      for (const asset of new Set(assets)) await storage.copyAsset(from, to, asset)
+      return { ok: true as const }
+    } catch (err) {
+      return { error: `Could not copy an image between notebooks: ${(err as Error).message}` }
+    }
+  })
   handle(
     IPC.exportPng,
     z.tuple([z.string().max(200), z.string().startsWith('data:image/png;base64,').max(80_000_000)]),

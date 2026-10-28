@@ -86,6 +86,32 @@ describe('Storage', () => {
     expect(files.some((f) => f.includes('.corrupt-'))).toBe(true)
   })
 
+  it('saves normally after recovering a page from its backup (no false conflict)', async () => {
+    const page = samplePage()
+    await storage.savePage(page)
+    await storage.savePage({ ...page, updatedAt: page.updatedAt + 1 })
+    await writeFile(storage.pagePath(page.notebookId, page.id), 'not json')
+
+    const fresh = new Storage(root)
+    const loaded = await fresh.loadPage(page.notebookId, page.id)
+    expect(loaded.recovered).toBe(true)
+    // Edit and save the recovered page in the same session.
+    const edited = { ...loaded.page!, objects: [], updatedAt: 42 }
+    expect((await fresh.savePage(edited)).status).toBe('saved')
+    expect((await fresh.loadPage(page.notebookId, page.id)).page?.updatedAt).toBe(42)
+  })
+
+  it('saves normally after recovering a page whose main file went missing', async () => {
+    const page = samplePage()
+    await storage.savePage(page)
+    await storage.savePage({ ...page, updatedAt: page.updatedAt + 1 })
+    await rm(storage.pagePath(page.notebookId, page.id))
+
+    const fresh = new Storage(root)
+    expect((await fresh.loadPage(page.notebookId, page.id)).recovered).toBe(true)
+    expect((await fresh.savePage({ ...page, updatedAt: 7 })).status).toBe('saved')
+  })
+
   it('does not overwrite a file changed by another program', async () => {
     const page = samplePage()
     await storage.savePage(page)

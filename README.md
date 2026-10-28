@@ -30,10 +30,12 @@ Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Window
 
 ```bash
 npm run typecheck   # strict TypeScript, no emit
-npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration
+npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets
 npm run build
-npm run test:e2e    # drives the real Electron app with mouse input (Phase 1 + Phase 2 acceptance)
+npm run test:e2e    # drives the real Electron app with mouse input (Phase 1, Phase 2 and regression suites)
 ```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the typecheck, unit tests and production build on every push to `main` and on pull requests. The Electron acceptance tests need a display and are run locally.
 
 On a headless Linux machine run the e2e suite under a virtual display: `xvfb-run -a npm run test:e2e`. Each run uses a fresh temporary data folder and writes screenshots to `test-results/` (override with `SHOTS=…`).
 

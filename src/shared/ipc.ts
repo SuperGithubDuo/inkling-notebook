@@ -28,6 +28,8 @@ export interface InklingApi {
   importImage(notebookId: string): Promise<ImportImageResult>
   /** Stores pasted or dropped image bytes in the notebook. */
   saveImageBytes(notebookId: string, bytes: Uint8Array): Promise<ImportImageResult>
+  /** Copies assets into another notebook so pasted objects keep working. */
+  copyAssets(fromNotebookId: string, toNotebookId: string, assets: string[]): Promise<{ ok: true } | { error: string }>
   exportPng(suggestedName: string, dataUrl: string): Promise<{ saved: boolean; path?: string }>
   showDataFolder(): Promise<void>
   /** Main asks the renderer to flush pending saves before the window closes. */
@@ -43,6 +45,7 @@ export const IPC = {
   deleteNotebookFiles: 'notebook:delete',
   importImage: 'image:import',
   saveImageBytes: 'image:save-bytes',
+  copyAssets: 'asset:copy',
   exportPng: 'export:png',
   showDataFolder: 'app:show-data-folder',
   flushRequest: 'app:flush-request',

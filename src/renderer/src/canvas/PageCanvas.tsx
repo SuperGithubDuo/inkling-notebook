@@ -393,7 +393,7 @@ export function PageCanvas({ pageId }: { pageId: string }) {
       const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith('image/'))
       e.preventDefault()
       if (file) void insertImageBytes(file)
-      else useStore.getState().paste()
+      else void useStore.getState().paste()
     }
     document.addEventListener('paste', onPaste)
     return () => document.removeEventListener('paste', onPaste)

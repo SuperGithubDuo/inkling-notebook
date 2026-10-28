@@ -55,7 +55,10 @@ interface State {
   shapeFill: boolean
   /** Selected object ids on the active page. */
   selection: string[]
-  clipboard: CanvasObject[]
+  /** Copied canvas objects plus the notebook their image assets live in. */
+  clipboard: { notebookId: string; objects: CanvasObject[] } | null
+  /** Transient message shown over the canvas (e.g. a failed paste). */
+  notice: string | null
 
   sidebarOpen: boolean
   navigatorOpen: boolean
@@ -97,7 +100,8 @@ interface Actions {
   setSelection(ids: string[]): void
   copySelection(): void
   cutSelection(): void
-  paste(): void
+  paste(): Promise<void>
+  setNotice(notice: string | null): void
   duplicateSelection(): void
   deleteSelection(): void
   undo(): void
@@ -196,7 +200,8 @@ export const useStore = create<Store>()((set, get) => {
     shapeTool: 'rect',
     shapeFill: false,
     selection: [],
-    clipboard: [],
+    clipboard: null,
+    notice: null,
 
     sidebarOpen: true,
     navigatorOpen: true,
@@ -455,7 +460,7 @@ export const useStore = create<Store>()((set, get) => {
       const page = activePage()
       const ids = new Set(get().selection)
       if (!page || !ids.size) return
-      set({ clipboard: page.objects.filter((o) => ids.has(o.id)) })
+      set({ clipboard: { notebookId: page.notebookId, objects: page.objects.filter((o) => ids.has(o.id)) } })
     },
 
     cutSelection() {
@@ -463,17 +468,37 @@ export const useStore = create<Store>()((set, get) => {
       get().deleteSelection()
     },
 
-    paste() {
+    async paste() {
       const clip = get().clipboard
-      if (!clip.length) return
-      // Paste on the original spot on another page, offset on the same page.
       const page = activePage()
-      const samePage = !!page && clip.some((c) => page.objects.some((o) => o.id === c.id))
-      const offset = samePage ? 24 : 0
-      const result = get().run(pasteCommands(clip, offset, offset), { label: 'Paste' })
-      if (result.ok) {
-        set({ selection: result.created, tool: 'lasso', clipboard: clip.map((c, i) => ({ ...c, id: result.created[i]! })) as CanvasObject[] })
+      if (!clip?.objects.length || !page) return
+      // Images reference files inside their notebook: bring them along first.
+      if (clip.notebookId !== page.notebookId) {
+        const assets = clip.objects.flatMap((o) => (o.type === 'image' ? [o.asset] : []))
+        if (assets.length) {
+          const copied = await window.inkling.copyAssets(clip.notebookId, page.notebookId, assets)
+          if ('error' in copied) {
+            set({ notice: copied.error })
+            return
+          }
+        }
       }
+      // Paste on the original spot on another page, offset on the same page.
+      const samePage = clip.objects.some((c) => page.objects.some((o) => o.id === c.id))
+      const offset = samePage ? 24 : 0
+      const result = get().run(pasteCommands(clip.objects, offset, offset), { label: 'Paste', pageId: page.id })
+      if (result.ok && get().activePageId === page.id) {
+        set({
+          selection: result.created,
+          tool: 'lasso',
+          // Later pastes cascade from the new copies.
+          clipboard: { notebookId: page.notebookId, objects: get().pages[page.id]!.objects.filter((o) => result.created.includes(o.id)) }
+        })
+      }
+    },
+
+    setNotice(notice) {
+      set({ notice })
     },
 
     duplicateSelection() {

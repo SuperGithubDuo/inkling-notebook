@@ -112,6 +112,19 @@ export class Storage {
     return fs.readFile(this.assetPath(notebookId, asset))
   }
 
+  /**
+   * Makes an asset of one notebook available in another (cross-notebook
+   * paste). Asset names are random and their content never changes, so an
+   * existing file with the same name is already the same asset.
+   */
+  async copyAsset(fromNotebookId: string, toNotebookId: string, asset: string): Promise<void> {
+    const target = this.assetPath(toNotebookId, asset)
+    if (fromNotebookId === toNotebookId) return
+    if (await fs.stat(target).then(() => true, () => false)) return
+    const bytes = await this.readAsset(fromNotebookId, asset)
+    await this.enqueue(target, () => this.atomicWrite(target, bytes))
+  }
+
   async deletePageFile(notebookId: string, pageId: string): Promise<void> {
     const file = this.pagePath(notebookId, pageId)
     await this.enqueue(file, async () => {
@@ -151,7 +164,11 @@ export class Storage {
   }
 
   private async restoreFromBackup<T>(file: string, data: T): Promise<{ data: T; recovered: boolean }> {
-    await this.atomicWrite(file, JSON.stringify(data, null, 1))
+    // Serialised with other writes to this file, and the new mtime is recorded
+    // so the next save is not mistaken for an external change.
+    await this.enqueue(file, async () => {
+      this.stamps.set(file, await this.atomicWrite(file, JSON.stringify(data, null, 1)))
+    })
     return { data, recovered: true }
   }
 

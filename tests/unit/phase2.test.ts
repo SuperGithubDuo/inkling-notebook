@@ -212,6 +212,13 @@ describe('migration and assets', () => {
       await expect(storage.saveAsset('notebook-1', new TextEncoder().encode('<script>'))).rejects.toThrow(/Unsupported/)
       expect(() => storage.assetPath('notebook-1', '../library.json')).toThrow()
       expect(sniffImage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe('jpg')
+
+      // Cross-notebook copy: the asset becomes readable from the target notebook.
+      await expect(storage.readAsset('notebook-2', name)).rejects.toThrow()
+      await storage.copyAsset('notebook-1', 'notebook-2', name)
+      expect(new Uint8Array(await storage.readAsset('notebook-2', name))).toEqual(png)
+      await storage.copyAsset('notebook-1', 'notebook-2', name) // idempotent
+      await expect(storage.copyAsset('notebook-1', 'notebook-3', 'missing12345.png')).rejects.toThrow()
     } finally {
       await rm(root, { recursive: true, force: true })
     }
