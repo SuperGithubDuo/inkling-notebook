@@ -1,13 +1,14 @@
 # Inkling
 
-An AI-native handwriting notebook for the desktop, built with Electron, React and TypeScript. Think GoodNotes-style ink, plus notebook organisation, plus (soon) an AI tutor that writes directly on your pages.
+An AI-native handwriting notebook for the desktop, built with Electron, React and TypeScript. Think GoodNotes-style ink, plus notebook organisation, plus an AI tutor, running on Google Gemini's free tier, that reads your handwriting and writes corrections directly on your pages.
 
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Library, pages, pen/highlighter/eraser, text, undo/redo, local auto-save | ✅ done |
 | 2 | Lasso selection, shapes, images, zoom/pan, precise eraser, page sizes, typed command layer | ✅ done |
 | 3 | Rich-text notes, search, links/backlinks, knowledge graph, PDF import/annotation/export | ✅ done |
-| 4–5 | Claude-powered AI Tutor: chat, practice, edits on the page | planned (panel shown as "not connected") |
+| 4 | AI Tutor on Google Gemini (free tier): streaming chat about handwriting, practice mode, previewed corrections on the page | ✅ done |
+| 5 | More providers (local Ollama vision models, OpenRouter, Anthropic Claude), handwriting search | planned |
 | 6 | Packaging, installers, theming, accessibility pass | planned |
 
 ## Requirements
@@ -32,8 +33,11 @@ Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Window
 npm run typecheck   # strict TypeScript, no emit
 npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets, notes/Markdown, search/links/graph, PDF export, assistant context
 npm run build
-npm run test:e2e    # drives the real Electron app with mouse input (Phase 1, 2, 3 and regression suites)
+npm run test:e2e    # drives the real Electron app with mouse input (Phase 1–4 and regression suites)
+GEMINI_API_KEY=… npm run test:smoke   # optional: 4 small requests to the real Gemini API
 ```
+
+Automated tests never call Google. They run the official `@google/genai` SDK against a local fake of the Gemini REST API (`tests/support/fakeGemini.mjs`), which speaks the same wire format (SSE streaming, `x-goog-api-key`, Google's error bodies) and records every request, including images and structured-output schemas. The optional smoke test (`tests/smoke/`) checks a real key end to end: connection test, a streamed answer, a markup of a handwriting image (`tests/fixtures/handwriting-linear.png`) turned into valid canvas commands, and a practice set. Set `GEMINI_MODEL=gemini-3.5-flash-lite` to try the lighter model. It is skipped when no key is set.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the typecheck, unit tests and production build on every push to `main` and on pull requests. The Electron acceptance tests need a display and are run locally.
 
@@ -104,9 +108,40 @@ The data comes from the link index (`graph()`), and the layout is a d3-force sim
   - Handwritten pages get their paper as fine lines.
   - Rich-text notes are not included (export them as Markdown).
 
-## Ready for the AI Tutor
+## AI Tutor (Google Gemini)
 
-`renderer/src/services/notebookContext.ts` is the only interface a future Claude integration needs. It keeps notebook access separate from any model or network code:
+The tutor runs on Google's Gemini API through the official Gen AI SDK (`@google/genai`). It is designed to cost nothing within Gemini's free tier.
+
+**Set up.**
+1. Create a free API key in [Google AI Studio](https://aistudio.google.com/apikey). No billing is needed. To be sure you stay free, use a key from a Google Cloud project **without billing enabled**: Inkling can't see your project's billing, and Google charges for any project that has it.
+2. Open Settings → AI Tutor, paste the key and press Save. Inkling runs a connection test: it lists the models your key can use and sends one tiny request. No notebook content is sent.
+3. Choose a model: **Gemini 3.8 Flash** (default, best quality) or **Gemini 3.5 Flash-Lite** (lighter, more generous free limits). Models your key can't use are flagged.
+4. The first time you ask something, Inkling asks permission to send notebook content to Google.
+
+**Using it.**
+| What | How |
+|---|---|
+| Ask about your handwriting | Lasso-select your work → ✨ on the selection toolbar (or Ask AI), then type a question. Answers stream in, with formulas typeset. Follow-up questions keep the conversation. |
+| Quick actions | Give me a hint · Explain the concept · Check my work · Try a similar problem |
+| Context | The composer shows what is included: your selection, or this page. Remove it to ask a general question. |
+| Practice | Practice tab → difficulty, number of problems, optional topic. Reveal hints one at a time, check a typed answer or a handwritten one (select it), show the worked solution, or copy a problem onto the page. |
+| Corrections on the page | On Page tab → *Mark up my selection*, or **Show this on my page** under a chat answer. Gemini proposes ✓/✗ marks, circles, underlines, corrections and notes. They are previewed on the page, you can untick any of them, and *Add to my page* inserts them as one undoable step. They are ordinary objects in a handwriting font (Caveat): move, edit or delete them like anything else. |
+
+**Privacy.** On Gemini's free tier, Google may use what you send, and its answers, to improve its products, and human reviewers may read them ([Gemini API terms](https://ai.google.dev/gemini-api/terms)). Don't send sensitive, confidential or personal information. Google requires API users to be 18 or older. Inkling sends only what you ask about: your question, and either a cropped image of the selected area or the current page's typed/PDF text plus an image of just its handwritten part. Nothing is sent before you agree and ask. You can withdraw permission in Settings.
+
+**Free-tier protection.**
+- Only free-tier models are offered. Inkling never switches model or tier on its own. When a model's daily quota runs out, it says so (quotas reset at midnight Pacific) and offers a one-click switch to the other free model.
+- One request at a time, at most 8 per minute, and an accidental repeat of the same request within 10 seconds is refused. After a rate-limit or quota error, Inkling waits locally instead of retrying against the API.
+- Images are cropped to the relevant area and sent as JPEG, at most 1024 px on the long edge. Conversations keep only the last five exchanges, with earlier answers shortened and at most one earlier image.
+- Clear messages for an invalid key, rate limits, exhausted daily quota, models without free quota, unavailable models, network problems and blocked answers.
+
+**Key storage.** The key lives only in the main process, encrypted with the operating system's keychain (Electron `safeStorage`) in the app's config folder (`gemini-key.bin`, next to `ai-settings.json`), never in your notebooks. The interface only ever sees its last four characters. On Linux without a keyring the key is saved with weak protection, and Settings says so. Where nothing can encrypt, it is kept in memory for the session only.
+
+**Providers.** `src/main/ai/provider.ts` defines the small interface the tutor needs (`listModels`, `stream` with text and image parts and optional JSON-schema output). `src/main/ai/gemini.ts` implements it for Gemini. A local Ollama vision model (e.g. Qwen3-VL), OpenRouter or Anthropic Claude can be added as further implementations without changing the tutor or the UI.
+
+## Notebook context API
+
+`renderer/src/services/notebookContext.ts` is how the tutor reads and writes the notebook. It keeps notebook access separate from any model or network code:
 
 | Need | API |
 |---|---|
@@ -114,7 +149,7 @@ The data comes from the link index (`graph()`), and the layout is a d3-force sim
 | Read canvas pages | `page(id)` → typed objects, text boxes, PDF text |
 | Search notebook text | `search(query, { notebookId })` |
 | Linked notes | `connections(id)` → links, backlinks, related |
-| Selected handwriting | `selection()` → the lasso-selected objects plus a PNG of that region as displayed (ink over paper or PDF), for a vision model |
+| Selected handwriting | `selection()` → the lasso-selected objects, their bounds, and a PNG of that region as displayed (ink over paper or PDF) with its exact page rectangle |
 | Create or modify content | `applyCanvasCommands(pageId, commands)`: typed, validated, tagged as AI-authored, one undo step; user content is refused unless `allowEditUserContent` is set. `appendToNote(id, markdown)` (sanitised) |
 | Outline | `outline()` → every live page and note |
 
@@ -125,16 +160,20 @@ The acceptance tests exercise this API in the real app (`INKLING_TEST_HOOKS=1` e
 ```
 src/
   main/         Electron main process: window, validated IPC, storage, image asset protocol
+    ai/         Provider interface, Gemini provider, AI service (consent, limits, streaming), key storage, task prompts
   preload/      Narrow window.inkling bridge (contextIsolation + sandbox)
-  shared/       Data schemas (zod), factories, migrations, IPC contract
+  shared/       Data schemas (zod), factories, migrations, IPC contract, AI request/result schemas
   renderer/src/
     canvas/     Konva page canvas, command layer, geometry, ink, shapes, viewport, thumbnails
     components/ Toolbar, sidebar, page navigator, AI Tutor panel, library views
+    ai/         Tutor chat, practice, markup (annotation planning + preview), context building, Markdown/KaTeX rendering
     store/      Zustand store: library, pages, history, selection, tools
     services/   Debounced save queue
 tests/
   unit/         vitest
   e2e/          Playwright-driven Electron acceptance tests
+  smoke/        Optional real-Gemini smoke test
+  support/      Fake Gemini API server, test handwriting strokes
 ```
 
 **Source of truth.** Each page is versioned JSON (`schemaVersion` 3): an ordered list of vector objects — strokes (every point, with real pressure only when a stylus supplied it), text boxes, shapes and images — in page coordinates. Nothing is flattened to a bitmap. Paper is a page setting, never baked into content. Older files are migrated in memory on load (`shared/migrate.ts`).
@@ -168,11 +207,18 @@ useStore.getState().run(
 
 **Rendering.** Konva (MIT) draws the page under a camera (scale + offset). perfect-freehand (MIT) turns input points into ink outlines. In-progress strokes, lassos and shape drags are drawn imperatively on their own layer, so pointer moves never re-render React. Coalesced pointer events are used for accuracy, and predicted events shorten perceived latency (never saved). tldraw was considered but its SDK licence requires a paid key or watermark in production.
 
+**AI requests.** The renderer builds a request (`task` + conversation turns with text and image parts). The main process validates it (sizes, image count, roles), picks the instructions and JSON schema for the task (`main/ai/prompts.ts`), applies consent, key, model and rate limits, and streams events back over IPC. Structured answers (practice sets, answer checks, page markup) are validated against zod schemas (`shared/tutor.ts`) in both processes. Notebook text sent to the model is wrapped in tags and the instructions tell the model to treat it as data. Markup proposals use Gemini's `box_2d` convention (0–1000 over the image), mapped back to page coordinates and turned into canvas commands by `renderer/src/ai/annotate.ts`. Each mark is validated by the command layer as AI content before it is previewed. Answers are rendered from Markdown tokens to React elements (no HTML from the model is injected) with KaTeX for maths.
+
 **Security.** Context isolation, sandboxed renderer, strict CSP, navigation blocked, every IPC call checks the sender and validates arguments, ids are validated before any path is built, and no filesystem or shell access is exposed to the renderer.
 
 ## Known limitations
 
-- The AI Tutor is not connected yet (Phase 4). Audio recording and sharing are not built and are labelled as such in the UI.
+- Gemini is the only AI provider so far. Inkling can't tell whether your Google Cloud project has billing enabled. Use a key from a project without billing to be sure of no charges.
+- Tutor conversations last for the session only and are not saved with the notebook.
+- The tutor reads handwriting from images, so its reading depends on legibility. "What the tutor read" in the On Page tab shows what it saw.
+- Live tests against the real Gemini API are optional and need your own key. Free-tier limits are set by Google per project and may change.
+- AI notes in the PDF export use Caveat when it has every character, and otherwise fall back to Inter. Some maths symbols (e.g. √) may then be missing in the PDF.
+- Audio recording and sharing are not built and are labelled as such in the UI.
 - Rotation is available for single images and shapes; strokes and text boxes move and scale but don't rotate.
 - Canvas text boxes are plain text. Rich text and formulas live in notes.
 - Note images are referenced by notebook. A note image pasted into another notebook still points at its original notebook (canvas paste copies the file).
