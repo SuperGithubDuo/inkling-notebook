@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, Copy, FilePlus2, FileText, Grid3x3, Import, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, Copy, FileDown, FilePlus2, FileText, Grid3x3, Import, Plus, Trash2 } from 'lucide-react'
 import { PAPER_TYPES, type PaperType } from '@shared/schema'
 import { PAGE_SIZES, pageSizeOf, type PageSize } from '@shared/factory'
 import { livePages, selectActiveNotebook, useStore } from '@/store/store'
 import { PageThumbnail } from '@/canvas/PageThumbnail'
 import { NoteThumbnail } from '@/notes/NoteThumbnail'
 import { importMarkdownNote } from '@/notes/noteActions'
+import { importPdfIntoNotebook } from '@/pdf/pdfActions'
 import { Menu, Popover, Tip, cx, type MenuEntry } from './ui/primitives'
 
 export const PAPER_LABEL: Record<PaperType, string> = { grid: 'Grid', lined: 'Lined', dotted: 'Dotted', blank: 'Blank' }
@@ -36,12 +37,14 @@ export function PageNavigator() {
   const list = livePages(notebook)
   const activeIsNote = list.find((p) => p.id === activePageId)?.kind === 'note'
   const activeDoc = activePageId && !activeIsNote ? pages[activePageId] : undefined
+  const activeIsPdf = !!activeDoc?.background
+  const noPaper = activeIsNote || activeIsPdf
   const activePaper = activeDoc?.paper.type
   const activeSize = activeDoc ? pageSizeOf(activeDoc) : null
 
   const menuItems = (pageId: string): MenuEntry[] => {
     const i = list.findIndex((p) => p.id === pageId)
-    const isNote = list[i]?.kind === 'note'
+    const isNote = list[i]?.kind === 'note' || !!pages[pageId]?.background
     return [
       { label: 'New page after', icon: <FilePlus2 size={15} />, onSelect: () => addPage(pageId) },
       { label: 'New note after', icon: <FileText size={15} />, onSelect: () => addNote(pageId) },
@@ -71,17 +74,17 @@ export function PageNavigator() {
         <button
           ref={paperBtn}
           type="button"
-          onClick={() => !activeIsNote && setPaperOpen((o) => !o)}
-          disabled={activeIsNote}
+          onClick={() => !noPaper && setPaperOpen((o) => !o)}
+          disabled={noPaper}
           className="group relative flex h-8 w-full items-center justify-between rounded-[10px] border border-line bg-white px-2.5 text-[12.5px] text-ink-2 hover:border-[#d9dbe0]"
           aria-label="Paper and size for this page"
         >
           <span className="flex items-center gap-1.5">
-            {activeIsNote ? <FileText size={14} /> : <Grid3x3 size={14} />}
-            {activeIsNote ? 'Note' : activePaper ? PAPER_LABEL[activePaper] : 'Paper'}
+            {activeIsNote ? <FileText size={14} /> : activeIsPdf ? <FileDown size={14} /> : <Grid3x3 size={14} />}
+            {activeIsNote ? 'Note' : activeIsPdf ? 'PDF' : activePaper ? PAPER_LABEL[activePaper] : 'Paper'}
           </span>
           <ChevronDown size={13} className="text-ink-3" />
-          <Tip text={activeIsNote ? 'Notes have no paper settings' : 'Paper and page size'} side="bottom" />
+          <Tip text={activeIsNote ? 'Notes have no paper settings' : activeIsPdf ? 'PDF pages keep the PDF’s size' : 'Paper and page size'} side="bottom" />
         </button>
         <Popover anchor={paperBtn} open={paperOpen} onClose={() => setPaperOpen(false)} align="start" className="w-48 p-1.5">
           <div className="px-2 pt-1 pb-1 text-[11px] font-medium tracking-wide text-ink-3 uppercase">Paper</div>
@@ -189,6 +192,9 @@ export function PageNavigator() {
                     <span className="block h-full w-full animate-pulse bg-[#f4f4f6]" />
                   )}
                 </span>
+                {doc?.background && (
+                  <span className="absolute right-1 bottom-1 rounded bg-accent-soft px-1 text-[8.5px] font-semibold tracking-wide text-accent uppercase">PDF</span>
+                )}
                 {meta.kind === 'note' && (
                   <span className="absolute right-1 bottom-1 rounded bg-lav-soft px-1 text-[8.5px] font-semibold tracking-wide text-lav uppercase">Note</span>
                 )}
@@ -245,7 +251,10 @@ export function PageNavigator() {
       <Menu
         at={importMenu}
         onClose={() => setImportMenu(null)}
-        items={[{ label: 'Markdown file as note…', icon: <FileText size={15} />, onSelect: () => void importMarkdownNote() }]}
+        items={[
+          { label: 'PDF…', icon: <FileDown size={15} />, onSelect: () => void importPdfIntoNotebook() },
+          { label: 'Markdown file as note…', icon: <FileText size={15} />, onSelect: () => void importMarkdownNote() }
+        ]}
       />
     </div>
   )

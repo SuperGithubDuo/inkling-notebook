@@ -7,6 +7,7 @@ import { shapeD } from './shapes'
 import { FONT_FAMILY, wrapLines } from './text'
 import { TEXT_LINE_HEIGHT } from './geometry'
 import { PAPER_FILL } from './paper'
+import { usePdfThumbnail } from '@/pdf/pdfjs'
 
 function ThumbObject({ o, notebookId }: { o: CanvasObject; notebookId: string }) {
   switch (o.type) {
@@ -55,6 +56,11 @@ function ThumbObject({ o, notebookId }: { o: CanvasObject; notebookId: string })
   }
 }
 
+function PdfThumbImage({ notebookId, asset, index, width, height }: { notebookId: string; asset: string; index: number; width: number; height: number }) {
+  const url = usePdfThumbnail(notebookId, asset, index)
+  return url ? <image href={url} width={width} height={height} preserveAspectRatio="none" data-testid="pdf-thumb" /> : null
+}
+
 export const PageThumbnail = memo(function PageThumbnail({ page }: { page: PageDoc }) {
   const { width: w, height: h, paper } = page
   const pid = `paper-${page.id}`
@@ -73,6 +79,7 @@ export const PageThumbnail = memo(function PageThumbnail({ page }: { page: PageD
       </defs>
       <rect width={w} height={h} fill={PAPER_FILL} />
       {paper.type !== 'blank' && <rect width={w} height={h} fill={`url(#${pid})`} />}
+      {page.background && <PdfThumbImage notebookId={page.notebookId} asset={page.background.asset} index={page.background.page} width={w} height={h} />}
       <g clipPath={`url(#clip-${page.id})`}>
         {page.objects.map((o) => (
           <ThumbObject key={o.id} o={o} notebookId={page.notebookId} />

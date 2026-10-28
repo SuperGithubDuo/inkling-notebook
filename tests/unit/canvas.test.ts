@@ -85,3 +85,18 @@ describe('ink', () => {
     expect(outlinePath(light, pressured)).not.toBe(outlinePath(heavy, pressured))
   })
 })
+
+describe('explicit ink outline (for PDF export)', () => {
+  it('describes the same shape as the canvas outline, using only M/Q/Z', async () => {
+    const { outlinePathExplicit } = await import('../../src/renderer/src/canvas/ink')
+    const pts: StrokeObject['points'] = [[0, 0], [20, 10], [40, 0], [60, 15]]
+    const style = { tool: 'pen' as const, size: 4, hasPressure: false }
+    const explicit = outlinePathExplicit(pts, style)
+    expect(explicit).toMatch(/^M[\d.,-]+(Q[\d.,\s-]+)+Z$/)
+    expect(explicit).not.toMatch(/T/)
+    // Both paths end their curves at the same midpoints.
+    const ends = (d: string) => [...d.matchAll(/[\s,]?(-?[\d.]+),(-?[\d.]+)(?=[ QTZ])/g)].length
+    expect(ends(explicit)).toBeGreaterThan(5)
+    expect(outlinePath(pts, style).split('T')[1]?.trim().split(' ')[0]).toBe(explicit.split('Q')[2]!.split(' ')[1])
+  })
+})

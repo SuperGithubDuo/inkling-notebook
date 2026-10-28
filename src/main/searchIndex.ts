@@ -91,6 +91,7 @@ export class SearchIndex {
 
   upsertPage(page: PageDoc): void {
     const parts = page.objects.flatMap((o) => (o.type === 'text' ? [o.text] : []))
+    if (page.background?.text) parts.push(page.background.text)
     this.put(page.id, parts.join('\n'), [])
   }
 

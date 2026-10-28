@@ -6,6 +6,7 @@ import {
   type NoteDoc,
   type NoteNode,
   type PageKind,
+  type PdfBackground,
   type NotebookIcon,
   type NotebookMeta,
   type PageDoc,
@@ -70,7 +71,21 @@ export function createPageDoc(
     height: size.height,
     paper: { ...PAPER_DEFAULTS[paperType] },
     objects: [],
+    background: null,
     updatedAt: Date.now()
+  }
+}
+
+/** Page units per PDF point: an A4 PDF page becomes the same size as an A4 page. */
+export const PDF_SCALE = PAGE_WIDTH / 595.28
+
+export function createPdfPageDoc(notebookId: string, pageId: string, background: PdfBackground): PageDoc {
+  return {
+    ...createPageDoc(notebookId, pageId, 'blank', {
+      width: Math.round(background.width * PDF_SCALE),
+      height: Math.round(background.height * PDF_SCALE)
+    }),
+    background
   }
 }
 

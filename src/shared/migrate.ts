@@ -8,9 +8,12 @@ const isObject = (v: unknown): v is Raw => !!v && typeof v === 'object' && !Arra
 
 export function migratePage(raw: unknown): unknown {
   if (!isObject(raw)) return raw
+  let page = raw
   // v1 → v2: v2 added shape and image objects; existing objects are unchanged.
-  if (raw.schemaVersion === 1) return { ...raw, schemaVersion: 2 }
-  return raw
+  if (page.schemaVersion === 1) page = { ...page, schemaVersion: 2 }
+  // v2 → v3: pages may have a PDF background; older pages have none.
+  if (page.schemaVersion === 2) page = { ...page, schemaVersion: 3, background: null }
+  return page
 }
 
 export function migrateLibrary(raw: unknown): unknown {

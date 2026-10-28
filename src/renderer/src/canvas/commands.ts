@@ -11,7 +11,7 @@ import { z } from 'zod'
 import { newId } from '@shared/factory'
 import {
   SHAPE_KINDS,
-  assetNameSchema,
+  imageAssetSchema,
   canvasObjectSchema,
   idSchema,
   pointSchema,
@@ -81,7 +81,7 @@ export const commandSchema = z.discriminatedUnion('type', [
     /** Layer position; defaults to the top. */
     index: z.number().int().min(0).optional(),
     image: z.object({
-      asset: assetNameSchema,
+      asset: imageAssetSchema,
       x: num,
       y: num,
       width: z.number().min(1).max(20000),

@@ -10,10 +10,13 @@ export type SaveResult =
 
 export type LoadLibraryResult = { library: Library; recovered: string[]; dataDir: string }
 export type ImportImageResult = { asset: string } | { canceled: true } | { error: string }
+export type ImportPdfResult = { asset: string; name: string } | { canceled: true } | { error: string }
 
 /** URL the renderer uses to display a stored image asset. */
 export const ASSET_SCHEME = 'inkling-asset'
 export const assetUrl = (notebookId: string, asset: string): string => `${ASSET_SCHEME}://asset/${notebookId}/${asset}`
+/** Base URL of pdf.js runtime resources (fonts, CMaps, decoders) served by the main process. */
+export const PDFJS_RESOURCE_URL = `${ASSET_SCHEME}://pdfjs/`
 
 export type LoadPageResult = { page: PageDoc | null; recovered: boolean }
 export type LoadNoteResult = { note: NoteDoc | null; recovered: boolean }
@@ -21,6 +24,8 @@ export type ImportMarkdownResult = { name: string; markdown: string } | { cancel
 
 /** The complete, deliberately narrow API exposed to the renderer. */
 export interface InklingApi {
+  /** True only when launched by the acceptance tests (INKLING_TEST_HOOKS=1). */
+  testHooks: boolean
   loadLibrary(): Promise<LoadLibraryResult>
   saveLibrary(library: Library): Promise<SaveResult>
   loadPage(notebookId: string, pageId: string): Promise<LoadPageResult>
@@ -39,6 +44,10 @@ export interface InklingApi {
   saveImageBytes(notebookId: string, bytes: Uint8Array): Promise<ImportImageResult>
   /** Copies assets into another notebook so pasted objects keep working. */
   copyAssets(fromNotebookId: string, toNotebookId: string, assets: string[]): Promise<{ ok: true } | { error: string }>
+  /** Picks a PDF and stores it, unchanged, as an asset of the notebook. */
+  importPdf(notebookId: string): Promise<ImportPdfResult>
+  /** Saves PDF bytes produced by the renderer through a save dialog. */
+  exportPdf(suggestedName: string, bytes: Uint8Array): Promise<{ saved: boolean; path?: string; error?: string }>
   exportPng(suggestedName: string, dataUrl: string): Promise<{ saved: boolean; path?: string }>
   /** Full-text search over titles, tags, notes, canvas text and links. */
   search(query: string, options?: { notebookId?: string; limit?: number }): Promise<SearchHit[]>
@@ -65,6 +74,8 @@ export const IPC = {
   importImage: 'image:import',
   saveImageBytes: 'image:save-bytes',
   copyAssets: 'asset:copy',
+  importPdf: 'pdf:import',
+  exportPdf: 'pdf:export',
   exportPng: 'export:png',
   search: 'index:search',
   connections: 'index:connections',

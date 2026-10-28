@@ -1,11 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell, type IpcMainInvokeEvent } from 'electron'
 import { promises as fs } from 'node:fs'
-import { basename, extname, join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { z } from 'zod'
 import { ASSET_SCHEME, IPC, type ImportImageResult, type LoadLibraryResult } from '@shared/ipc'
 import { assetNameSchema, idSchema } from '@shared/schema'
 import { createStarterLibrary } from '@shared/factory'
-import { IMAGE_MIME, MAX_IMAGE_BYTES, Storage } from './storage'
+import { IMAGE_MIME, MAX_IMAGE_BYTES, MAX_PDF_BYTES, Storage } from './storage'
 import { exportMarkdownWithImages, importMarkdownImages } from './markdownFiles'
 import { SearchIndex } from './searchIndex'
 import type { Library } from '@shared/schema'
@@ -48,10 +48,32 @@ protocol.registerSchemesAsPrivileged([
   { scheme: ASSET_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }
 ])
 
+// pdf.js loads standard fonts, CMaps and decoders at runtime. They ship with
+// pdfjs-dist; only these folders and plain file names are served.
+const PDFJS_DIRS = new Set(['standard_fonts', 'cmaps', 'wasm', 'iccs'])
+const pdfjsRoot = dirname(require.resolve('pdfjs-dist/package.json'))
+const PDFJS_TYPES: Record<string, string> = { '.wasm': 'application/wasm', '.bcmap': 'application/octet-stream', '.pfb': 'application/octet-stream', '.ttf': 'font/ttf', '.icc': 'application/octet-stream' }
+
+async function servePdfjsResource(pathname: string): Promise<Response> {
+  const [dir, file, ...rest] = pathname.split('/').filter(Boolean)
+  if (!dir || !file || rest.length || !PDFJS_DIRS.has(dir) || !/^[A-Za-z0-9_.-]+$/.test(file) || file.startsWith('.')) {
+    return new Response('Not found', { status: 404 })
+  }
+  try {
+    const bytes = await fs.readFile(join(pdfjsRoot, dir, file))
+    return new Response(new Uint8Array(bytes), {
+      headers: { 'Content-Type': PDFJS_TYPES[extname(file)] ?? 'application/octet-stream', 'Access-Control-Allow-Origin': '*' }
+    })
+  } catch {
+    return new Response('Not found', { status: 404 })
+  }
+}
+
 function registerAssetProtocol(): void {
   protocol.handle(ASSET_SCHEME, async (request) => {
     try {
       const url = new URL(request.url)
+      if (url.host === 'pdfjs') return servePdfjsResource(url.pathname)
       const [notebookId, asset] = url.pathname.split('/').filter(Boolean)
       if (url.host !== 'asset' || !notebookId || !asset) return new Response('Not found', { status: 404 })
       const bytes = await storage.readAsset(idSchema.parse(notebookId), asset)
@@ -93,7 +115,9 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
-      spellcheck: true
+      spellcheck: true,
+      // Acceptance tests get read access to the assistant context API.
+      additionalArguments: process.env.INKLING_TEST_HOOKS === '1' ? ['--inkling-test-hooks'] : []
     }
   })
   mainWindow = win
@@ -257,6 +281,33 @@ function registerIpc(): void {
       return { ok: true as const }
     } catch (err) {
       return { error: `Could not copy an image between notebooks: ${(err as Error).message}` }
+    }
+  })
+  handle(IPC.importPdf, z.tuple([idSchema]), async (notebookId) => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Import PDF',
+      properties: ['openFile'],
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    })
+    const path = result.filePaths[0]
+    if (result.canceled || !path) return { canceled: true as const }
+    try {
+      if ((await fs.stat(path)).size > MAX_PDF_BYTES) throw new Error('PDF is larger than 200 MB.')
+      const asset = await storage.saveAsset(notebookId, new Uint8Array(await fs.readFile(path)), 'pdf')
+      return { asset, name: basename(path, extname(path)) }
+    } catch (err) {
+      return { error: `Could not import PDF: ${(err as Error).message}` }
+    }
+  })
+  handle(IPC.exportPdf, z.tuple([z.string().max(200), z.instanceof(Uint8Array)]), async (suggestedName, bytes) => {
+    const safeName = suggestedName.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'notebook'
+    const result = await dialog.showSaveDialog(mainWindow!, { defaultPath: `${safeName}.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] })
+    if (result.canceled || !result.filePath) return { saved: false }
+    try {
+      await fs.writeFile(result.filePath, bytes)
+      return { saved: true, path: result.filePath }
+    } catch (err) {
+      return { saved: false, error: (err as Error).message }
     }
   })
   handle(

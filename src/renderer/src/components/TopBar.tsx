@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import {
+  FileDown,
   FilePlus2,
   FileText,
   ChevronDown,
@@ -34,6 +35,7 @@ import { NotebookIcon } from './NotebookIcon'
 import { ImageButton, ShapePicker } from './ToolControls'
 import { NoteToolbar } from '@/notes/NoteToolbar'
 import { exportActiveNoteMarkdown, importMarkdownNote } from '@/notes/noteActions'
+import { exportActiveNotebookPdf, importPdfIntoNotebook } from '@/pdf/pdfActions'
 
 const TOOLS: { tool: Tool; label: string; key: string; icon: typeof PenLine }[] = [
   { tool: 'pen', label: 'Pen', key: 'P', icon: PenLine },
@@ -73,7 +75,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
 
   async function exportPage(): Promise<void> {
     if (!page || !notebook) return
-    const png = renderPagePng(page)
+    const png = await renderPagePng(page)
     if (!png) return
     const idx = notebook.pages.filter((p) => p.deletedAt === null).findIndex((p) => p.id === page.id)
     const result = await window.inkling.exportPng(`${notebook.name} - page ${idx + 1}`, png)
@@ -183,13 +185,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           <IconButton label="Redo" hint="Ctrl+Shift+Z" disabled={!canRedo} onClick={st.redo} data-testid="redo">
             <Redo2 size={19} strokeWidth={1.8} />
           </IconButton>
-          <IconButton
-            label="More"
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect()
-              setMoreMenu({ x: r.left, y: r.bottom + 6 })
-            }}
-          >
+          <IconButton label="More" onClick={openMore} data-testid="more-menu-canvas">
             <Ellipsis size={19} />
           </IconButton>
         </div>
@@ -276,10 +272,12 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           { label: 'Add page', hint: 'Ctrl+Enter', icon: <FilePlus2 size={15} />, onSelect: () => st.addPage() },
           { label: 'Add note', icon: <FileText size={15} />, onSelect: () => st.addNote() },
           { label: 'Import Markdown as note…', icon: <FileText size={15} />, onSelect: () => void importMarkdownNote() },
+          { label: 'Import PDF…', icon: <FileDown size={15} />, onSelect: () => void importPdfIntoNotebook() },
           { label: 'Toggle page navigator', icon: <PanelLeft size={15} />, onSelect: () => st.toggle('navigatorOpen') },
           inNote
             ? { label: 'Export note as Markdown…', icon: <Share size={15} />, onSelect: () => void exportActiveNoteMarkdown() }
             : { label: 'Export page as PNG…', icon: <Share size={15} />, onSelect: () => void exportPage() },
+          { label: 'Export notebook as PDF…', icon: <Share size={15} />, onSelect: () => void exportActiveNotebookPdf() },
           'separator',
           { label: 'Save now', hint: 'Ctrl+S', icon: <CloudCheck size={15} />, onSelect: () => void st.flush() },
           { label: 'Show data folder', icon: <Settings size={15} />, onSelect: () => void window.inkling.showDataFolder() }

@@ -7,7 +7,7 @@ import { z } from 'zod'
 
 export const LIBRARY_SCHEMA_VERSION = 2
 export const NOTE_SCHEMA_VERSION = 1
-export const PAGE_SCHEMA_VERSION = 2
+export const PAGE_SCHEMA_VERSION = 3
 
 export const idSchema = z.string().regex(/^[A-Za-z0-9_-]{6,64}$/, 'invalid id')
 
@@ -81,12 +81,14 @@ export const shapeSchema = z.object({
 })
 
 /** Image file name inside the notebook's assets folder. */
-export const assetNameSchema = z.string().regex(/^[A-Za-z0-9_-]{6,64}\.(png|jpg|jpeg|gif|webp)$/, 'invalid asset name')
+export const assetNameSchema = z.string().regex(/^[A-Za-z0-9_-]{6,64}\.(png|jpg|jpeg|gif|webp|pdf)$/, 'invalid asset name')
+export const imageAssetSchema = z.string().regex(/^[A-Za-z0-9_-]{6,64}\.(png|jpg|jpeg|gif|webp)$/, 'invalid image asset')
+export const pdfAssetSchema = z.string().regex(/^[A-Za-z0-9_-]{6,64}\.pdf$/, 'invalid PDF asset')
 
 export const imageSchema = z.object({
   ...baseObject,
   type: z.literal('image'),
-  asset: assetNameSchema,
+  asset: imageAssetSchema,
   x: finite,
   y: finite,
   width: z.number().min(1).max(20000),
@@ -98,6 +100,22 @@ export const imageSchema = z.object({
 
 export const canvasObjectSchema = z.discriminatedUnion('type', [strokeSchema, textSchema, shapeSchema, imageSchema])
 
+/**
+ * A page drawn from a PDF. The PDF file is an untouched asset; the page shows
+ * one of its pages underneath the editable objects. `width`/`height` are the
+ * PDF page size in points (the page itself is that size × PDF_SCALE).
+ */
+export const pdfBackgroundSchema = z.object({
+  type: z.literal('pdf'),
+  asset: pdfAssetSchema,
+  /** 0-based page index in the PDF. */
+  page: z.number().int().min(0).max(100000),
+  width: z.number().positive().max(20000),
+  height: z.number().positive().max(20000),
+  /** The page's embedded text, for search and the AI (empty for scans). */
+  text: z.string().max(500_000)
+})
+
 export const pageDocSchema = z.object({
   schemaVersion: z.literal(PAGE_SCHEMA_VERSION),
   id: idSchema,
@@ -107,6 +125,7 @@ export const pageDocSchema = z.object({
   paper: paperSchema,
   /** Array order is layer order: later objects draw on top. */
   objects: z.array(canvasObjectSchema),
+  background: pdfBackgroundSchema.nullable(),
   updatedAt: z.number()
 })
 
@@ -194,6 +213,7 @@ export type ImageObject = z.infer<typeof imageSchema>
 export type CanvasObject = z.infer<typeof canvasObjectSchema>
 export type ObjectType = CanvasObject['type']
 export type PageDoc = z.infer<typeof pageDocSchema>
+export type PdfBackground = z.infer<typeof pdfBackgroundSchema>
 export type PageMeta = z.infer<typeof pageMetaSchema>
 export type PageKind = PageMeta['kind']
 export type NoteDoc = z.infer<typeof noteDocSchema>

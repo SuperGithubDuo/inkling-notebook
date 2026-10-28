@@ -23,8 +23,32 @@ export function inkOptions(style: InkStyle, complete: boolean): StrokeOptions {
 }
 
 export function outlinePath(points: readonly Point[], style: InkStyle, complete = true): string {
+  return svgPathFromOutline(strokeOutline(points, style, complete))
+}
+
+function strokeOutline(points: readonly Point[], style: InkStyle, complete: boolean): number[][] {
   const input = points.map(([x, y, p]) => [x, y, style.hasPressure ? (p ?? 0.5) : 0.5])
-  return svgPathFromOutline(getStroke(input, inkOptions(style, complete)))
+  return getStroke(input, inkOptions(style, complete))
+}
+
+/**
+ * The same outline as `outlinePath`, written with explicit quadratic
+ * segments only (no `T` shorthand), for consumers whose SVG path parsers
+ * don't support smooth curves (e.g. PDF export). Geometrically identical:
+ * each `T` reflects the previous control point, which here is the next
+ * outline point.
+ */
+export function outlinePathExplicit(points: readonly Point[], style: InkStyle): string {
+  const o = strokeOutline(points, style, true)
+  const r = (v: number): string => (Math.round(v * 100) / 100).toString()
+  if (o.length < 3) return o.length ? `M${r(o[0]![0]!)},${r(o[0]![1]!)}Z` : ''
+  let d = `M${r(o[0]![0]!)},${r(o[0]![1]!)}`
+  for (let i = 1; i < o.length - 1; i++) {
+    const c = o[i]!
+    const n = o[i + 1]!
+    d += `Q${r(c[0]!)},${r(c[1]!)} ${r((c[0]! + n[0]!) / 2)},${r((c[1]! + n[1]!) / 2)}`
+  }
+  return d + 'Z'
 }
 
 const cache = new WeakMap<StrokeObject, { d: string; path: Path2D | null }>()

@@ -34,6 +34,14 @@ const pageFileSchema = z.preprocess(migratePage, pageDocSchema) as unknown as Zo
 const libraryFileSchema = z.preprocess(migrateLibrary, librarySchema) as unknown as ZodType<Library>
 
 export const MAX_IMAGE_BYTES = 30 * 1024 * 1024
+export const MAX_PDF_BYTES = 200 * 1024 * 1024
+
+/** True if the bytes are a PDF file (by signature, not extension). */
+export function isPdf(bytes: Uint8Array): boolean {
+  // The header may follow a few bytes of junk; PDF readers search the first 1 KB.
+  const head = String.fromCharCode(...bytes.subarray(0, 1024))
+  return head.includes('%PDF-')
+}
 
 /** Identifies an image by its leading bytes; we never trust file extensions. */
 export function sniffImage(bytes: Uint8Array): 'png' | 'jpg' | 'gif' | 'webp' | null {
@@ -51,7 +59,8 @@ export const IMAGE_MIME: Record<string, string> = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   gif: 'image/gif',
-  webp: 'image/webp'
+  webp: 'image/webp',
+  pdf: 'application/pdf'
 }
 
 export class Storage {
@@ -114,10 +123,17 @@ export class Storage {
    * Assets are content we own: pages reference them by name, never by a
    * temporary browser URL or the user's original path.
    */
-  async saveAsset(notebookId: string, bytes: Uint8Array): Promise<string> {
-    if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error('Image is larger than 30 MB.')
-    const kind = sniffImage(bytes)
-    if (!kind) throw new Error('Unsupported image format. Use PNG, JPEG, GIF or WebP.')
+  async saveAsset(notebookId: string, bytes: Uint8Array, type: 'image' | 'pdf' = 'image'): Promise<string> {
+    let kind: string | null
+    if (type === 'pdf') {
+      if (bytes.byteLength > MAX_PDF_BYTES) throw new Error('PDF is larger than 200 MB.')
+      kind = isPdf(bytes) ? 'pdf' : null
+      if (!kind) throw new Error('This file is not a PDF.')
+    } else {
+      if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error('Image is larger than 30 MB.')
+      kind = sniffImage(bytes)
+      if (!kind) throw new Error('Unsupported image format. Use PNG, JPEG, GIF or WebP.')
+    }
     const name = `${randomBytes(12).toString('hex')}.${kind}`
     const file = this.assetPath(notebookId, name)
     await this.atomicWrite(file, bytes)

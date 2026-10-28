@@ -5,11 +5,12 @@ import {
   createNotebook as makeNotebook,
   createNoteDoc,
   createPageDoc,
+  createPdfPageDoc,
   createPageMeta,
   newId,
   type PageSize
 } from '@shared/factory'
-import type { CanvasObject, Library, NoteDoc, NoteNode, NotebookIcon, NotebookMeta, PageDoc, PageKind, PageMeta, PaperType } from '@shared/schema'
+import type { CanvasObject, Library, NoteDoc, NoteNode, NotebookIcon, NotebookMeta, PageDoc, PageKind, PageMeta, PaperType, PdfBackground } from '@shared/schema'
 import { HISTORY_LIMIT, applyTransaction, invertTransaction, type PageHistory, type Transaction } from '@/canvas/history'
 import { buildTransaction, pasteCommands, CommandError, type CanvasCommand, type CommandContext } from '@/canvas/commands'
 import { SaveQueue, type SaveStatus } from '@/services/saveQueue'
@@ -93,6 +94,8 @@ interface Actions {
   /** Adds a rich-text note after the given page and opens it. Returns its id. */
   addNote(afterPageId?: string, init?: { title?: string; doc?: NoteNode }): string | null
   updateNote(pageId: string, doc: NoteNode): void
+  /** Adds one page per PDF page (the PDF itself stays an untouched asset). */
+  addPdfPages(afterPageId: string | undefined, name: string, backgrounds: PdfBackground[]): void
   renamePage(pageId: string, title: string): void
   setPageTags(pageId: string, tags: string[]): void
   duplicatePage(pageId: string): void
@@ -396,6 +399,27 @@ export const useStore = create<Store>()((set, get) => {
       saver.markNote(meta.id)
       writeLastOpened(nb.id, meta.id)
       return meta.id
+    },
+
+    addPdfPages(afterPageId, name, backgrounds) {
+      const nb = activeNotebook()
+      if (!nb || !backgrounds.length) return
+      const metas = backgrounds.map((bg) => createPageMeta(backgrounds.length > 1 ? `${name} · p. ${bg.page + 1}` : name))
+      const docs = metas.map((m, i) => createPdfPageDoc(nb.id, m.id, backgrounds[i]!))
+      const anchor = afterPageId ?? get().activePageId
+      updateNotebook(nb.id, (n) => {
+        const pages = n.pages.slice()
+        const at = pages.findIndex((p) => p.id === anchor)
+        pages.splice(at === -1 ? pages.length : at + 1, 0, ...metas)
+        return { ...n, pages, updatedAt: Date.now() }
+      })
+      set((s) => ({
+        pages: { ...s.pages, ...Object.fromEntries(docs.map((d) => [d.id, d])) },
+        activePageId: metas[0]!.id,
+        selection: []
+      }))
+      metas.forEach((m) => saver.markPage(m.id))
+      writeLastOpened(nb.id, metas[0]!.id)
     },
 
     updateNote(pageId, doc) {

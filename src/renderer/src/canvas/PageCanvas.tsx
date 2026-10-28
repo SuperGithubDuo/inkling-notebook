@@ -31,6 +31,7 @@ import { clamp, fitPage, fitWidth, panBy, screenToPage, zoomAt, type Camera, typ
 import { SelectionToolbar } from './SelectionToolbar'
 import { ZoomControls } from './ZoomControls'
 import { BacklinksPill } from '@/notes/Connections'
+import { PdfLayer } from '@/pdf/PdfLayer'
 
 const EMPTY: ReadonlySet<string> = new Set()
 const HIGHLIGHTER_OPACITY = 0.45
@@ -790,6 +791,9 @@ export function PageCanvas({ pageId }: { pageId: string }) {
               ...paperStyle(page.paper, cam.scale)
             }}
           />
+          {page.background && (
+            <PdfLayer notebookId={page.notebookId} background={page.background} pageWidth={page.width} cam={cam} view={view} />
+          )}
           <Stage ref={stageRef} width={view.width} height={view.height} className="absolute inset-0">
             <Layer>
               <Group ref={worldRef} x={cam.x} y={cam.y} scaleX={cam.scale} scaleY={cam.scale}>

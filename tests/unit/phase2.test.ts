@@ -180,9 +180,11 @@ describe('viewport', () => {
 })
 
 describe('migration and assets', () => {
-  it('upgrades v1 pages to v2 without touching objects', () => {
+  it('upgrades v1 and v2 pages to v3 without touching objects', () => {
     const v1 = { schemaVersion: 1, id: 'page-0001', objects: [{ a: 1 }] }
-    expect(migratePage(v1)).toEqual({ ...v1, schemaVersion: 2 })
+    expect(migratePage(v1)).toEqual({ ...v1, schemaVersion: 3, background: null })
+    const v2 = { schemaVersion: 2, id: 'page-0001', objects: [{ a: 1 }] }
+    expect(migratePage(v2)).toEqual({ ...v2, schemaVersion: 3, background: null })
   })
 
   it('loads a v1 page file written by Phase 1', async () => {
@@ -194,7 +196,8 @@ describe('migration and assets', () => {
       await storage.savePage(p)
       await writeFile(file, JSON.stringify({ ...p, schemaVersion: 1 }))
       const loaded = await new Storage(root).loadPage(p.notebookId, p.id)
-      expect(loaded.page?.schemaVersion).toBe(2)
+      expect(loaded.page?.schemaVersion).toBe(3)
+      expect(loaded.page?.background).toBeNull()
       expect(loaded.page?.objects).toHaveLength(1)
     } finally {
       await rm(root, { recursive: true, force: true })

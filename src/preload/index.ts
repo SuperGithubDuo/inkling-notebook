@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type InklingApi } from '@shared/ipc'
 
 const api: InklingApi = {
+  testHooks: process.argv.includes('--inkling-test-hooks'),
   loadLibrary: () => ipcRenderer.invoke(IPC.loadLibrary),
   saveLibrary: (library) => ipcRenderer.invoke(IPC.saveLibrary, library),
   loadPage: (notebookId, pageId) => ipcRenderer.invoke(IPC.loadPage, notebookId, pageId),
@@ -15,6 +16,8 @@ const api: InklingApi = {
   importImage: (notebookId) => ipcRenderer.invoke(IPC.importImage, notebookId),
   saveImageBytes: (notebookId, bytes) => ipcRenderer.invoke(IPC.saveImageBytes, notebookId, bytes),
   copyAssets: (from, to, assets) => ipcRenderer.invoke(IPC.copyAssets, from, to, assets),
+  importPdf: (notebookId) => ipcRenderer.invoke(IPC.importPdf, notebookId),
+  exportPdf: (name, bytes) => ipcRenderer.invoke(IPC.exportPdf, name, bytes),
   exportPng: (name, dataUrl) => ipcRenderer.invoke(IPC.exportPng, name, dataUrl),
   search: (query, options) => ipcRenderer.invoke(IPC.search, query, options ?? {}),
   connections: (pageId) => ipcRenderer.invoke(IPC.connections, pageId),

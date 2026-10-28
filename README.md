@@ -6,7 +6,7 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 |---|---|---|
 | 1 | Library, pages, pen/highlighter/eraser, text, undo/redo, local auto-save | ✅ done |
 | 2 | Lasso selection, shapes, images, zoom/pan, precise eraser, page sizes, typed command layer | ✅ done |
-| 3 | Rich-text notes ✅, search ✅, links/backlinks ✅, knowledge graph ✅, PDF | in progress |
+| 3 | Rich-text notes, search, links/backlinks, knowledge graph, PDF import/annotation/export | ✅ done |
 | 4–5 | Claude-powered AI Tutor: chat, practice, edits on the page | planned (panel shown as "not connected") |
 | 6 | Packaging, installers, theming, accessibility pass | planned |
 
@@ -30,7 +30,7 @@ Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Window
 
 ```bash
 npm run typecheck   # strict TypeScript, no emit
-npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets, notes/Markdown, search/links/graph
+npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets, notes/Markdown, search/links/graph, PDF export, assistant context
 npm run build
 npm run test:e2e    # drives the real Electron app with mouse input (Phase 1, 2, 3 and regression suites)
 ```
@@ -90,6 +90,36 @@ A notebook can mix handwritten pages and rich-text notes. Add a note with **Note
 
 The data comes from the link index (`graph()`), and the layout is a d3-force simulation run to rest up front, so the same data always draws the same way.
 
+## PDFs
+
+- **Import**: *Import* under the page thumbnails (or ⋯ → *Import PDF…*) adds one page per PDF page after the current page.
+  - The PDF file is stored unchanged in the notebook folder.
+  - Each page keeps the PDF's exact size, and its embedded text is extracted for search.
+- **Read and annotate**: PDF pages work like any handwritten page: pen, highlighter, eraser, lasso, shapes, text, images, zoom and pan.
+  - pdf.js draws the PDF underneath at the current zoom, so text stays sharp. On very large zooms only the visible part is rendered.
+  - Annotations are ordinary editable objects stored in the page's JSON, separate from the PDF. They stay aligned at every zoom because both use page coordinates.
+- **Export**: ⋯ → *Export notebook as PDF…* writes the notebook's handwritten and PDF pages to one PDF.
+  - PDF pages are copied from the original file unchanged; nothing is rasterised.
+  - Annotations are drawn on top as vectors and real text. Highlighter uses a multiply blend, and images are embedded.
+  - Handwritten pages get their paper as fine lines.
+  - Rich-text notes are not included (export them as Markdown).
+
+## Ready for the AI Tutor
+
+`renderer/src/services/notebookContext.ts` is the only interface a future Claude integration needs. It keeps notebook access separate from any model or network code:
+
+| Need | API |
+|---|---|
+| Read structured notes | `page(id)` → note JSON, plain text and Markdown (live link titles) |
+| Read canvas pages | `page(id)` → typed objects, text boxes, PDF text |
+| Search notebook text | `search(query, { notebookId })` |
+| Linked notes | `connections(id)` → links, backlinks, related |
+| Selected handwriting | `selection()` → the lasso-selected objects plus a PNG of that region as displayed (ink over paper or PDF), for a vision model |
+| Create or modify content | `applyCanvasCommands(pageId, commands)`: typed, validated, tagged as AI-authored, one undo step; user content is refused unless `allowEditUserContent` is set. `appendToNote(id, markdown)` (sanitised) |
+| Outline | `outline()` → every live page and note |
+
+The acceptance tests exercise this API in the real app (`INKLING_TEST_HOOKS=1` exposes it to the test runner only).
+
 ## Architecture
 
 ```
@@ -107,7 +137,7 @@ tests/
   e2e/          Playwright-driven Electron acceptance tests
 ```
 
-**Source of truth.** Each page is versioned JSON (`schemaVersion` 2): an ordered list of vector objects — strokes (every point, with real pressure only when a stylus supplied it), text boxes, shapes and images — in page coordinates. Nothing is flattened to a bitmap. Paper is a page setting, never baked into content. Older files are migrated in memory on load (`shared/migrate.ts`).
+**Source of truth.** Each page is versioned JSON (`schemaVersion` 3): an ordered list of vector objects — strokes (every point, with real pressure only when a stylus supplied it), text boxes, shapes and images — in page coordinates. Nothing is flattened to a bitmap. Paper is a page setting, never baked into content. Older files are migrated in memory on load (`shared/migrate.ts`).
 
 Notes are stored separately, in `notebooks/<id>/notes/<pageId>.json` (`schemaVersion` 1). The `doc` field holds the editor's ProseMirror JSON, which keeps tables, task state and formulas without loss. Markdown is an import/export format, not the storage format. In `library.json` (`schemaVersion` 2, upgraded automatically from v1), every page has a `kind` (`canvas` or `note`), a `title` and `tags`. Handwritten pages are never converted into notes.
 
@@ -116,6 +146,8 @@ The editor is TipTap 3 (ProseMirror, MIT) with KaTeX (MIT) for math and TipTap's
 **Storage.** `src/main/storage.ts` writes atomically (temp file → fsync → rename), keeps the previous version as `.bak` and falls back to it automatically, and refuses to overwrite a file another program changed: your version goes to a `.conflict-<time>.json` copy and the app tells you. Images are copied into `notebooks/<id>/assets/` under a random name after their format is checked from the file bytes, and pages reference them by that name. The renderer reads them through a read-only `inkling-asset://` scheme. Original file paths and temporary browser URLs are never stored.
 
 **Search index.** `src/main/searchIndex.ts` keeps an in-memory index in the main process. At startup it reads every page and note once, then updates on every save, load and delete. Titles, tags and trash state come from the live library at query time, so renames, deletes and restores apply immediately. The same index answers `connections(pageId)` (links, backlinks, related) and `graph()` (nodes, edges, clusters). It is pure TypeScript with no Electron dependency, and unit-tested.
+
+**PDF.** pdf.js (Apache-2.0) renders pages in a background worker. Its fonts, CMaps and decoders are served through the read-only `inkling-asset://pdfjs/` scheme, so the strict CSP stays in place (pdf.js 6 needs no `eval`). Export uses pdf-lib (MIT) with fontkit for text: original pages are copied with `copyPages`, and annotations are drawn into the page's displayed coordinate space, which honours `/Rotate` and the crop box. Page files are `schemaVersion` 3, adding an optional `background` (`{ type: 'pdf', asset, page, width, height, text }`). v1/v2 files migrate automatically.
 
 **Command layer (ready for the AI Tutor).** All page edits go through typed, zod-validated commands in `renderer/src/canvas/commands.ts`:
 
@@ -145,6 +177,10 @@ useStore.getState().run(
 - Canvas text boxes are plain text. Rich text and formulas live in notes.
 - Note images are referenced by notebook. A note image pasted into another notebook still points at its original notebook (canvas paste copies the file).
 - Remote (`https`) images in notes are blocked by the content security policy and appear broken; import local images instead.
-- Image assets are never garbage-collected when an image is deleted (safe, but uses disk space).
+- Image and PDF assets are never garbage-collected when the pages using them are deleted (safe, but uses disk space).
+- Handwriting is not searchable or readable as text (no handwriting recognition yet). PDF pages without embedded text (scans) are not searchable either; there is no OCR.
+- PDF links, form fields and text selection are not interactive inside Inkling.
+- Highlights exported to PNG are blended normally, not multiplied, over PDF content (PDF export uses a true multiply blend).
+- Very large PDFs import page by page with a progress notice; a 500-page PDF creates 500 page files.
 - No installer yet; `npm run build` produces the app for `npm start`. Packaging (electron-builder) is planned for Phase 6.
 - Automated tests run on Linux. Windows and macOS have not been tested on real hardware yet, and stylus pressure, palm rejection and touch gestures have not been tested on physical pen or touch devices.
