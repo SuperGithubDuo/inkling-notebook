@@ -1,18 +1,25 @@
 import { create } from 'zustand'
 import {
+  PAGE_SIZES,
   PAPER_DEFAULTS,
   createNotebook as makeNotebook,
   createPageDoc,
   createPageMeta,
-  newId
+  newId,
+  type PageSize
 } from '@shared/factory'
-import type { Library, NotebookIcon, NotebookMeta, PageDoc, PaperType } from '@shared/schema'
+import type { CanvasObject, Library, NotebookIcon, NotebookMeta, PageDoc, PaperType } from '@shared/schema'
 import { HISTORY_LIMIT, applyTransaction, invertTransaction, type PageHistory, type Transaction } from '@/canvas/history'
+import { buildTransaction, pasteCommands, CommandError, type CanvasCommand, type CommandContext } from '@/canvas/commands'
 import { SaveQueue, type SaveStatus } from '@/services/saveQueue'
 
 export type Section = 'notebooks' | 'all' | 'favorites' | 'shared' | 'trash'
 export type View = { kind: 'library'; section: Section } | { kind: 'notebook' }
-export type Tool = 'pen' | 'highlighter' | 'eraser' | 'text'
+export type Tool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'shape' | 'text' | 'hand'
+/** Shape tools; `circle` and `ellipse` both create ellipse objects. */
+export type ShapeTool = 'line' | 'arrow' | 'rect' | 'ellipse' | 'circle' | 'triangle'
+export type EraserMode = 'stroke' | 'precise'
+export type RunResult = { ok: true; created: string[] } | { ok: false; error: string }
 
 export const INK_COLORS = ['#1f2430', '#2563eb', '#e5484d'] as const
 export const HIGHLIGHT_COLORS = ['#fde047', '#86efac', '#93c5fd', '#f9a8d4'] as const
@@ -43,6 +50,12 @@ interface State {
   highlightColor: string
   highlightSize: number
   eraserSize: number
+  eraserMode: EraserMode
+  shapeTool: ShapeTool
+  shapeFill: boolean
+  /** Selected object ids on the active page. */
+  selection: string[]
+  clipboard: CanvasObject[]
 
   sidebarOpen: boolean
   navigatorOpen: boolean
@@ -72,15 +85,30 @@ interface Actions {
   deletePageForever(notebookId: string, pageId: string): Promise<void>
   movePage(pageId: string, toIndex: number): void
   setPaper(pageId: string, paper: PaperType): void
+  setPageSize(pageId: string, size: PageSize): void
   resolveConflictWithDisk(pageId: string): Promise<void>
 
   commit(pageId: string, tx: Transaction): void
+  /**
+   * Runs typed canvas commands on the active page as one undoable step.
+   * This is the entry point for tools, menus and (later) the AI Tutor.
+   */
+  run(commands: CanvasCommand[], options?: { label?: string; context?: CommandContext; pageId?: string }): RunResult
+  setSelection(ids: string[]): void
+  copySelection(): void
+  cutSelection(): void
+  paste(): void
+  duplicateSelection(): void
+  deleteSelection(): void
   undo(): void
   redo(): void
 
   setTool(tool: Tool): void
   setColor(color: string): void
   setSize(size: number): void
+  setEraserMode(mode: EraserMode): void
+  setShapeTool(shape: ShapeTool): void
+  setShapeFill(fill: boolean): void
   toggle(panel: 'sidebarOpen' | 'navigatorOpen' | 'tutorOpen'): void
   setSearch(q: string): void
 }
@@ -164,6 +192,11 @@ export const useStore = create<Store>()((set, get) => {
     highlightColor: HIGHLIGHT_COLORS[0],
     highlightSize: 18,
     eraserSize: 14,
+    eraserMode: 'stroke',
+    shapeTool: 'rect',
+    shapeFill: false,
+    selection: [],
+    clipboard: [],
 
     sidebarOpen: true,
     navigatorOpen: true,
@@ -202,7 +235,7 @@ export const useStore = create<Store>()((set, get) => {
       }
       const target = pages.find((p) => p.id === pageId) ?? pages[0]!
       await ensurePageLoaded(notebookId, target.id)
-      set({ activeNotebookId: notebookId, activePageId: target.id, view: { kind: 'notebook' } })
+      set({ activeNotebookId: notebookId, activePageId: target.id, view: { kind: 'notebook' }, selection: [] })
       writeLastOpened(notebookId, target.id)
       // Load the rest in the background for thumbnails.
       await Promise.all(pages.map((p) => ensurePageLoaded(notebookId, p.id)))
@@ -212,7 +245,7 @@ export const useStore = create<Store>()((set, get) => {
       const nbId = get().activeNotebookId
       if (!nbId) return
       void ensurePageLoaded(nbId, pageId).then(() => {
-        set({ activePageId: pageId })
+        set({ activePageId: pageId, selection: [] })
         writeLastOpened(nbId, pageId)
       })
     },
@@ -271,7 +304,7 @@ export const useStore = create<Store>()((set, get) => {
       if (!nb) return
       const current = get().activePageId ? get().pages[get().activePageId!] : undefined
       const meta = createPageMeta()
-      const doc = createPageDoc(nb.id, meta.id, paper ?? current?.paper.type ?? 'grid')
+      const doc = createPageDoc(nb.id, meta.id, paper ?? current?.paper.type ?? 'grid', current)
       const anchor = afterPageId ?? get().activePageId
       updateNotebook(nb.id, (n) => {
         const pages = n.pages.slice()
@@ -279,7 +312,7 @@ export const useStore = create<Store>()((set, get) => {
         pages.splice(at === -1 ? pages.length : at + 1, 0, meta)
         return { ...n, pages, updatedAt: Date.now() }
       })
-      set((s) => ({ pages: { ...s.pages, [meta.id]: doc }, activePageId: meta.id }))
+      set((s) => ({ pages: { ...s.pages, [meta.id]: doc }, activePageId: meta.id, selection: [] }))
       saver.markPage(meta.id)
       writeLastOpened(nb.id, meta.id)
     },
@@ -363,6 +396,15 @@ export const useStore = create<Store>()((set, get) => {
       touchPage(page.notebookId, pageId)
     },
 
+    setPageSize(pageId, size) {
+      const page = get().pages[pageId]
+      if (!page) return
+      const { width, height } = PAGE_SIZES[size]
+      set((s) => ({ pages: { ...s.pages, [pageId]: { ...page, width, height, updatedAt: Date.now() } } }))
+      saver.markPage(pageId)
+      touchPage(page.notebookId, pageId)
+    },
+
     async resolveConflictWithDisk(pageId) {
       const page = get().pages[pageId]
       if (!page) return
@@ -390,6 +432,62 @@ export const useStore = create<Store>()((set, get) => {
       touchPage(page.notebookId, pageId)
     },
 
+    run(commands, options = {}) {
+      const pageId = options.pageId ?? get().activePageId
+      const page = pageId ? get().pages[pageId] : undefined
+      if (!pageId || !page) return { ok: false, error: 'No page is open.' }
+      try {
+        const result = buildTransaction(page, commands, options.context ?? { author: 'user' }, options.label)
+        if (result.transaction.ops.length) get().commit(pageId, result.transaction)
+        if (result.selection && pageId === get().activePageId) set({ selection: result.selection })
+        return { ok: true, created: result.created }
+      } catch (err) {
+        if (err instanceof CommandError) return { ok: false, error: err.message }
+        throw err
+      }
+    },
+
+    setSelection(ids) {
+      set({ selection: ids })
+    },
+
+    copySelection() {
+      const page = activePage()
+      const ids = new Set(get().selection)
+      if (!page || !ids.size) return
+      set({ clipboard: page.objects.filter((o) => ids.has(o.id)) })
+    },
+
+    cutSelection() {
+      get().copySelection()
+      get().deleteSelection()
+    },
+
+    paste() {
+      const clip = get().clipboard
+      if (!clip.length) return
+      // Paste on the original spot on another page, offset on the same page.
+      const page = activePage()
+      const samePage = !!page && clip.some((c) => page.objects.some((o) => o.id === c.id))
+      const offset = samePage ? 24 : 0
+      const result = get().run(pasteCommands(clip, offset, offset), { label: 'Paste' })
+      if (result.ok) {
+        set({ selection: result.created, tool: 'lasso', clipboard: clip.map((c, i) => ({ ...c, id: result.created[i]! })) as CanvasObject[] })
+      }
+    },
+
+    duplicateSelection() {
+      const ids = get().selection
+      if (ids.length) get().run([{ type: 'duplicateObjects', ids }], { label: 'Duplicate' })
+    },
+
+    deleteSelection() {
+      const ids = get().selection
+      if (!ids.length) return
+      get().run([{ type: 'deleteObjects', ids }], { label: 'Delete' })
+      set({ selection: [] })
+    },
+
     undo() {
       step('undo')
     },
@@ -399,19 +497,55 @@ export const useStore = create<Store>()((set, get) => {
     },
 
     setTool(tool) {
-      set({ tool })
+      // Selection belongs to the lasso; the hand tool keeps it so you can pan to it.
+      set((s) => ({ tool, selection: tool === 'lasso' || tool === 'hand' ? s.selection : [] }))
     },
 
     setColor(color) {
-      if (get().tool === 'highlighter') set({ highlightColor: color })
-      else set({ penColor: color, tool: get().tool === 'eraser' ? 'pen' : get().tool })
+      const s = get()
+      if (s.selection.length) {
+        recolorSelection(color)
+        set({ penColor: color })
+        return
+      }
+      if (s.tool === 'highlighter') set({ highlightColor: color })
+      else set({ penColor: color, tool: s.tool === 'eraser' || s.tool === 'hand' || s.tool === 'lasso' ? 'pen' : s.tool })
     },
 
     setSize(size) {
-      const tool = get().tool
-      if (tool === 'highlighter') set({ highlightSize: size })
-      else if (tool === 'eraser') set({ eraserSize: size })
+      const s = get()
+      if (s.selection.length && s.tool === 'lasso') {
+        resizeLinesOfSelection(size)
+        return
+      }
+      if (s.tool === 'highlighter') set({ highlightSize: size })
+      else if (s.tool === 'eraser') set({ eraserSize: size })
       else set({ penSize: size })
+    },
+
+    setEraserMode(eraserMode) {
+      set({ eraserMode })
+    },
+
+    setShapeTool(shapeTool) {
+      set({ shapeTool, tool: 'shape', selection: [] })
+    },
+
+    setShapeFill(shapeFill) {
+      set({ shapeFill })
+      const page = activePage()
+      const ids = new Set(get().selection)
+      const shapes = page?.objects.filter((o) => ids.has(o.id) && o.type === 'shape' && o.kind !== 'line' && o.kind !== 'arrow') ?? []
+      if (shapes.length) {
+        get().run(
+          shapes.map((o) => ({
+            type: 'updateObject' as const,
+            id: o.id,
+            patch: { fill: shapeFill ? (o.type === 'shape' ? o.color : null) : null }
+          })),
+          { label: shapeFill ? 'Fill shapes' : 'Remove fill' }
+        )
+      }
     },
 
     toggle(panel) {
@@ -421,6 +555,41 @@ export const useStore = create<Store>()((set, get) => {
     setSearch(search) {
       set({ search })
     }
+  }
+
+  function activePage(): PageDoc | undefined {
+    const id = get().activePageId
+    return id ? get().pages[id] : undefined
+  }
+
+  function recolorSelection(color: string): void {
+    const page = activePage()
+    const ids = new Set(get().selection)
+    const targets = page?.objects.filter((o) => ids.has(o.id) && o.type !== 'image') ?? []
+    if (!targets.length) return
+    get().run(
+      targets.map((o) => ({
+        type: 'updateObject' as const,
+        id: o.id,
+        patch: o.type === 'shape' && o.fill ? { color, fill: color } : { color }
+      })),
+      { label: 'Change colour' }
+    )
+  }
+
+  function resizeLinesOfSelection(size: number): void {
+    const page = activePage()
+    const ids = new Set(get().selection)
+    const targets = page?.objects.filter((o) => ids.has(o.id) && (o.type === 'stroke' || o.type === 'shape')) ?? []
+    if (!targets.length) return
+    get().run(
+      targets.map((o) => ({
+        type: 'updateObject' as const,
+        id: o.id,
+        patch: o.type === 'stroke' ? { size: o.tool === 'highlighter' ? Math.max(size, 6) : size } : { strokeWidth: Math.min(40, size) }
+      })),
+      { label: 'Change thickness' }
+    )
   }
 
   function step(direction: 'undo' | 'redo'): void {
@@ -439,6 +608,8 @@ export const useStore = create<Store>()((set, get) => {
       pages: { ...s.pages, [pageId]: applyTransaction(page, applied) },
       history: { ...s.history, [pageId]: nextHist }
     }))
+    const remaining = new Set(get().pages[pageId]!.objects.map((o) => o.id))
+    set((s) => ({ selection: s.selection.filter((id) => remaining.has(id)) }))
     saver.markPage(pageId)
     touchPage(page.notebookId, pageId)
   }

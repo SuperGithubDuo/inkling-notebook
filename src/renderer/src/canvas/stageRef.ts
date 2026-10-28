@@ -1,14 +1,24 @@
-import type Konva from 'konva'
+import Konva from 'konva'
 import type { PageDoc } from '@shared/schema'
 import { drawPaper } from './paper'
 
-/** The currently mounted page stage, for features outside the canvas (export). */
-export const activeStage: { stage: Konva.Stage | null; scale: number } = { stage: null, scale: 1 }
+/**
+ * The mounted page canvas, for features outside it (toolbar image insert,
+ * export, zoom shortcuts). Set by PageCanvas while it is mounted.
+ */
+export interface CanvasHandle {
+  /** The content group in page coordinates (cloned for export). */
+  world: () => Konva.Group | null
+  placeImage: (asset: string) => Promise<void>
+  zoom: (action: 'in' | 'out' | 'fit-width' | 'fit-page') => void
+}
 
-/** Renders a page (paper + content) to a PNG data URL at page resolution × `pixelRatio`. */
+export const activeCanvas: { handle: CanvasHandle | null } = { handle: null }
+
+/** Renders a whole page (paper + content) to PNG at page resolution × pixelRatio. */
 export function renderPagePng(page: PageDoc, pixelRatio = 2): string | null {
-  const { stage, scale } = activeStage
-  if (!stage) return null
+  const world = activeCanvas.handle?.world()
+  if (!world) return null
   const out = document.createElement('canvas')
   out.width = page.width * pixelRatio
   out.height = page.height * pixelRatio
@@ -16,8 +26,20 @@ export function renderPagePng(page: PageDoc, pixelRatio = 2): string | null {
   if (!ctx) return null
   ctx.scale(pixelRatio, pixelRatio)
   drawPaper(ctx, page.paper, page.width, page.height)
-  const content = stage.toCanvas({ pixelRatio: pixelRatio / scale })
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.drawImage(content, 0, 0, out.width, out.height)
-  return out.toDataURL('image/png')
+
+  // Re-render the content off-screen at 1:1 page scale.
+  const holder = document.createElement('div')
+  const stage = new Konva.Stage({ container: holder, width: page.width, height: page.height })
+  const layer = new Konva.Layer()
+  stage.add(layer)
+  const clone = world.clone({ x: 0, y: 0, scaleX: 1, scaleY: 1 })
+  layer.add(clone)
+  try {
+    const content = layer.toCanvas({ x: 0, y: 0, width: page.width, height: page.height, pixelRatio })
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.drawImage(content, 0, 0, out.width, out.height)
+    return out.toDataURL('image/png')
+  } finally {
+    stage.destroy()
+  }
 }

@@ -31,7 +31,7 @@ export function Sidebar() {
   const menuNotebook = menu ? library?.notebooks.find((n) => n.id === menu.id) : undefined
 
   return (
-    <aside className="flex w-[208px] shrink-0 flex-col border-r border-line-soft bg-panel" aria-label="Library">
+    <aside className="flex w-[clamp(180px,14vw,208px)] shrink-0 flex-col border-r border-line-soft bg-panel" aria-label="Library">
       <div className="px-3 pt-3 pb-1">
         <label className="group flex h-8 items-center gap-2 rounded-lg border border-line bg-white px-2.5 text-ink-3 focus-within:border-accent/50 focus-within:ring-2 focus-within:ring-accent/10">
           <Search size={14} />

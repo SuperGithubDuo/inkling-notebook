@@ -8,6 +8,12 @@ export type SaveResult =
   | { status: 'error'; message: string }
 
 export type LoadLibraryResult = { library: Library; recovered: string[]; dataDir: string }
+export type ImportImageResult = { asset: string } | { canceled: true } | { error: string }
+
+/** URL the renderer uses to display a stored image asset. */
+export const ASSET_SCHEME = 'inkling-asset'
+export const assetUrl = (notebookId: string, asset: string): string => `${ASSET_SCHEME}://asset/${notebookId}/${asset}`
+
 export type LoadPageResult = { page: PageDoc | null; recovered: boolean }
 
 /** The complete, deliberately narrow API exposed to the renderer. */
@@ -18,6 +24,10 @@ export interface InklingApi {
   savePage(page: PageDoc): Promise<SaveResult>
   deletePageFile(notebookId: string, pageId: string): Promise<void>
   deleteNotebookFiles(notebookId: string): Promise<void>
+  /** Opens a file picker and copies the chosen image into the notebook. */
+  importImage(notebookId: string): Promise<ImportImageResult>
+  /** Stores pasted or dropped image bytes in the notebook. */
+  saveImageBytes(notebookId: string, bytes: Uint8Array): Promise<ImportImageResult>
   exportPng(suggestedName: string, dataUrl: string): Promise<{ saved: boolean; path?: string }>
   showDataFolder(): Promise<void>
   /** Main asks the renderer to flush pending saves before the window closes. */
@@ -31,6 +41,8 @@ export const IPC = {
   savePage: 'page:save',
   deletePageFile: 'page:delete',
   deleteNotebookFiles: 'notebook:delete',
+  importImage: 'image:import',
+  saveImageBytes: 'image:save-bytes',
   exportPng: 'export:png',
   showDataFolder: 'app:show-data-folder',
   flushRequest: 'app:flush-request',

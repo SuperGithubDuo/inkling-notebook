@@ -68,7 +68,3 @@ export function removeOp(objects: readonly CanvasObject[], ids: ReadonlySet<stri
   })
   return { kind: 'remove', items }
 }
-
-export function addOp(objects: readonly CanvasObject[], added: CanvasObject[]): Op {
-  return { kind: 'add', items: added.map((object, i) => ({ object, index: objects.length + i })) }
-}

@@ -8,7 +8,6 @@ import {
   Eraser,
   Hand,
   Highlighter,
-  Image,
   Lasso,
   LoaderCircle,
   Menu as MenuIcon,
@@ -18,7 +17,6 @@ import {
   Pencil,
   Redo2,
   Settings,
-  Shapes,
   Share,
   Sparkles,
   Star,
@@ -32,6 +30,7 @@ import { HIGHLIGHT_COLORS, INK_COLORS, PEN_SIZES, selectActiveNotebook, selectAc
 import { renderPagePng } from '@/canvas/stageRef'
 import { IconButton, InlineEdit, Menu, Popover, Tip, cx } from './ui/primitives'
 import { NotebookIcon } from './NotebookIcon'
+import { ImageButton, ShapePicker } from './ToolControls'
 
 const TOOLS: { tool: Tool; label: string; key: string; icon: typeof PenLine }[] = [
   { tool: 'pen', label: 'Pen', key: 'P', icon: PenLine },
@@ -39,7 +38,6 @@ const TOOLS: { tool: Tool; label: string; key: string; icon: typeof PenLine }[] 
   { tool: 'eraser', label: 'Eraser', key: 'E', icon: Eraser }
 ]
 
-const SOON = 'coming in Phase 2'
 
 const Divider = () => <span className="mx-1.5 h-6 w-px shrink-0 bg-line" aria-hidden />
 
@@ -81,7 +79,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   return (
     <header className="relative flex h-[60px] shrink-0 items-center border-b border-line-soft bg-white px-3">
       {/* Left: navigation + notebook name */}
-      <div className="flex w-[300px] min-w-0 shrink items-center gap-1">
+      <div className="flex w-[clamp(190px,19vw,300px)] min-w-0 shrink-0 items-center gap-1">
         <IconButton
           label={inNotebook ? 'Back to library' : 'Back to notebook'}
           disabled={!inNotebook && !notebook}
@@ -128,18 +126,14 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
               <Icon size={19} strokeWidth={1.8} />
             </IconButton>
           ))}
-          <IconButton label={`Lasso select — ${SOON}`} disabled>
+          <IconButton label="Lasso select" hint="L" active={tool === 'lasso'} onClick={() => st.setTool('lasso')} data-testid="tool-lasso">
             <Lasso size={19} strokeWidth={1.8} />
           </IconButton>
-          <IconButton label={`Shapes — ${SOON}`} disabled>
-            <Shapes size={19} strokeWidth={1.8} />
-          </IconButton>
+          <ShapePicker />
           <IconButton label="Text" hint="T" active={tool === 'text'} onClick={() => st.setTool('text')} data-testid="tool-text">
             <Type size={19} strokeWidth={1.8} />
           </IconButton>
-          <IconButton label={`Insert image — ${SOON}`} disabled>
-            <Image size={19} strokeWidth={1.8} />
-          </IconButton>
+          <ImageButton />
           <IconButton label="Audio recording — not yet available" disabled>
             <Mic size={19} strokeWidth={1.8} />
           </IconButton>
@@ -162,7 +156,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           ))}
           <CustomColor value={currentColor} onPick={st.setColor} />
           <SizePicker />
-          <IconButton label={`Pan & zoom — ${SOON}`} disabled>
+          <IconButton label="Hand (pan)" hint="Space" active={tool === 'hand'} onClick={() => st.setTool('hand')} data-testid="tool-hand">
             <Hand size={18} strokeWidth={1.8} />
           </IconButton>
           <Divider />
@@ -186,7 +180,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
       {!inNotebook && <div className="flex-1" />}
 
       {/* Right: status, tutor, export, settings */}
-      <div className="flex w-[300px] shrink items-center justify-end gap-1">
+      <div className="flex w-[clamp(250px,19vw,300px)] shrink-0 items-center justify-end gap-1">
         <SaveIndicator />
         <button
           type="button"
@@ -194,7 +188,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           aria-pressed={tutorOpen}
           onClick={() => st.toggle('tutorOpen')}
           className={cx(
-            'mx-1 flex h-9 items-center gap-1.5 rounded-[11px] px-3.5 text-[14px] font-medium transition-colors',
+            'mx-1 flex h-9 shrink-0 items-center gap-1.5 rounded-[11px] px-3.5 text-[14px] font-medium whitespace-nowrap transition-colors',
             tutorOpen
               ? 'bg-gradient-to-r from-[#8d8cf6] to-[#9fa7fb] text-white shadow-[0_2px_8px_-2px_rgb(109_99_240/0.5)]'
               : 'bg-lav-soft text-lav hover:bg-[#e2dffc]'
@@ -308,18 +302,69 @@ function SizePicker() {
   const ref = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
   const tool = useStore((s) => s.tool)
+  const hasSelection = useStore((s) => s.selection.length > 0)
+  const eraserMode = useStore((s) => s.eraserMode)
+  const color = useStore((s) => (s.tool === 'highlighter' ? s.highlightColor : s.penColor))
   const size = useStore((s) => (s.tool === 'highlighter' ? s.highlightSize : s.tool === 'eraser' ? s.eraserSize : s.penSize))
-  const setSize = useStore((s) => s.setSize)
-  const presets = tool === 'highlighter' ? [12, 18, 28] : tool === 'eraser' ? [8, 14, 28] : [...PEN_SIZES]
-  const [min, max] = tool === 'highlighter' ? [6, 48] : tool === 'eraser' ? [4, 60] : [1, 16]
-  const label = tool === 'eraser' ? 'Eraser size' : tool === 'highlighter' ? 'Highlighter thickness' : 'Pen thickness'
+  const { setSize, setEraserMode } = useStore.getState()
+  const kind = tool === 'highlighter' ? 'highlighter' : tool === 'eraser' ? 'eraser' : 'pen'
+  const presets = kind === 'highlighter' ? [12, 18, 28] : kind === 'eraser' ? [8, 14, 28] : [...PEN_SIZES]
+  const [min, max] = kind === 'highlighter' ? [6, 48] : kind === 'eraser' ? [4, 60] : [1, 16]
+  const label =
+    tool === 'lasso' && hasSelection
+      ? 'Thickness of selection'
+      : kind === 'eraser'
+        ? 'Eraser'
+        : kind === 'highlighter'
+          ? 'Highlighter thickness'
+          : tool === 'shape'
+            ? 'Line thickness'
+            : 'Pen thickness'
+  const disabled = tool === 'text' || tool === 'hand' || (tool === 'lasso' && !hasSelection)
   return (
     <>
-      <IconButton ref={ref} label={label} onClick={() => setOpen((o) => !o)} disabled={tool === 'text'} data-testid="size-picker">
+      <IconButton ref={ref} label={label} onClick={() => setOpen((o) => !o)} disabled={disabled} data-testid="size-picker">
         <Waves size={19} strokeWidth={1.8} />
       </IconButton>
-      <Popover anchor={ref} open={open} onClose={() => setOpen(false)} className="w-[220px] p-3">
+      <Popover anchor={ref} open={open} onClose={() => setOpen(false)} className="w-[232px] p-3">
         <div className="mb-2 text-[12px] font-medium text-ink-2">{label}</div>
+        {kind === 'eraser' && (
+          <div role="radiogroup" aria-label="Eraser mode" className="mb-3 flex rounded-[10px] bg-[#f2f3f6] p-0.5">
+            {(
+              [
+                ['stroke', 'Whole stroke'],
+                ['precise', 'Precise']
+              ] as const
+            ).map(([mode, text]) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={eraserMode === mode}
+                data-testid={`eraser-${mode}`}
+                onClick={() => setEraserMode(mode)}
+                className={cx(
+                  'h-7 flex-1 rounded-[8px] text-[12px]',
+                  eraserMode === mode ? 'bg-white font-medium text-accent shadow-[0_1px_2px_rgb(30_36_60/0.12)]' : 'text-ink-2'
+                )}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+        )}
+        {kind !== 'eraser' && (
+          <svg viewBox="0 0 200 36" className="mb-2 h-9 w-full rounded-lg bg-[#fafafb]" aria-hidden>
+            <path
+              d="M14 24 C 50 4, 80 4, 100 18 S 160 32, 186 12"
+              fill="none"
+              stroke={color}
+              strokeOpacity={kind === 'highlighter' ? 0.45 : 1}
+              strokeWidth={Math.min(26, size * 0.9)}
+              strokeLinecap="round"
+            />
+          </svg>
+        )}
         <div className="flex gap-2">
           {presets.map((p) => (
             <button

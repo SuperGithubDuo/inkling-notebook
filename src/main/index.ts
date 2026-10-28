@@ -1,15 +1,50 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol, shell, type IpcMainInvokeEvent } from 'electron'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { IPC, type LoadLibraryResult } from '@shared/ipc'
+import { ASSET_SCHEME, IPC, type ImportImageResult, type LoadLibraryResult } from '@shared/ipc'
 import { idSchema } from '@shared/schema'
 import { createStarterLibrary } from '@shared/factory'
-import { Storage } from './storage'
+import { IMAGE_MIME, MAX_IMAGE_BYTES, Storage } from './storage'
 
 const dataDir = process.env.INKLING_DATA_DIR ?? join(app.getPath('userData'), 'Library')
 const storage = new Storage(dataDir)
 let mainWindow: BrowserWindow | null = null
+
+// Image assets are served from the notebook folder through a read-only scheme.
+protocol.registerSchemesAsPrivileged([
+  { scheme: ASSET_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }
+])
+
+function registerAssetProtocol(): void {
+  protocol.handle(ASSET_SCHEME, async (request) => {
+    try {
+      const url = new URL(request.url)
+      const [notebookId, asset] = url.pathname.split('/').filter(Boolean)
+      if (url.host !== 'asset' || !notebookId || !asset) return new Response('Not found', { status: 404 })
+      const bytes = await storage.readAsset(idSchema.parse(notebookId), asset)
+      const ext = asset.slice(asset.lastIndexOf('.') + 1)
+      return new Response(new Uint8Array(bytes), {
+        headers: {
+          'Content-Type': IMAGE_MIME[ext] ?? 'application/octet-stream',
+          // Lets the canvas export pages with images without being tainted.
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'max-age=31536000, immutable'
+        }
+      })
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
+  })
+}
+
+async function storeImage(notebookId: string, read: () => Promise<Uint8Array>): Promise<ImportImageResult> {
+  try {
+    return { asset: await storage.saveAsset(notebookId, await read()) }
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -90,6 +125,23 @@ function registerIpc(): void {
   handle(IPC.savePage, z.tuple([z.unknown()]), (page) => storage.savePage(page as never))
   handle(IPC.deletePageFile, z.tuple([idSchema, idSchema]), (nb, page) => storage.deletePageFile(nb, page))
   handle(IPC.deleteNotebookFiles, z.tuple([idSchema]), (nb) => storage.deleteNotebookFiles(nb))
+  handle(IPC.importImage, z.tuple([idSchema]), async (notebookId) => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Insert image',
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
+    })
+    const path = result.filePaths[0]
+    if (result.canceled || !path) return { canceled: true }
+    return storeImage(notebookId, async () => {
+      const { size } = await fs.stat(path)
+      if (size > MAX_IMAGE_BYTES) throw new Error('Image is larger than 30 MB.')
+      return fs.readFile(path)
+    })
+  })
+  handle(IPC.saveImageBytes, z.tuple([idSchema, z.instanceof(Uint8Array)]), (notebookId, bytes) =>
+    storeImage(notebookId, async () => bytes)
+  )
   handle(
     IPC.exportPng,
     z.tuple([z.string().max(200), z.string().startsWith('data:image/png;base64,').max(80_000_000)]),
@@ -111,6 +163,7 @@ function registerIpc(): void {
 }
 
 app.whenReady().then(() => {
+  registerAssetProtocol()
   registerIpc()
   createWindow()
   app.on('activate', () => {

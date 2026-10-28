@@ -43,7 +43,7 @@ export function TutorPanel({ onOpenSettings, inputId }: { onOpenSettings: () => 
     <aside
       aria-label="AI Tutor"
       data-testid="tutor-panel"
-      className="m-3 ml-0 flex w-[392px] shrink-0 flex-col overflow-hidden rounded-[18px] border border-line bg-white shadow-[0_1px_3px_rgb(30_36_60/0.05)]"
+      className="m-3 ml-0 flex w-[clamp(300px,27vw,392px)] shrink-0 flex-col overflow-hidden rounded-[18px] border border-line bg-white shadow-[0_1px_3px_rgb(30_36_60/0.05)]"
     >
       <header className="flex items-center gap-2.5 px-5 pt-4 pb-3">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-lav-soft text-lav">

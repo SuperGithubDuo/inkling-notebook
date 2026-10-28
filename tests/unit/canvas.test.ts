@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasObject, StrokeObject, TextObject } from '../../src/shared/schema'
-import { addOp, applyTransaction, invertTransaction, removeOp } from '../../src/renderer/src/canvas/history'
+import { applyTransaction, invertTransaction, removeOp } from '../../src/renderer/src/canvas/history'
 import { eraserHits } from '../../src/renderer/src/canvas/geometry'
 import { outlinePath } from '../../src/renderer/src/canvas/ink'
 import { createPageDoc } from '../../src/shared/factory'
@@ -47,7 +47,7 @@ describe('history', () => {
 
   it('add and update invert cleanly', () => {
     const d = stroke('stroke-d01', [[1, 1]])
-    const add = { label: 'Draw', ops: [addOp(base.objects, [d])] }
+    const add = { label: 'Draw', ops: [{ kind: 'add' as const, items: [{ object: d, index: base.objects.length }] }] }
     const added = applyTransaction(base, add)
     expect(added.objects.at(-1)?.id).toBe(d.id)
     expect(applyTransaction(added, invertTransaction(add)).objects).toHaveLength(3)

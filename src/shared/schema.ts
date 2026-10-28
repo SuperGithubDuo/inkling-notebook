@@ -6,7 +6,7 @@
 import { z } from 'zod'
 
 export const LIBRARY_SCHEMA_VERSION = 1
-export const PAGE_SCHEMA_VERSION = 1
+export const PAGE_SCHEMA_VERSION = 2
 
 export const idSchema = z.string().regex(/^[A-Za-z0-9_-]{6,64}$/, 'invalid id')
 
@@ -54,7 +54,48 @@ export const textSchema = z.object({
   font: z.enum(['sans', 'serif', 'hand'])
 })
 
-export const canvasObjectSchema = z.discriminatedUnion('type', [strokeSchema, textSchema])
+export const SHAPE_KINDS = ['line', 'arrow', 'rect', 'ellipse', 'triangle'] as const
+const extent = z.number().finite().min(-20000).max(20000)
+const rotation = z.number().finite().min(-360).max(360)
+
+/**
+ * Shapes live in a box: (x, y) is the top-left corner and `rotation` (degrees)
+ * turns the box around that corner. For lines and arrows the box is the
+ * vector from start (x, y) to end (x + width, y + height), so width and height
+ * may be negative.
+ */
+export const shapeSchema = z.object({
+  ...baseObject,
+  type: z.literal('shape'),
+  kind: z.enum(SHAPE_KINDS),
+  x: finite,
+  y: finite,
+  width: extent,
+  height: extent,
+  rotation,
+  color: hex,
+  strokeWidth: z.number().min(0.5).max(40),
+  fill: hex.nullable(),
+  fillOpacity: z.number().min(0).max(1)
+})
+
+/** Image file name inside the notebook's assets folder. */
+export const assetNameSchema = z.string().regex(/^[A-Za-z0-9_-]{6,64}\.(png|jpg|jpeg|gif|webp)$/, 'invalid asset name')
+
+export const imageSchema = z.object({
+  ...baseObject,
+  type: z.literal('image'),
+  asset: assetNameSchema,
+  x: finite,
+  y: finite,
+  width: z.number().min(1).max(20000),
+  height: z.number().min(1).max(20000),
+  rotation,
+  naturalWidth: z.number().min(1).max(100000),
+  naturalHeight: z.number().min(1).max(100000)
+})
+
+export const canvasObjectSchema = z.discriminatedUnion('type', [strokeSchema, textSchema, shapeSchema, imageSchema])
 
 export const pageDocSchema = z.object({
   schemaVersion: z.literal(PAGE_SCHEMA_VERSION),
@@ -108,7 +149,11 @@ export type PaperType = Paper['type']
 export type Point = z.infer<typeof pointSchema>
 export type StrokeObject = z.infer<typeof strokeSchema>
 export type TextObject = z.infer<typeof textSchema>
+export type ShapeKind = (typeof SHAPE_KINDS)[number]
+export type ShapeObject = z.infer<typeof shapeSchema>
+export type ImageObject = z.infer<typeof imageSchema>
 export type CanvasObject = z.infer<typeof canvasObjectSchema>
+export type ObjectType = CanvasObject['type']
 export type PageDoc = z.infer<typeof pageDocSchema>
 export type PageMeta = z.infer<typeof pageMetaSchema>
 export type NotebookIcon = (typeof NOTEBOOK_ICONS)[number]

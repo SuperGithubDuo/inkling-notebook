@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronDown, Copy, FilePlus2, Grid3x3, Plus, Trash2 } from 'lucide-react'
 import { PAPER_TYPES, type PaperType } from '@shared/schema'
+import { PAGE_SIZES, pageSizeOf, type PageSize } from '@shared/factory'
 import { livePages, selectActiveNotebook, useStore } from '@/store/store'
 import { PageThumbnail } from '@/canvas/PageThumbnail'
 import { Menu, Popover, Tip, cx, type MenuEntry } from './ui/primitives'
@@ -21,7 +22,7 @@ export function PageNavigator() {
   const notebook = useStore(selectActiveNotebook)
   const pages = useStore((s) => s.pages)
   const activePageId = useStore((s) => s.activePageId)
-  const { selectPage, addPage, duplicatePage, trashPage, movePage, setPaper } = useStore.getState()
+  const { selectPage, addPage, duplicatePage, trashPage, movePage, setPaper, setPageSize } = useStore.getState()
 
   const [menu, setMenu] = useState<{ pageId: string; at: { x: number; y: number } } | null>(null)
   const [paperOpen, setPaperOpen] = useState(false)
@@ -29,7 +30,9 @@ export function PageNavigator() {
   const paperBtn = useRef<HTMLButtonElement>(null)
 
   const list = livePages(notebook)
-  const activePaper = activePageId ? pages[activePageId]?.paper.type : undefined
+  const activeDoc = activePageId ? pages[activePageId] : undefined
+  const activePaper = activeDoc?.paper.type
+  const activeSize = activeDoc ? pageSizeOf(activeDoc) : null
 
   const menuItems = (pageId: string): MenuEntry[] => {
     const i = list.findIndex((p) => p.id === pageId)
@@ -59,16 +62,17 @@ export function PageNavigator() {
           type="button"
           onClick={() => setPaperOpen((o) => !o)}
           className="group relative flex h-8 w-full items-center justify-between rounded-[10px] border border-line bg-white px-2.5 text-[12.5px] text-ink-2 hover:border-[#d9dbe0]"
-          aria-label="Paper for this page"
+          aria-label="Paper and size for this page"
         >
           <span className="flex items-center gap-1.5">
             <Grid3x3 size={14} />
             {activePaper ? PAPER_LABEL[activePaper] : 'Paper'}
           </span>
           <ChevronDown size={13} className="text-ink-3" />
-          <Tip text="Paper style for this page" side="bottom" />
+          <Tip text="Paper and page size" side="bottom" />
         </button>
-        <Popover anchor={paperBtn} open={paperOpen} onClose={() => setPaperOpen(false)} align="start" className="w-40 p-1.5">
+        <Popover anchor={paperBtn} open={paperOpen} onClose={() => setPaperOpen(false)} align="start" className="w-48 p-1.5">
+          <div className="px-2 pt-1 pb-1 text-[11px] font-medium tracking-wide text-ink-3 uppercase">Paper</div>
           {PAPER_TYPES.map((t) => (
             <button
               key={t}
@@ -86,6 +90,31 @@ export function PageNavigator() {
               {PAPER_LABEL[t]}
             </button>
           ))}
+          <div className="mx-1 my-1.5 h-px bg-line-soft" />
+          <div className="px-2 pt-0.5 pb-1 text-[11px] font-medium tracking-wide text-ink-3 uppercase">Size</div>
+          {(Object.keys(PAGE_SIZES) as PageSize[]).map((size) => {
+            const { label, width, height } = PAGE_SIZES[size]
+            return (
+              <button
+                key={size}
+                type="button"
+                data-testid={`page-size-${size}`}
+                onClick={() => {
+                  if (activePageId) setPageSize(activePageId, size)
+                  setPaperOpen(false)
+                }}
+                className={cx(
+                  'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-[13px]',
+                  activeSize === size ? 'bg-accent-soft text-accent' : 'hover:bg-[#f2f3f5]'
+                )}
+              >
+                <span className="flex w-4 justify-center">
+                  <span className="rounded-[2px] border border-current opacity-70" style={{ width: (14 * width) / 1920, height: (14 * height) / 1920 }} />
+                </span>
+                {label}
+              </button>
+            )
+          })}
         </Popover>
       </div>
 
@@ -132,12 +161,14 @@ export function PageNavigator() {
                 }}
                 onDragEnd={() => setDrag(null)}
                 className={cx(
-                  'relative block aspect-[1240/1754] w-full overflow-hidden rounded-[8px] bg-white transition-shadow',
+                  'relative block w-full overflow-hidden rounded-[8px] bg-white transition-shadow',
                   active ? 'shadow-[0_0_0_2px_var(--color-accent)]' : 'shadow-[0_0_0_1px_var(--color-line)] hover:shadow-[0_0_0_1px_#cfd3da]',
                   drag?.id === meta.id && 'opacity-40'
                 )}
               >
-                {doc ? <PageThumbnail page={doc} /> : <span className="absolute inset-0 animate-pulse bg-[#f4f4f6]" />}
+                <span className="block" style={{ aspectRatio: doc ? `${doc.width} / ${doc.height}` : '1240 / 1754' }}>
+                  {doc ? <PageThumbnail page={doc} /> : <span className="block h-full w-full animate-pulse bg-[#f4f4f6]" />}
+                </span>
                 <span
                   className={cx(
                     'absolute top-1 left-1.5 text-[10.5px] font-medium',
