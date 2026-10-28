@@ -38,6 +38,10 @@ body,
   margin: 0;
 }
 
+html {
+  overflow: hidden;
+}
+
 body {
   font-family: var(--font-sans);
   color: var(--color-ink);

@@ -2,20 +2,17 @@
  * AI Tutor panel: chat about the page or a lasso selection, practice problems
  * and on-page feedback, all running on Google Gemini through the main process.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   BookOpen,
   ChartColumn,
   Check,
-  CircleAlert,
   Copy,
   FileText,
   Lasso,
   Lightbulb,
-  ListChecks,
   PenLine,
   Plus,
-  RotateCcw,
   Send,
   Settings,
   Sparkles,
@@ -23,12 +20,15 @@ import {
   SquarePen,
   X
 } from 'lucide-react'
-import { modelLabel, type AiError } from '@shared/ai'
+import { modelLabel } from '@shared/ai'
 import { useStore } from '@/store/store'
 import { useAi } from '@/ai/aiStore'
 import { Markdown } from '@/ai/Markdown'
 import { QUICK, threadKey, useTutor, type ChatMessage, type QuickAction, type TutorTab } from '@/ai/tutorStore'
 import { IconButton, cx } from './ui/primitives'
+import { ErrorCard } from '@/ai/ErrorCard'
+import { PracticeView } from '@/ai/PracticeView'
+import { usePractice } from '@/ai/practiceStore'
 
 const TABS: { id: TutorTab; label: string }[] = [
   { id: 'chat', label: 'Chat' },
@@ -92,7 +92,7 @@ export function TutorPanel({ onOpenSettings, inputId }: { onOpenSettings: () => 
 
       {tab === 'chat' && <ChatView onOpenSettings={onOpenSettings} inputId={inputId} />}
       {tab === 'page' && <Placeholder icon={PenLine} title="Corrections on your page" body="Select your handwritten work with the lasso, then ask the tutor to mark it up. You preview every change and approve it before it is added to your page." onOpenSettings={onOpenSettings} />}
-      {tab === 'practice' && <Placeholder icon={ListChecks} title="Practise from your notes" body="Generate problems like the ones on this page, work them out by hand, and get hints that stop short of the answer." onOpenSettings={onOpenSettings} />}
+      {tab === 'practice' && <PracticeView onOpenSettings={onOpenSettings} />}
 
       <p className="flex items-center gap-1.5 px-5 pb-3.5 text-[12px] text-ink-3">
         <Sparkles size={12} className="text-lav" />
@@ -162,6 +162,14 @@ const QUICK_ICONS: Record<QuickAction, { icon: typeof Sparkles; tint: string }> 
   similar: { icon: ChartColumn, tint: 'text-accent' }
 }
 
+/** "Try a similar problem" opens Practice with one generated problem; the rest ask in chat. */
+function runQuick(q: QuickAction): void {
+  if (q === 'similar') {
+    useTutor.getState().setTab('practice')
+    void usePractice.getState().generate({ count: 1, similar: true })
+  } else void useTutor.getState().send({ quick: q })
+}
+
 function ChatView({ onOpenSettings, inputId }: { onOpenSettings: () => void; inputId: string }) {
   const messages = useTutor((s) => s.threads[threadKey()] ?? EMPTY)
   const running = useTutor((s) => !!s.running)
@@ -198,7 +206,7 @@ function ChatView({ onOpenSettings, inputId }: { onOpenSettings: () => void; inp
                     type="button"
                     data-testid={`quick-${q}`}
                     disabled={running}
-                    onClick={() => void useTutor.getState().send({ quick: q })}
+                    onClick={() => runQuick(q)}
                     className="flex h-[76px] flex-col items-center justify-center gap-1.5 rounded-[14px] border border-line bg-white px-2 text-[13px] leading-snug text-ink-2 transition-colors hover:border-[#d9dbe2] hover:bg-[#fafafb] hover:text-ink disabled:opacity-50"
                   >
                     <QIcon size={20} className={tint} strokeWidth={1.7} />
@@ -223,7 +231,7 @@ function ChatView({ onOpenSettings, inputId }: { onOpenSettings: () => void; inp
                 key={q}
                 type="button"
                 disabled={running}
-                onClick={() => void useTutor.getState().send({ quick: q })}
+                onClick={() => runQuick(q)}
                 className="flex shrink-0 items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[12px] text-ink-2 hover:bg-[#fafafb] hover:text-ink disabled:opacity-50"
               >
                 <QIcon size={13} className={tint} />
@@ -299,50 +307,6 @@ function ModelMessage({ m, onOpenSettings }: { m: ChatMessage; onOpenSettings: (
         </div>
       )}
     </div>
-  )
-}
-
-const SETTINGS_CODES = new Set(['no_key', 'invalid_key', 'consent_required', 'not_free', 'model_unavailable'])
-const NO_RETRY = new Set(['no_key', 'consent_required', 'duplicate', 'invalid_key'])
-
-export function ErrorCard({ error, messageId, onOpenSettings, onRetry }: { error: AiError; messageId?: string; onOpenSettings: () => void; onRetry?: () => void }) {
-  const running = useTutor((s) => !!s.running)
-  const retry = onRetry ?? (messageId ? () => void useTutor.getState().retry(messageId) : undefined)
-  const quota = error.code === 'daily_quota' || error.code === 'rate_limited'
-  return (
-    <div data-testid="tutor-error" data-code={error.code} className={cx('rounded-[12px] border px-3 py-2.5 text-[13px]', quota ? 'border-[#f3d39a] bg-[#fff8e8]' : 'border-[#f2c9ca] bg-[#fdf3f3]')}>
-      <div className="flex items-start gap-2">
-        <CircleAlert size={15} className={cx('mt-0.5 shrink-0', quota ? 'text-[#c27c0e]' : 'text-[#c03a3e]')} />
-        <span className="leading-relaxed text-ink">{error.message}</span>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-1.5 pl-6">
-        {error.suggestModel && (
-          <Action
-            testId="tutor-switch-model"
-            onClick={async () => {
-              useAi.getState().setStatus(await window.inkling.ai.setModel(error.suggestModel!))
-              retry?.()
-            }}
-          >
-            Use {modelLabel(error.suggestModel)} (free)
-          </Action>
-        )}
-        {retry && !NO_RETRY.has(error.code) && (
-          <Action testId="tutor-retry" disabled={running} onClick={retry}>
-            <RotateCcw size={12} /> Try again
-          </Action>
-        )}
-        {SETTINGS_CODES.has(error.code) && <Action onClick={onOpenSettings}>Open AI settings</Action>}
-      </div>
-    </div>
-  )
-}
-
-function Action({ children, onClick, testId, disabled }: { children: ReactNode; onClick: () => void; testId?: string; disabled?: boolean }) {
-  return (
-    <button type="button" data-testid={testId} disabled={disabled} onClick={onClick} className="flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-[12.5px] font-medium text-accent shadow-[0_0_0_1px_#e3e5ea] hover:bg-accent-softer disabled:opacity-50">
-      {children}
-    </button>
   )
 }
 

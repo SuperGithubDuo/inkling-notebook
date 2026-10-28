@@ -209,6 +209,8 @@ try {
   await drawPage([[110, 150], [520, 150], [520, 420], [110, 420], [110, 152]])
   await win.waitForSelector('[data-testid="selection-toolbar"]')
   await win.click('[data-testid="ask-ai-selection"]')
+  // Clicking a toolbar near the canvas edge must not scroll the canvas away from the pointer.
+  await win.waitForFunction(() => { const el = document.querySelector('[data-testid="canvas-viewport"]'); return el.scrollLeft + el.scrollTop === 0 }, null, { timeout: 1000 })
   await win.waitForFunction(() => document.activeElement?.getAttribute('data-testid') === 'tutor-input', null, { timeout: 2000 })
   await win.locator('[data-testid="tutor-context-chip"]').getByText(/Selection · \d+ items/).waitFor()
   step('lasso selection → Ask AI focuses the tutor with the selection as context')
@@ -327,6 +329,96 @@ try {
   assert.equal(await messages().count(), 0)
   await win.waitForSelector('[data-testid="quick-hint"]')
   step('new chat')
+
+  // ================================================================ practice
+  console.log('practice')
+  await win.click('[data-testid="tutor-tab-practice"]')
+  await win.click('[data-testid="practice-level-easy"]')
+  await win.selectOption('[data-testid="practice-count"]', '2')
+  await win.click('[data-testid="practice-generate"]')
+  await win.waitForSelector('[data-testid="practice-problem"]')
+  sent = lastGenerate()
+  assert.equal(sent.task, 'practice')
+  assert.equal(sent.body.generationConfig.responseMimeType, 'application/json')
+  assert.ok(sent.body.generationConfig.responseJsonSchema.properties.problems)
+  assert.match(textIn(sent), /Create 2 practice problems at easy difficulty\. Base them on the material above\./)
+  assert.match(textIn(sent), /<page title=/)
+  assert.equal(await win.textContent('[data-testid="practice-position"]'), '1 / 2')
+  assert.ok((await win.locator('[data-testid="practice-question"] .katex').count()) >= 1)
+  step('generated a structured practice set from the page (JSON schema output)')
+
+  const calls = fake.generated().length
+  for (let i = 1; i <= 3; i++) {
+    await win.click('[data-testid="practice-hint"]')
+    assert.equal(await win.locator('[data-testid="practice-hints"] li').count(), i)
+  }
+  assert.equal(await win.locator('[data-testid="practice-hint"]').count(), 0, 'no more hints after the last')
+  assert.equal(fake.generated().length, calls, 'hints are revealed without new requests')
+  step('three progressive hints revealed one at a time, locally')
+
+  await win.fill('[data-testid="practice-answer"]', 'x = 1')
+  await win.click('[data-testid="practice-check"]')
+  await win.waitForSelector('[data-testid="practice-verdict"][data-verdict="incorrect"]')
+  sent = lastGenerate()
+  assert.equal(sent.task, 'check')
+  assert.match(textIn(sent), /Expected final answer: \$x = 2\$ or \$x = 3\$[\s\S]*Student answer \(typed\): x = 1/)
+  await win.fill('[data-testid="practice-answer"]', 'x = 2 or x = 3')
+  await win.click('[data-testid="practice-check"]')
+  await win.waitForSelector('[data-testid="practice-verdict"][data-verdict="correct"]')
+  step('typed answers checked: wrong, then right')
+
+  await win.click('[data-testid="practice-to-page"]')
+  await win.getByText('Added to your page').waitFor()
+  let pageNow = await win.evaluate((id) => window.__inkling.notebookContext.page(id), mathPageId)
+  const copied = pageNow.objects.find((o) => o.type === 'text')
+  assert.equal(copied.text, 'Problem 1: Solve x² - 5x + 6 = 0.')
+  assert.equal(copied.author, 'ai')
+  const copiedBottom = copied.y + 40
+  step('problem copied onto the page as editable plain text (AI-authored)')
+
+  // Work the answer by hand under the problem, select it, and check the handwriting.
+  await win.click('[data-testid="tool-pen"]')
+  await write('x=2 x=3', 120, copiedBottom + 30, 40)
+  await win.click('[data-testid="tool-lasso"]')
+  await drawPage([[100, copiedBottom + 10], [600, copiedBottom + 10], [600, copiedBottom + 100], [100, copiedBottom + 100], [100, copiedBottom + 12]])
+  await win.waitForSelector('[data-testid="selection-toolbar"]')
+  // The answer is written where the pointer went: below the copied problem, not over it.
+  pageNow = await win.evaluate((id) => window.__inkling.notebookContext.page(id), mathPageId)
+  const answerTop = Math.min(...pageNow.objects.slice(-9).flatMap((o) => o.points.map((p) => p[1])))
+  assert.ok(answerTop > copied.y + 30 && answerTop < copiedBottom + 40, `answer strokes start at y=${answerTop}`)
+  fake.reply({ json: { verdict: 'correct', transcription: 'x = 2, x = 3', feedback: 'Both roots are right.' } })
+  await win.click('[data-testid="practice-check-handwriting"]')
+  await win.locator('[data-testid="practice-verdict"][data-verdict="correct"]').getByText('Both roots are right.').waitFor()
+  sent = lastGenerate()
+  assert.equal(imagesIn(sent).length, 1)
+  assert.match(textIn(sent), /Student answer: the attached image of their handwriting\./)
+  await win.screenshot({ path: join(shots, 'p4-practice.png') })
+  step('handwritten answer checked from a lasso selection image')
+
+  await win.click('[data-testid="practice-next"]')
+  assert.equal(await win.textContent('[data-testid="practice-position"]'), '2 / 2')
+  assert.equal(await win.locator('[data-testid="practice-hints"]').count(), 0, 'hints are per problem')
+  await win.click('[data-testid="practice-solution"]')
+  await win.locator('[data-testid="practice-solution-text"] .katex').first().waitFor()
+  step('next problem; worked solution on request')
+
+  // A malformed answer from the model is caught, and retrying works.
+  fake.reply({ json: { topic: 'broken', problems: [{ question: 'no hints or answer' }] } })
+  await win.click('[data-testid="practice-generate"]')
+  await win.locator('[data-testid="tutor-error"][data-code="bad_response"]').waitFor()
+  assert.equal(await win.textContent('[data-testid="practice-position"]'), '2 / 2', 'previous set kept')
+  await win.click('[data-testid="tutor-retry"]')
+  await win.waitForFunction(() => document.querySelector('[data-testid="practice-position"]')?.textContent === '1 / 2')
+  step('malformed problems rejected by validation; retry succeeds')
+
+  // "Try a similar problem" from the chat goes to Practice with one problem.
+  await win.keyboard.press('Escape')
+  await win.click('[data-testid="tutor-tab-chat"]')
+  await win.click('[data-testid="quick-similar"]')
+  await win.waitForFunction(() => document.querySelector('[data-testid="practice-position"]')?.textContent === '1 / 2')
+  sent = lastGenerate()
+  assert.match(textIn(sent), /Create 1 practice problem very similar to the problem in my work above/)
+  step('"Try a similar problem" generates practice from the work')
 
   assert.deepEqual(cspViolations, [])
   step('no Content-Security-Policy violations')

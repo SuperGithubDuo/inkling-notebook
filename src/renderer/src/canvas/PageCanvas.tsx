@@ -759,6 +759,13 @@ export function PageCanvas({ pageId }: { pageId: string }) {
       data-testid="canvas-viewport"
       className="relative h-full w-full overflow-hidden bg-[#f1f1f3]"
       style={{ touchAction: 'none', cursor }}
+      // The camera does all panning. The browser can still scroll a clipped
+      // box to reveal a focused control (e.g. the selection toolbar near an
+      // edge), which would shift the drawing away from the pointer.
+      onScroll={(e) => {
+        e.currentTarget.scrollTop = 0
+        e.currentTarget.scrollLeft = 0
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
