@@ -21,7 +21,7 @@ export function PagePicker({ currentPageId }: { currentPageId: string }) {
   // Focus synchronously on open so no keystroke lands in the note meanwhile.
   useLayoutEffect(() => {
     if (!open) return
-    setQuery('')
+    setQuery(useNoteEditor.getState().pickerSeed)
     setActive(0)
     input.current?.focus()
   }, [open])
@@ -40,18 +40,29 @@ export function PagePicker({ currentPageId }: { currentPageId: string }) {
       .slice(0, 50)
   }, [refs, query, currentPageId])
 
+  const choose = (r: PageRef): void => {
+    if (!editor) return
+    close()
+    editor.chain()
+      .focus()
+      .insertContent([{ type: 'noteRef', attrs: { pageId: r.pageId, label: r.title } }, { type: 'text', text: ' ' }])
+      .run()
+    // TipTap refocuses on the next frame; do it now so the next keystroke lands.
+    editor.view.focus()
+  }
+
   useEffect(() => setActive(0), [query])
+  // Enter pressed while the picker was still opening.
+  useEffect(() => {
+    if (!open || !useNoteEditor.getState().pickerChoose || !results[0] || !editor) return
+    useNoteEditor.setState({ pickerChoose: false })
+    choose(results[0])
+  })
   useEffect(() => {
     list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [active])
 
   if (!open || !editor) return null
-
-  const choose = (r: PageRef): void => {
-    close()
-    editor.chain().focus().insertContent([{ type: 'noteRef', attrs: { pageId: r.pageId, label: r.title } }, { type: 'text', text: ' ' }]).run()
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-[#1f2430]/20 pt-[14vh]" onPointerDown={(e) => e.target === e.currentTarget && close()}>
       <div role="dialog" aria-modal aria-label="Link to a page" className="animate-pop w-[520px] overflow-hidden rounded-2xl bg-white shadow-pop">
@@ -64,7 +75,7 @@ export function PagePicker({ currentPageId }: { currentPageId: string }) {
             if (e.key === 'ArrowDown') (e.preventDefault(), setActive((a) => Math.min(a + 1, results.length - 1)))
             else if (e.key === 'ArrowUp') (e.preventDefault(), setActive((a) => Math.max(a - 1, 0)))
             else if (e.key === 'Enter' && results[active]) (e.preventDefault(), choose(results[active]!))
-            else if (e.key === 'Escape') (e.preventDefault(), close(), editor.commands.focus())
+            else if (e.key === 'Escape') (e.preventDefault(), close(), editor.view.focus())
           }}
           placeholder="Link to a page or note…"
           className="w-full border-b border-line-soft px-5 py-4 text-[15px] outline-none placeholder:text-ink-3"

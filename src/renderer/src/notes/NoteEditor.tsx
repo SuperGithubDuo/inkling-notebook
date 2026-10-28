@@ -74,7 +74,21 @@ function NoteEditorInner({ pageId }: { pageId: string }) {
         void insertImageFiles(view, files, pos)
         return true
       },
+      // While the page picker is opening, keystrokes belong to it, not the note.
+      handleTextInput: (_view, _from, _to, text) => {
+        const picker = useNoteEditor.getState()
+        if (!picker.pagePicker) return false
+        useNoteEditor.setState({ pickerSeed: picker.pickerSeed + text })
+        return true
+      },
       handleKeyDown: (view, event) => {
+        if (useNoteEditor.getState().pagePicker) {
+          if (event.key === 'Backspace') useNoteEditor.setState((s) => ({ pickerSeed: s.pickerSeed.slice(0, -1) }))
+          if (event.key === 'Escape') useNoteEditor.getState().close()
+          if (event.key === 'Enter') useNoteEditor.setState({ pickerChoose: true })
+          // Enter, arrows etc. wait for the picker instead of editing the note.
+          if (event.key.length > 1) return true
+        }
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
           event.preventDefault()
           // Take the selection the user sees before the dialog takes focus.

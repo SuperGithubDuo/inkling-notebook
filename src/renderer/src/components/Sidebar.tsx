@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, Ellipsis, FileText, LibraryBig, Plus, Search, Star, Trash2, Users } from 'lucide-react'
+import { ChevronDown, Ellipsis, FileText, LibraryBig, Network, Plus, Search, Star, Trash2, Users } from 'lucide-react'
 import { useStore, type Section } from '@/store/store'
 import { NotebookIcon } from './NotebookIcon'
 import { NotebookMenu } from './NotebookMenu'
@@ -9,6 +9,7 @@ const NAV: { section: Section; label: string; icon: typeof FileText }[] = [
   { section: 'notebooks', label: 'Notebooks', icon: LibraryBig },
   { section: 'all', label: 'All Notes', icon: FileText },
   { section: 'favorites', label: 'Favourites', icon: Star },
+  { section: 'graph', label: 'Graph', icon: Network },
   { section: 'shared', label: 'Shared', icon: Users },
   { section: 'trash', label: 'Trash', icon: Trash2 }
 ]

@@ -6,7 +6,7 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 |---|---|---|
 | 1 | Library, pages, pen/highlighter/eraser, text, undo/redo, local auto-save | ✅ done |
 | 2 | Lasso selection, shapes, images, zoom/pan, precise eraser, page sizes, typed command layer | ✅ done |
-| 3 | Rich-text notes ✅, search ✅, links/backlinks ✅, knowledge graph, PDF | in progress |
+| 3 | Rich-text notes ✅, search ✅, links/backlinks ✅, knowledge graph ✅, PDF | in progress |
 | 4–5 | Claude-powered AI Tutor: chat, practice, edits on the page | planned (panel shown as "not connected") |
 | 6 | Packaging, installers, theming, accessibility pass | planned |
 
@@ -79,6 +79,16 @@ A notebook can mix handwritten pages and rich-text notes. Add a note with **Note
   Matches are highlighted in titles and excerpts, `↑`/`↓`/`Enter` open a result, and a menu limits search to one notebook. Search ignores case and accents. **Handwritten ink is not searchable**: there is no handwriting recognition yet.
 - **Links**: in a note, type `[[` (or use the *Link to a page* button) to pick any page or note. Links store the target's permanent id and always show its current title, so renaming notes or notebooks never breaks them. In Markdown they export as portable `[Title](inkling://page/<id>)` links and import back as live links.
 - **Backlinks**: every note ends with *Links to*, *Linked from* and *Related* (shared tags, or pages two links away). A handwritten page that is linked from somewhere shows a backlinks pill in its top-left corner.
+
+## Knowledge graph
+
+**Graph** in the sidebar shows every page and note as a node, with internal links as arrows. Circles are notes, squares are handwritten pages, and colour is the notebook. Groups of linked pages are shaded as clusters, and unlinked pages sit on an outer ring (they can be hidden).
+
+- Hover or click a node to highlight it, its links and its connected pages; the side card lists them.
+- Double-click a node, press `Enter`, or use **Open** to open the page.
+- Drag or scroll to pan; `Ctrl`+scroll or the zoom pill zooms; the notebook menu filters the graph.
+
+The data comes from the link index (`graph()`), and the layout is a d3-force simulation run to rest up front, so the same data always draws the same way.
 
 ## Architecture
 

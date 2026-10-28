@@ -5,7 +5,6 @@
  * In Markdown it is a portable `[Title](inkling://page/<id>)` link.
  */
 import { InputRule, Node, mergeAttributes } from '@tiptap/core'
-import { flushSync } from 'react-dom'
 import { pageLinkUrl } from '@shared/library'
 
 export interface PageInfo {
@@ -113,9 +112,9 @@ export const NoteRef = Node.create<NoteRefOptions>({
         find: /\[\[$/,
         handler: ({ state, range }) => {
           state.tr.delete(range.from, range.to)
-          // Open right after this transaction is applied, rendering synchronously
-          // so the picker has focus before the next keystroke arrives.
-          setTimeout(() => flushSync(() => this.options.onTrigger()), 0)
+          // The picker renders asynchronously; until it has focus, the editor
+          // forwards typed characters to it (see NoteEditor), so none are lost.
+          this.options.onTrigger()
         }
       })
     ]

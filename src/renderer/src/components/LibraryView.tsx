@@ -3,6 +3,7 @@ import { RotateCcw, Star, Trash2, Users } from 'lucide-react'
 import type { NoteDoc, NotebookMeta, PageDoc } from '@shared/schema'
 import { createNoteDoc, createPageDoc } from '@shared/factory'
 import { NoteThumbnail } from '@/notes/NoteThumbnail'
+import { KnowledgeGraph } from '@/graph/KnowledgeGraph'
 import { livePages, useStore, type Section } from '@/store/store'
 import { PageThumbnail } from '@/canvas/PageThumbnail'
 import { NotebookIcon } from './NotebookIcon'
@@ -13,6 +14,7 @@ const TITLES: Record<Section, string> = {
   notebooks: 'Notebooks',
   all: 'All Notes',
   favorites: 'Favourites',
+  graph: 'Graph',
   shared: 'Shared',
   trash: 'Trash'
 }
@@ -137,6 +139,13 @@ export function LibraryView({ section }: { section: Section }) {
   const library = useStore((s) => s.library)
   const st = useStore.getState()
   if (!library) return null
+  if (section === 'graph') {
+    return (
+      <main className="min-w-0 flex-1 bg-paper" data-testid="library-graph">
+        <KnowledgeGraph />
+      </main>
+    )
+  }
 
   const live = library.notebooks.filter((n) => n.deletedAt === null)
   let content: React.ReactNode

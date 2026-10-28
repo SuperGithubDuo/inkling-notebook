@@ -14,7 +14,7 @@ import { HISTORY_LIMIT, applyTransaction, invertTransaction, type PageHistory, t
 import { buildTransaction, pasteCommands, CommandError, type CanvasCommand, type CommandContext } from '@/canvas/commands'
 import { SaveQueue, type SaveStatus } from '@/services/saveQueue'
 
-export type Section = 'notebooks' | 'all' | 'favorites' | 'shared' | 'trash'
+export type Section = 'notebooks' | 'all' | 'favorites' | 'graph' | 'shared' | 'trash'
 export type View = { kind: 'library'; section: Section } | { kind: 'notebook' }
 export type Tool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'shape' | 'text' | 'hand'
 /** Shape tools; `circle` and `ellipse` both create ellipse objects. */

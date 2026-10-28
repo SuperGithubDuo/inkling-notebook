@@ -59,6 +59,7 @@ export function MathDialog() {
       ;(dialog.kind === 'inline' ? chain.insertInlineMath({ latex: value }) : chain.insertBlockMath({ latex: value })).run()
     }
     close()
+    editor.view.focus()
   }
 
   return (
@@ -121,6 +122,7 @@ export function LinkDialog() {
       chain.insertContent({ type: 'text', text: normalized, marks: [{ type: 'link', attrs: { href: normalized } }] }).run()
     } else chain.setLink({ href: normalized }).run()
     close()
+    editor.view.focus()
   }
   return (
     <Modal title="Link" onClose={close}>
