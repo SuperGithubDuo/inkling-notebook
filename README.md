@@ -6,7 +6,7 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 |---|---|---|
 | 1 | Library, pages, pen/highlighter/eraser, text, undo/redo, local auto-save | ✅ done |
 | 2 | Lasso selection, shapes, images, zoom/pan, precise eraser, page sizes, typed command layer | ✅ done |
-| 3 | Rich-text notes, search, links/backlinks, knowledge graph, PDF | planned |
+| 3 | Rich-text notes ✅, search, links/backlinks, knowledge graph, PDF | in progress |
 | 4–5 | Claude-powered AI Tutor: chat, practice, edits on the page | planned (panel shown as "not connected") |
 | 6 | Packaging, installers, theming, accessibility pass | planned |
 
@@ -30,9 +30,9 @@ Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Window
 
 ```bash
 npm run typecheck   # strict TypeScript, no emit
-npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets
+npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets, notes/Markdown
 npm run build
-npm run test:e2e    # drives the real Electron app with mouse input (Phase 1, Phase 2 and regression suites)
+npm run test:e2e    # drives the real Electron app with mouse input (Phase 1, 2, 3 and regression suites)
 ```
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the typecheck, unit tests and production build on every push to `main` and on pull requests. The Electron acceptance tests need a display and are run locally.
@@ -56,6 +56,18 @@ On a headless Linux machine run the e2e suite under a virtual display: `xvfb-run
 | Paper and page size | The "Grid" pill above the thumbnails: grid, lined, dotted, blank; A4 portrait/landscape, Letter, square, 16:9 |
 | Undo / redo / save | `Ctrl+Z`, `Ctrl+Shift+Z` or `Ctrl+Y`, `Ctrl+S` (auto-save runs anyway) |
 
+## Rich-text notes
+
+A notebook can mix handwritten pages and rich-text notes. Add a note with **Note** under the page thumbnails (or ⋯ → Add note). While a note is open, the top toolbar switches to formatting:
+
+- Headings, bold, italic, underline, strikethrough and inline code. Markdown shortcuts work while typing (`# `, `- `, `1. `, `[ ] `, `**bold**`, `` `code` ``).
+- Bulleted, numbered and check lists; quotes; code blocks; tables (row and column commands in the table menu).
+- Formulas: `$x^2$` typed inline, or the Σ menu. Click a formula to edit its LaTeX with a live KaTeX preview.
+- Links: select text and press `Ctrl+K`; `Ctrl`+click opens a link in the browser. Only `https`/`mailto` links are allowed.
+- Images: insert button, paste or drop. They are stored in the notebook like canvas images.
+- Title and `#tags` above the text.
+- **Markdown**: ⋯ → *Import Markdown as note…* copies local images the file references into the notebook. The share button (or ⋯ → *Export note as Markdown…*) writes a `.md` file and puts its images in a `<name>_assets/` folder next to it.
+
 ## Architecture
 
 ```
@@ -74,6 +86,10 @@ tests/
 ```
 
 **Source of truth.** Each page is versioned JSON (`schemaVersion` 2): an ordered list of vector objects — strokes (every point, with real pressure only when a stylus supplied it), text boxes, shapes and images — in page coordinates. Nothing is flattened to a bitmap. Paper is a page setting, never baked into content. Older files are migrated in memory on load (`shared/migrate.ts`).
+
+Notes are stored separately, in `notebooks/<id>/notes/<pageId>.json` (`schemaVersion` 1). The `doc` field holds the editor's ProseMirror JSON, which keeps tables, task state and formulas without loss. Markdown is an import/export format, not the storage format. In `library.json` (`schemaVersion` 2, upgraded automatically from v1), every page has a `kind` (`canvas` or `note`), a `title` and `tags`. Handwritten pages are never converted into notes.
+
+The editor is TipTap 3 (ProseMirror, MIT) with KaTeX (MIT) for math and TipTap's Markdown extension (MIT). One extension list (`renderer/src/notes/extensions.ts`) serves both the live editor and the headless Markdown converter, so both always agree on the schema. Imported Markdown passes through `sanitizeNoteDoc`, which removes `javascript:`-style links and images.
 
 **Storage.** `src/main/storage.ts` writes atomically (temp file → fsync → rename), keeps the previous version as `.bak` and falls back to it automatically, and refuses to overwrite a file another program changed: your version goes to a `.conflict-<time>.json` copy and the app tells you. Images are copied into `notebooks/<id>/assets/` under a random name after their format is checked from the file bytes, and pages reference them by that name. The renderer reads them through a read-only `inkling-asset://` scheme. Original file paths and temporary browser URLs are never stored.
 
@@ -102,7 +118,9 @@ useStore.getState().run(
 
 - The AI Tutor is not connected yet (Phase 4). Audio recording and sharing are not built and are labelled as such in the UI.
 - Rotation is available for single images and shapes; strokes and text boxes move and scale but don't rotate.
-- Text boxes are plain text (rich text and LaTeX equations arrive with Phase 3/5).
+- Canvas text boxes are plain text. Rich text and formulas live in notes.
+- Note images are referenced by notebook. A note image pasted into another notebook still points at its original notebook (canvas paste copies the file).
+- Remote (`https`) images in notes are blocked by the content security policy and appear broken; import local images instead.
 - Image assets are never garbage-collected when an image is deleted (safe, but uses disk space).
 - No installer yet; `npm run build` produces the app for `npm start`. Packaging (electron-builder) is planned for Phase 6.
 - Automated tests run on Linux. Windows and macOS have not been tested on real hardware yet, and stylus pressure, palm rejection and touch gestures have not been tested on physical pen or touch devices.

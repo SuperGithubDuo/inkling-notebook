@@ -3,12 +3,13 @@ import {
   PAGE_SIZES,
   PAPER_DEFAULTS,
   createNotebook as makeNotebook,
+  createNoteDoc,
   createPageDoc,
   createPageMeta,
   newId,
   type PageSize
 } from '@shared/factory'
-import type { CanvasObject, Library, NotebookIcon, NotebookMeta, PageDoc, PaperType } from '@shared/schema'
+import type { CanvasObject, Library, NoteDoc, NoteNode, NotebookIcon, NotebookMeta, PageDoc, PageKind, PageMeta, PaperType } from '@shared/schema'
 import { HISTORY_LIMIT, applyTransaction, invertTransaction, type PageHistory, type Transaction } from '@/canvas/history'
 import { buildTransaction, pasteCommands, CommandError, type CanvasCommand, type CommandContext } from '@/canvas/commands'
 import { SaveQueue, type SaveStatus } from '@/services/saveQueue'
@@ -40,6 +41,10 @@ interface State {
   activeNotebookId: string | null
   activePageId: string | null
   pages: Record<string, PageDoc>
+  /** Rich-text note documents, keyed by page id. */
+  notes: Record<string, NoteDoc>
+  /** Bumped when a note is replaced from disk, so its editor reloads. */
+  noteRevision: Record<string, number>
   history: Record<string, PageHistory>
   conflicts: Conflict[]
   saveStatus: SaveStatus
@@ -82,6 +87,11 @@ interface Actions {
   deleteNotebookForever(id: string): Promise<void>
 
   addPage(afterPageId?: string, paper?: PaperType): void
+  /** Adds a rich-text note after the given page and opens it. Returns its id. */
+  addNote(afterPageId?: string, init?: { title?: string; doc?: NoteNode }): string | null
+  updateNote(pageId: string, doc: NoteNode): void
+  renamePage(pageId: string, title: string): void
+  setPageTags(pageId: string, tags: string[]): void
   duplicatePage(pageId: string): void
   trashPage(pageId: string): void
   restorePage(notebookId: string, pageId: string): void
@@ -127,6 +137,7 @@ export const livePages = (nb: NotebookMeta | undefined) => nb?.pages.filter((p) 
 export const useStore = create<Store>()((set, get) => {
   const saver = new SaveQueue({
     getPage: (id) => get().pages[id],
+    getNote: (id) => get().notes[id],
     getLibrary: () => get().library,
     isBlocked: (id) => get().conflicts.some((c) => c.pageId === id),
     onStatus: (saveStatus) => set({ saveStatus }),
@@ -154,7 +165,36 @@ export const useStore = create<Store>()((set, get) => {
     }))
   }
 
+  const metaOf = (pageId: string): { notebook: NotebookMeta; meta: PageMeta } | undefined => {
+    for (const notebook of get().library?.notebooks ?? []) {
+      const meta = notebook.pages.find((p) => p.id === pageId)
+      if (meta) return { notebook, meta }
+    }
+    return undefined
+  }
+
+  const kindOf = (pageId: string): PageKind => metaOf(pageId)?.meta.kind ?? 'canvas'
+
+  async function ensureNoteLoaded(notebookId: string, pageId: string): Promise<void> {
+    if (get().notes[pageId]) return
+    let note: NoteDoc | null = null
+    try {
+      const result = await window.inkling.loadNote(notebookId, pageId)
+      note = result.note
+      if (result.recovered) set((s) => ({ recovered: [...s.recovered, `note ${pageId.slice(0, 8)}`] }))
+    } catch (err) {
+      set({ saveStatus: { state: 'error', message: `Could not open note: ${(err as Error).message}` } })
+      return
+    }
+    if (!note) {
+      note = createNoteDoc(notebookId, pageId)
+      saver.markNote(pageId)
+    }
+    set((s) => ({ notes: { ...s.notes, [pageId]: note! } }))
+  }
+
   async function ensurePageLoaded(notebookId: string, pageId: string): Promise<void> {
+    if (kindOf(pageId) === 'note') return ensureNoteLoaded(notebookId, pageId)
     if (get().pages[pageId]) return
     let page: PageDoc | null = null
     try {
@@ -186,6 +226,8 @@ export const useStore = create<Store>()((set, get) => {
     activeNotebookId: null,
     activePageId: null,
     pages: {},
+    notes: {},
+    noteRevision: {},
     history: {},
     conflicts: [],
     saveStatus: { state: 'saved' },
@@ -299,8 +341,12 @@ export const useStore = create<Store>()((set, get) => {
       await window.inkling.deleteNotebookFiles(id)
       set((s) => {
         const pages = { ...s.pages }
-        nb.pages.forEach((p) => delete pages[p.id])
-        return { pages }
+        const notes = { ...s.notes }
+        nb.pages.forEach((p) => {
+          delete pages[p.id]
+          delete notes[p.id]
+        })
+        return { pages, notes }
       })
     },
 
@@ -322,11 +368,74 @@ export const useStore = create<Store>()((set, get) => {
       writeLastOpened(nb.id, meta.id)
     },
 
+    addNote(afterPageId, init = {}) {
+      const nb = activeNotebook()
+      if (!nb) return null
+      const meta = createPageMeta(init.title ?? '', 'note')
+      const anchor = afterPageId ?? get().activePageId
+      updateNotebook(nb.id, (n) => {
+        const pages = n.pages.slice()
+        const at = pages.findIndex((p) => p.id === anchor)
+        pages.splice(at === -1 ? pages.length : at + 1, 0, meta)
+        return { ...n, pages, updatedAt: Date.now() }
+      })
+      set((s) => ({ notes: { ...s.notes, [meta.id]: createNoteDoc(nb.id, meta.id, init.doc) }, activePageId: meta.id, selection: [] }))
+      saver.markNote(meta.id)
+      writeLastOpened(nb.id, meta.id)
+      return meta.id
+    },
+
+    updateNote(pageId, doc) {
+      const note = get().notes[pageId]
+      if (!note) return
+      set((s) => ({ notes: { ...s.notes, [pageId]: { ...note, doc, updatedAt: Date.now() } } }))
+      saver.markNote(pageId)
+      touchPage(note.notebookId, pageId)
+    },
+
+    renamePage(pageId, title) {
+      const found = metaOf(pageId)
+      if (!found) return
+      const clean = title.replace(/\s+/g, ' ').trim().slice(0, 200)
+      if (clean === found.meta.title) return
+      updateNotebook(found.notebook.id, (n) => ({
+        ...n,
+        pages: n.pages.map((p) => (p.id === pageId ? { ...p, title: clean, updatedAt: Date.now() } : p))
+      }))
+    },
+
+    setPageTags(pageId, tags) {
+      const found = metaOf(pageId)
+      if (!found) return
+      const clean = [...new Set(tags.map((t) => t.replace(/^#/, '').replace(/,/g, ' ').trim()).filter(Boolean))].slice(0, 50).map((t) => t.slice(0, 40))
+      updateNotebook(found.notebook.id, (n) => ({
+        ...n,
+        pages: n.pages.map((p) => (p.id === pageId ? { ...p, tags: clean, updatedAt: Date.now() } : p))
+      }))
+    },
+
     duplicatePage(pageId) {
       const nb = activeNotebook()
+      const srcMeta = nb?.pages.find((p) => p.id === pageId)
+      if (!nb || !srcMeta) return
+      if (srcMeta.kind === 'note') {
+        const note = get().notes[pageId]
+        if (!note) return
+        const copy = createPageMeta(srcMeta.title ? `${srcMeta.title} (copy)` : '', 'note')
+        copy.tags = [...srcMeta.tags]
+        updateNotebook(nb.id, (n) => {
+          const pages = n.pages.slice()
+          pages.splice(pages.findIndex((p) => p.id === pageId) + 1, 0, copy)
+          return { ...n, pages }
+        })
+        set((s) => ({ notes: { ...s.notes, [copy.id]: createNoteDoc(nb.id, copy.id, structuredClone(note.doc)) }, activePageId: copy.id }))
+        saver.markNote(copy.id)
+        return
+      }
       const src = get().pages[pageId]
-      if (!nb || !src) return
-      const meta = createPageMeta(nb.pages.find((p) => p.id === pageId)?.title ?? '')
+      if (!src) return
+      const meta = createPageMeta(srcMeta.title)
+      meta.tags = [...srcMeta.tags]
       const doc: PageDoc = {
         ...src,
         id: meta.id,
@@ -372,8 +481,10 @@ export const useStore = create<Store>()((set, get) => {
       await window.inkling.deletePageFile(notebookId, pageId)
       set((s) => {
         const pages = { ...s.pages }
+        const notes = { ...s.notes }
         delete pages[pageId]
-        return { pages }
+        delete notes[pageId]
+        return { pages, notes }
       })
     },
 
@@ -411,6 +522,16 @@ export const useStore = create<Store>()((set, get) => {
     },
 
     async resolveConflictWithDisk(pageId) {
+      const note = get().notes[pageId]
+      if (note) {
+        const { note: disk } = await window.inkling.loadNote(note.notebookId, pageId)
+        set((s) => ({
+          conflicts: s.conflicts.filter((c) => c.pageId !== pageId),
+          notes: disk ? { ...s.notes, [pageId]: disk } : s.notes,
+          noteRevision: { ...s.noteRevision, [pageId]: (s.noteRevision[pageId] ?? 0) + 1 }
+        }))
+        return
+      }
       const page = get().pages[pageId]
       if (!page) return
       const { page: disk } = await window.inkling.loadPage(page.notebookId, pageId)
@@ -658,3 +779,5 @@ function writeLastOpened(notebookId: string, pageId: string): void {
 
 export const selectActiveNotebook = (s: Store) => notebookOf(s.library, s.activeNotebookId)
 export const selectActivePage = (s: Store) => (s.activePageId ? s.pages[s.activePageId] : undefined)
+export const selectActiveMeta = (s: Store) => selectActiveNotebook(s)?.pages.find((p) => p.id === s.activePageId)
+export const selectActiveKind = (s: Store) => selectActiveMeta(s)?.kind

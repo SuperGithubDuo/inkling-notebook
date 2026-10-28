@@ -1,7 +1,11 @@
 import {
   LIBRARY_SCHEMA_VERSION,
+  NOTE_SCHEMA_VERSION,
   PAGE_SCHEMA_VERSION,
   type Library,
+  type NoteDoc,
+  type NoteNode,
+  type PageKind,
   type NotebookIcon,
   type NotebookMeta,
   type PageDoc,
@@ -37,9 +41,19 @@ export const PAPER_DEFAULTS: Record<PaperType, Paper> = {
   blank: { type: 'blank', spacing: 31, color: '#e4e7ec' }
 }
 
-export function createPageMeta(title = ''): PageMeta {
+export function createPageMeta(title = '', kind: PageKind = 'canvas'): PageMeta {
   const now = Date.now()
-  return { id: newId(), title, createdAt: now, updatedAt: now, deletedAt: null }
+  return { id: newId(), kind, title, tags: [], createdAt: now, updatedAt: now, deletedAt: null }
+}
+
+export function createNoteDoc(notebookId: string, pageId: string, doc?: NoteNode): NoteDoc {
+  return {
+    schemaVersion: NOTE_SCHEMA_VERSION,
+    id: pageId,
+    notebookId,
+    doc: doc ?? { type: 'doc', content: [{ type: 'paragraph' }] },
+    updatedAt: Date.now()
+  }
 }
 
 export function createPageDoc(

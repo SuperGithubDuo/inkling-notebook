@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import {
   FilePlus2,
+  FileText,
   ChevronDown,
   ChevronLeft,
   CloudCheck,
@@ -26,11 +27,13 @@ import {
   Undo2,
   Waves
 } from 'lucide-react'
-import { HIGHLIGHT_COLORS, INK_COLORS, PEN_SIZES, selectActiveNotebook, selectActivePage, useStore, type Tool } from '@/store/store'
+import { HIGHLIGHT_COLORS, INK_COLORS, PEN_SIZES, selectActiveKind, selectActiveNotebook, selectActivePage, useStore, type Tool } from '@/store/store'
 import { renderPagePng } from '@/canvas/stageRef'
 import { IconButton, InlineEdit, Menu, Popover, Tip, cx } from './ui/primitives'
 import { NotebookIcon } from './NotebookIcon'
 import { ImageButton, ShapePicker } from './ToolControls'
+import { NoteToolbar } from '@/notes/NoteToolbar'
+import { exportActiveNoteMarkdown, importMarkdownNote } from '@/notes/noteActions'
 
 const TOOLS: { tool: Tool; label: string; key: string; icon: typeof PenLine }[] = [
   { tool: 'pen', label: 'Pen', key: 'P', icon: PenLine },
@@ -45,6 +48,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const view = useStore((s) => s.view)
   const notebook = useStore(selectActiveNotebook)
   const page = useStore(selectActivePage)
+  const kind = useStore(selectActiveKind)
   const tool = useStore((s) => s.tool)
   const penColor = useStore((s) => s.penColor)
   const highlightColor = useStore((s) => s.highlightColor)
@@ -59,6 +63,11 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [notice, setNotice] = useState<string | null>(null)
 
   const inNotebook = view.kind === 'notebook' && !!notebook
+  const inNote = inNotebook && kind === 'note'
+  const openMore = (e: React.MouseEvent<HTMLElement>): void => {
+    const r = e.currentTarget.getBoundingClientRect()
+    setMoreMenu({ x: r.left, y: r.bottom + 6 })
+  }
   const colors = tool === 'highlighter' ? HIGHLIGHT_COLORS : INK_COLORS
   const currentColor = tool === 'highlighter' ? highlightColor : penColor
 
@@ -118,8 +127,16 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           ))}
       </div>
 
-      {/* Center: drawing tools */}
-      {inNotebook && (
+      {/* Center: formatting tools for notes, drawing tools for pages */}
+      {inNote && (
+        <>
+          <NoteToolbar />
+          <IconButton label="More" onClick={openMore} data-testid="more-menu">
+            <Ellipsis size={19} />
+          </IconButton>
+        </>
+      )}
+      {inNotebook && !inNote && (
         <div className="flex min-w-0 flex-1 items-center justify-center gap-0.5" role="toolbar" aria-label="Drawing tools">
           {TOOLS.map(({ tool: t, label, key, icon: Icon }) => (
             <IconButton key={t} label={label} hint={key} active={tool === t} onClick={() => st.setTool(t)} data-testid={`tool-${t}`}>
@@ -197,7 +214,11 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           <Sparkles size={15} />
           AI Tutor
         </button>
-        <IconButton label="Export page as PNG" disabled={!inNotebook} onClick={() => void exportPage()}>
+        <IconButton
+          label={inNote ? 'Export note as Markdown' : 'Export page as PNG'}
+          disabled={!inNotebook}
+          onClick={() => void (inNote ? exportActiveNoteMarkdown() : exportPage())}
+        >
           <Share size={18} strokeWidth={1.8} />
         </IconButton>
         <IconButton label="Settings" onClick={onOpenSettings}>
@@ -253,8 +274,12 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
         onClose={() => setMoreMenu(null)}
         items={[
           { label: 'Add page', hint: 'Ctrl+Enter', icon: <FilePlus2 size={15} />, onSelect: () => st.addPage() },
+          { label: 'Add note', icon: <FileText size={15} />, onSelect: () => st.addNote() },
+          { label: 'Import Markdown as note…', icon: <FileText size={15} />, onSelect: () => void importMarkdownNote() },
           { label: 'Toggle page navigator', icon: <PanelLeft size={15} />, onSelect: () => st.toggle('navigatorOpen') },
-          { label: 'Export page as PNG…', icon: <Share size={15} />, onSelect: () => void exportPage() },
+          inNote
+            ? { label: 'Export note as Markdown…', icon: <Share size={15} />, onSelect: () => void exportActiveNoteMarkdown() }
+            : { label: 'Export page as PNG…', icon: <Share size={15} />, onSelect: () => void exportPage() },
           'separator',
           { label: 'Save now', hint: 'Ctrl+S', icon: <CloudCheck size={15} />, onSelect: () => void st.flush() },
           { label: 'Show data folder', icon: <Settings size={15} />, onSelect: () => void window.inkling.showDataFolder() }

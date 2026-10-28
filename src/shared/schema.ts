@@ -5,7 +5,8 @@
  */
 import { z } from 'zod'
 
-export const LIBRARY_SCHEMA_VERSION = 1
+export const LIBRARY_SCHEMA_VERSION = 2
+export const NOTE_SCHEMA_VERSION = 1
 export const PAGE_SCHEMA_VERSION = 2
 
 export const idSchema = z.string().regex(/^[A-Za-z0-9_-]{6,64}$/, 'invalid id')
@@ -109,9 +110,16 @@ export const pageDocSchema = z.object({
   updatedAt: z.number()
 })
 
+/** A notebook page is either a handwriting canvas (incl. PDF pages) or a rich-text note. */
+export const PAGE_KINDS = ['canvas', 'note'] as const
+
+export const tagSchema = z.string().trim().min(1).max(40).regex(/^[^\s#,][^,]*$/, 'invalid tag')
+
 export const pageMetaSchema = z.object({
   id: idSchema,
+  kind: z.enum(PAGE_KINDS),
   title: z.string().max(200),
+  tags: z.array(tagSchema).max(50),
   createdAt: z.number(),
   updatedAt: z.number(),
   deletedAt: z.number().nullable()
@@ -144,6 +152,37 @@ export const librarySchema = z.object({
   folders: z.array(folderSchema)
 })
 
+/**
+ * Rich-text note content: a ProseMirror/TipTap JSON document. The node tree is
+ * validated structurally here (types, attrs, marks, text); the editor schema
+ * enforces which node types may appear where.
+ */
+export interface NoteNode {
+  type: string
+  attrs?: Record<string, unknown>
+  marks?: { type: string; attrs?: Record<string, unknown> }[]
+  text?: string
+  content?: NoteNode[]
+}
+const noteMarkSchema = z.object({ type: z.string().min(1).max(64), attrs: z.record(z.string(), z.unknown()).optional() })
+export const noteNodeSchema: z.ZodType<NoteNode> = z.lazy(() =>
+  z.object({
+    type: z.string().min(1).max(64),
+    attrs: z.record(z.string(), z.unknown()).optional(),
+    marks: z.array(noteMarkSchema).max(32).optional(),
+    text: z.string().max(1_000_000).optional(),
+    content: z.array(noteNodeSchema).max(100_000).optional()
+  })
+)
+
+export const noteDocSchema = z.object({
+  schemaVersion: z.literal(NOTE_SCHEMA_VERSION),
+  id: idSchema,
+  notebookId: idSchema,
+  doc: noteNodeSchema.refine((n) => n.type === 'doc', 'root must be a doc node'),
+  updatedAt: z.number()
+})
+
 export type Paper = z.infer<typeof paperSchema>
 export type PaperType = Paper['type']
 export type Point = z.infer<typeof pointSchema>
@@ -156,6 +195,8 @@ export type CanvasObject = z.infer<typeof canvasObjectSchema>
 export type ObjectType = CanvasObject['type']
 export type PageDoc = z.infer<typeof pageDocSchema>
 export type PageMeta = z.infer<typeof pageMetaSchema>
+export type PageKind = PageMeta['kind']
+export type NoteDoc = z.infer<typeof noteDocSchema>
 export type NotebookIcon = (typeof NOTEBOOK_ICONS)[number]
 export type NotebookMeta = z.infer<typeof notebookMetaSchema>
 export type Folder = z.infer<typeof folderSchema>

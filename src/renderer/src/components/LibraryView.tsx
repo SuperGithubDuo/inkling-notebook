@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { RotateCcw, Star, Trash2, Users } from 'lucide-react'
-import type { NotebookMeta, PageDoc } from '@shared/schema'
-import { createPageDoc } from '@shared/factory'
+import type { NoteDoc, NotebookMeta, PageDoc } from '@shared/schema'
+import { createNoteDoc, createPageDoc } from '@shared/factory'
+import { NoteThumbnail } from '@/notes/NoteThumbnail'
 import { livePages, useStore, type Section } from '@/store/store'
 import { PageThumbnail } from '@/canvas/PageThumbnail'
 import { NotebookIcon } from './NotebookIcon'
@@ -38,9 +39,38 @@ function usePreview(notebookId: string, pageId: string | undefined): PageDoc | u
 const when = (t: number): string =>
   new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: new Date(t).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' })
 
-function Preview({ notebookId, pageId }: { notebookId: string; pageId?: string }) {
+function useNotePreview(notebookId: string, pageId: string | undefined): NoteDoc | undefined {
+  const cached = useStore((s) => (pageId ? s.notes[pageId] : undefined))
+  const [loaded, setLoaded] = useState<NoteDoc>()
+  useEffect(() => {
+    if (cached || !pageId) return
+    let live = true
+    window.inkling.loadNote(notebookId, pageId).then(
+      (r) => live && setLoaded(r.note ?? createNoteDoc(notebookId, pageId)),
+      () => undefined
+    )
+    return () => {
+      live = false
+    }
+  }, [cached, notebookId, pageId])
+  return cached ?? loaded
+}
+
+function NotePreview({ notebookId, pageId, title }: { notebookId: string; pageId: string; title: string }) {
+  const note = useNotePreview(notebookId, pageId)
+  return note ? <NoteThumbnail note={note} title={title} /> : <div className="h-full w-full bg-[#f7f7f8]" />
+}
+
+function CanvasPreview({ notebookId, pageId }: { notebookId: string; pageId?: string }) {
   const page = usePreview(notebookId, pageId)
   return page ? <PageThumbnail page={page} /> : <div className="h-full w-full bg-[#f7f7f8]" />
+}
+
+/** Preview of a page of either kind. */
+function Preview({ notebookId, pageId }: { notebookId: string; pageId?: string }) {
+  const meta = useStore((s) => s.library?.notebooks.find((n) => n.id === notebookId)?.pages.find((p) => p.id === pageId))
+  if (meta?.kind === 'note') return <NotePreview notebookId={notebookId} pageId={meta.id} title={meta.title} />
+  return <CanvasPreview notebookId={notebookId} pageId={pageId} />
 }
 
 function NotebookCard({ nb }: { nb: NotebookMeta }) {
@@ -139,7 +169,7 @@ export function LibraryView({ section }: { section: Section }) {
             <span className="mt-2 flex items-center gap-1.5 text-[13px] font-medium">
               <NotebookIcon color={nb.color} icon={nb.icon} size={12} />
               <span className="truncate">
-                {nb.name} · {index + 1}
+                {page.title || `${nb.name} · ${index + 1}`}
               </span>
             </span>
             <span className="text-[11.5px] text-ink-3">Edited {when(page.updatedAt)}</span>
@@ -183,7 +213,7 @@ export function LibraryView({ section }: { section: Section }) {
                   <Preview notebookId={nb.id} pageId={page.id} />
                 </span>
               }
-              title={page.title || 'Untitled page'}
+              title={page.title || (page.kind === 'note' ? 'Untitled note' : 'Untitled page')}
               detail={`Page from ${nb.name} · deleted ${when(page.deletedAt!)}`}
               onRestore={() => st.restorePage(nb.id, page.id)}
               onDelete={() => void st.deletePageForever(nb.id, page.id)}

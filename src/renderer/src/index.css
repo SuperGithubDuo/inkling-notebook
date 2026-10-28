@@ -52,7 +52,7 @@ textarea {
   user-select: text;
 }
 
-:focus-visible {
+:focus-visible:not(input):not(textarea) {
   outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
   outline-offset: 2px;
 }

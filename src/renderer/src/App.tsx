@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LoaderCircle, TriangleAlert } from 'lucide-react'
-import { selectActivePage, useStore } from './store/store'
+import { selectActiveKind, selectActiveMeta, selectActivePage, useStore } from './store/store'
 import { useShortcuts } from './hooks/useShortcuts'
 import { TopBar } from './components/TopBar'
 import { Sidebar } from './components/Sidebar'
@@ -10,6 +10,7 @@ import { FloatingToolbar } from './components/FloatingToolbar'
 import { LibraryView } from './components/LibraryView'
 import { SettingsDialog } from './components/SettingsDialog'
 import { PageCanvas } from './canvas/PageCanvas'
+import { NoteEditor } from './notes/NoteEditor'
 
 const TUTOR_INPUT_ID = 'tutor-input'
 
@@ -20,6 +21,7 @@ export function App() {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const navigatorOpen = useStore((s) => s.navigatorOpen)
   const tutorOpen = useStore((s) => s.tutorOpen)
+  const activeKind = useStore(selectActiveKind)
   const [settings, setSettings] = useState(false)
   const openSettings = useCallback(() => setSettings(true), [])
 
@@ -62,7 +64,7 @@ export function App() {
             <main className="relative min-w-0 flex-1 bg-paper">
               <Notices />
               <ActivePage />
-              <FloatingToolbar onAskAi={askAi} />
+              <FloatingToolbar onAskAi={askAi} compact={activeKind === 'note'} />
             </main>
           </>
         ) : (
@@ -81,7 +83,10 @@ export function App() {
 
 function ActivePage() {
   const page = useStore(selectActivePage)
-  if (!page) {
+  const meta = useStore(selectActiveMeta)
+  const note = useStore((s) => (s.activePageId ? s.notes[s.activePageId] : undefined))
+  if (meta?.kind === 'note' && note) return <NoteEditor key={note.id} pageId={note.id} />
+  if (meta?.kind === 'note' || !page) {
     return (
       <div className="flex h-full items-center justify-center text-ink-3">
         <LoaderCircle className="animate-spin" />

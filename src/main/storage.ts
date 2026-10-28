@@ -16,19 +16,22 @@ import { promises as fs } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { z, type ZodType } from 'zod'
-import { migratePage } from '@shared/migrate'
+import { migrateLibrary, migratePage } from '@shared/migrate'
 import {
   assetNameSchema,
   LIBRARY_SCHEMA_VERSION,
   idSchema,
   librarySchema,
+  noteDocSchema,
   pageDocSchema,
   type Library,
+  type NoteDoc,
   type PageDoc
 } from '@shared/schema'
 import type { SaveResult } from '@shared/ipc'
 
 const pageFileSchema = z.preprocess(migratePage, pageDocSchema) as unknown as ZodType<PageDoc>
+const libraryFileSchema = z.preprocess(migrateLibrary, librarySchema) as unknown as ZodType<Library>
 
 export const MAX_IMAGE_BYTES = 30 * 1024 * 1024
 
@@ -72,7 +75,7 @@ export class Storage {
   }
 
   async loadLibrary(): Promise<{ library: Library | null; recovered: boolean }> {
-    const { data, recovered } = await this.readValidated(this.libraryPath(), librarySchema)
+    const { data, recovered } = await this.readValidated(this.libraryPath(), libraryFileSchema)
     return { library: data, recovered }
   }
 
@@ -87,6 +90,19 @@ export class Storage {
 
   savePage(page: PageDoc): Promise<SaveResult> {
     return this.writeValidated(this.pagePath(page.notebookId, page.id), pageDocSchema, page)
+  }
+
+  notePath(notebookId: string, pageId: string): string {
+    return join(this.notebookDir(notebookId), 'notes', `${idSchema.parse(pageId)}.json`)
+  }
+
+  async loadNote(notebookId: string, pageId: string): Promise<{ note: NoteDoc | null; recovered: boolean }> {
+    const { data, recovered } = await this.readValidated(this.notePath(notebookId, pageId), noteDocSchema)
+    return { note: data, recovered }
+  }
+
+  saveNote(note: NoteDoc): Promise<SaveResult> {
+    return this.writeValidated(this.notePath(note.notebookId, note.id), noteDocSchema, note)
   }
 
   assetPath(notebookId: string, asset: string): string {
@@ -125,13 +141,15 @@ export class Storage {
     await this.enqueue(target, () => this.atomicWrite(target, bytes))
   }
 
+  /** Deletes a page's content file, whichever kind it is. */
   async deletePageFile(notebookId: string, pageId: string): Promise<void> {
-    const file = this.pagePath(notebookId, pageId)
-    await this.enqueue(file, async () => {
-      await fs.rm(file, { force: true })
-      await fs.rm(`${file}.bak`, { force: true })
-      this.stamps.delete(file)
-    })
+    for (const file of [this.pagePath(notebookId, pageId), this.notePath(notebookId, pageId)]) {
+      await this.enqueue(file, async () => {
+        await fs.rm(file, { force: true })
+        await fs.rm(`${file}.bak`, { force: true })
+        this.stamps.delete(file)
+      })
+    }
   }
 
   async deleteNotebookFiles(notebookId: string): Promise<void> {

@@ -1,4 +1,4 @@
-import type { Library, PageDoc } from './schema'
+import type { Library, NoteDoc, PageDoc } from './schema'
 
 /** Outcome of a save. `conflict` means the file changed on disk since we last
  * read it; our version was written to a side-by-side conflict copy instead. */
@@ -15,6 +15,8 @@ export const ASSET_SCHEME = 'inkling-asset'
 export const assetUrl = (notebookId: string, asset: string): string => `${ASSET_SCHEME}://asset/${notebookId}/${asset}`
 
 export type LoadPageResult = { page: PageDoc | null; recovered: boolean }
+export type LoadNoteResult = { note: NoteDoc | null; recovered: boolean }
+export type ImportMarkdownResult = { name: string; markdown: string } | { canceled: true } | { error: string }
 
 /** The complete, deliberately narrow API exposed to the renderer. */
 export interface InklingApi {
@@ -22,6 +24,12 @@ export interface InklingApi {
   saveLibrary(library: Library): Promise<SaveResult>
   loadPage(notebookId: string, pageId: string): Promise<LoadPageResult>
   savePage(page: PageDoc): Promise<SaveResult>
+  loadNote(notebookId: string, pageId: string): Promise<LoadNoteResult>
+  saveNote(note: NoteDoc): Promise<SaveResult>
+  /** Picks a .md file; local images it references are copied into the notebook. */
+  importMarkdown(notebookId: string): Promise<ImportMarkdownResult>
+  /** Saves Markdown; images it references are copied into a sibling folder. */
+  exportMarkdown(suggestedName: string, markdown: string): Promise<{ saved: boolean; path?: string; error?: string }>
   deletePageFile(notebookId: string, pageId: string): Promise<void>
   deleteNotebookFiles(notebookId: string): Promise<void>
   /** Opens a file picker and copies the chosen image into the notebook. */
@@ -41,6 +49,10 @@ export const IPC = {
   saveLibrary: 'library:save',
   loadPage: 'page:load',
   savePage: 'page:save',
+  loadNote: 'note:load',
+  saveNote: 'note:save',
+  importMarkdown: 'markdown:import',
+  exportMarkdown: 'markdown:export',
   deletePageFile: 'page:delete',
   deleteNotebookFiles: 'notebook:delete',
   importImage: 'image:import',

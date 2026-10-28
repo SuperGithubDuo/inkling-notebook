@@ -3,13 +3,14 @@
  * debounce later the latest snapshot is written. `flush()` writes everything
  * immediately (Ctrl+S, window close). Failed saves stay dirty and are retried.
  */
-import type { Library, PageDoc } from '@shared/schema'
+import type { Library, NoteDoc, PageDoc } from '@shared/schema'
 import type { SaveResult } from '@shared/ipc'
 
 export type SaveStatus = { state: 'saved' | 'saving' | 'error'; message?: string }
 
 interface Deps {
   getPage(pageId: string): PageDoc | undefined
+  getNote(pageId: string): NoteDoc | undefined
   getLibrary(): Library | null
   /** Pages that must not be written (unresolved external conflict). */
   isBlocked(pageId: string): boolean
@@ -23,6 +24,7 @@ const RETRY_DELAY = 3000
 
 export class SaveQueue {
   private dirtyPages = new Set<string>()
+  private dirtyNotes = new Set<string>()
   private libraryDirty = false
   private timer: ReturnType<typeof setTimeout> | null = null
   private running: Promise<void> | null = null
@@ -30,11 +32,16 @@ export class SaveQueue {
   constructor(private readonly deps: Deps) {}
 
   get hasPending(): boolean {
-    return this.dirtyPages.size > 0 || this.libraryDirty
+    return this.dirtyPages.size > 0 || this.dirtyNotes.size > 0 || this.libraryDirty
   }
 
   markPage(pageId: string): void {
     this.dirtyPages.add(pageId)
+    this.schedule(PAGE_DELAY)
+  }
+
+  markNote(pageId: string): void {
+    this.dirtyNotes.add(pageId)
     this.schedule(PAGE_DELAY)
   }
 
@@ -45,6 +52,7 @@ export class SaveQueue {
 
   forgetPage(pageId: string): void {
     this.dirtyPages.delete(pageId)
+    this.dirtyNotes.delete(pageId)
   }
 
   async flush(): Promise<void> {
@@ -84,6 +92,8 @@ export class SaveQueue {
 
     const pageIds = [...this.dirtyPages]
     this.dirtyPages.clear()
+    const noteIds = [...this.dirtyNotes]
+    this.dirtyNotes.clear()
     const libraryDirty = this.libraryDirty
     this.libraryDirty = false
 
@@ -95,6 +105,19 @@ export class SaveQueue {
         if (result.status === 'error') {
           errors.push(result.message)
           this.dirtyPages.add(id)
+        } else if (result.status === 'conflict') {
+          this.deps.onConflict(id, result.conflictPath)
+        }
+      })
+    )
+    await Promise.all(
+      noteIds.map(async (id) => {
+        const note = this.deps.getNote(id)
+        if (!note || this.deps.isBlocked(id)) return
+        const result = await safeCall(() => window.inkling.saveNote(note))
+        if (result.status === 'error') {
+          errors.push(result.message)
+          this.dirtyNotes.add(id)
         } else if (result.status === 'conflict') {
           this.deps.onConflict(id, result.conflictPath)
         }

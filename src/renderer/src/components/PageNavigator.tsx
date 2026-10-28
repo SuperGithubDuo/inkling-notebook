@@ -1,9 +1,11 @@
 import { useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, Copy, FilePlus2, Grid3x3, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, Copy, FilePlus2, FileText, Grid3x3, Import, Plus, Trash2 } from 'lucide-react'
 import { PAPER_TYPES, type PaperType } from '@shared/schema'
 import { PAGE_SIZES, pageSizeOf, type PageSize } from '@shared/factory'
 import { livePages, selectActiveNotebook, useStore } from '@/store/store'
 import { PageThumbnail } from '@/canvas/PageThumbnail'
+import { NoteThumbnail } from '@/notes/NoteThumbnail'
+import { importMarkdownNote } from '@/notes/noteActions'
 import { Menu, Popover, Tip, cx, type MenuEntry } from './ui/primitives'
 
 export const PAPER_LABEL: Record<PaperType, string> = { grid: 'Grid', lined: 'Lined', dotted: 'Dotted', blank: 'Blank' }
@@ -21,8 +23,10 @@ function PaperSwatch({ type }: { type: PaperType }) {
 export function PageNavigator() {
   const notebook = useStore(selectActiveNotebook)
   const pages = useStore((s) => s.pages)
+  const notes = useStore((s) => s.notes)
   const activePageId = useStore((s) => s.activePageId)
-  const { selectPage, addPage, duplicatePage, trashPage, movePage, setPaper, setPageSize } = useStore.getState()
+  const { selectPage, addPage, addNote, duplicatePage, trashPage, movePage, setPaper, setPageSize } = useStore.getState()
+  const [importMenu, setImportMenu] = useState<{ x: number; y: number } | null>(null)
 
   const [menu, setMenu] = useState<{ pageId: string; at: { x: number; y: number } } | null>(null)
   const [paperOpen, setPaperOpen] = useState(false)
@@ -30,23 +34,30 @@ export function PageNavigator() {
   const paperBtn = useRef<HTMLButtonElement>(null)
 
   const list = livePages(notebook)
-  const activeDoc = activePageId ? pages[activePageId] : undefined
+  const activeIsNote = list.find((p) => p.id === activePageId)?.kind === 'note'
+  const activeDoc = activePageId && !activeIsNote ? pages[activePageId] : undefined
   const activePaper = activeDoc?.paper.type
   const activeSize = activeDoc ? pageSizeOf(activeDoc) : null
 
   const menuItems = (pageId: string): MenuEntry[] => {
     const i = list.findIndex((p) => p.id === pageId)
+    const isNote = list[i]?.kind === 'note'
     return [
       { label: 'New page after', icon: <FilePlus2 size={15} />, onSelect: () => addPage(pageId) },
+      { label: 'New note after', icon: <FileText size={15} />, onSelect: () => addNote(pageId) },
       { label: 'Duplicate', icon: <Copy size={15} />, onSelect: () => duplicatePage(pageId) },
       'separator',
-      ...PAPER_TYPES.map((t) => ({
-        label: `${PAPER_LABEL[t]} paper`,
-        icon: <PaperSwatch type={t} />,
-        hint: pages[pageId]?.paper.type === t ? '✓' : undefined,
-        onSelect: () => setPaper(pageId, t)
-      })),
-      'separator',
+      ...(isNote
+        ? []
+        : [
+            ...PAPER_TYPES.map((t) => ({
+              label: `${PAPER_LABEL[t]} paper`,
+              icon: <PaperSwatch type={t} />,
+              hint: pages[pageId]?.paper.type === t ? '✓' : undefined,
+              onSelect: () => setPaper(pageId, t)
+            })),
+            'separator' as const
+          ]),
       { label: 'Move up', icon: <ArrowUp size={15} />, disabled: i <= 0, onSelect: () => movePage(pageId, i - 1) },
       { label: 'Move down', icon: <ArrowDown size={15} />, disabled: i >= list.length - 1, onSelect: () => movePage(pageId, i + 1) },
       'separator',
@@ -60,16 +71,17 @@ export function PageNavigator() {
         <button
           ref={paperBtn}
           type="button"
-          onClick={() => setPaperOpen((o) => !o)}
+          onClick={() => !activeIsNote && setPaperOpen((o) => !o)}
+          disabled={activeIsNote}
           className="group relative flex h-8 w-full items-center justify-between rounded-[10px] border border-line bg-white px-2.5 text-[12.5px] text-ink-2 hover:border-[#d9dbe0]"
           aria-label="Paper and size for this page"
         >
           <span className="flex items-center gap-1.5">
-            <Grid3x3 size={14} />
-            {activePaper ? PAPER_LABEL[activePaper] : 'Paper'}
+            {activeIsNote ? <FileText size={14} /> : <Grid3x3 size={14} />}
+            {activeIsNote ? 'Note' : activePaper ? PAPER_LABEL[activePaper] : 'Paper'}
           </span>
           <ChevronDown size={13} className="text-ink-3" />
-          <Tip text="Paper and page size" side="bottom" />
+          <Tip text={activeIsNote ? 'Notes have no paper settings' : 'Paper and page size'} side="bottom" />
         </button>
         <Popover anchor={paperBtn} open={paperOpen} onClose={() => setPaperOpen(false)} align="start" className="w-48 p-1.5">
           <div className="px-2 pt-1 pb-1 text-[11px] font-medium tracking-wide text-ink-3 uppercase">Paper</div>
@@ -131,7 +143,8 @@ export function PageNavigator() {
         }}
       >
         {list.map((meta, i) => {
-          const doc = pages[meta.id]
+          const doc = meta.kind === 'note' ? undefined : pages[meta.id]
+          const note = meta.kind === 'note' ? notes[meta.id] : undefined
           const active = meta.id === activePageId
           return (
             <div key={meta.id} className="relative mb-3">
@@ -140,7 +153,8 @@ export function PageNavigator() {
                 type="button"
                 data-testid="page-thumb"
                 draggable
-                aria-label={`Page ${i + 1}`}
+                aria-label={`${meta.kind === 'note' ? 'Note' : 'Page'} ${i + 1}${meta.title ? `: ${meta.title}` : ''}`}
+                data-kind={meta.kind}
                 aria-current={active ? 'page' : undefined}
                 onClick={() => selectPage(meta.id)}
                 onContextMenu={(e) => {
@@ -167,8 +181,17 @@ export function PageNavigator() {
                 )}
               >
                 <span className="block" style={{ aspectRatio: doc ? `${doc.width} / ${doc.height}` : '1240 / 1754' }}>
-                  {doc ? <PageThumbnail page={doc} /> : <span className="block h-full w-full animate-pulse bg-[#f4f4f6]" />}
+                  {note ? (
+                    <NoteThumbnail note={note} title={meta.title} />
+                  ) : doc ? (
+                    <PageThumbnail page={doc} />
+                  ) : (
+                    <span className="block h-full w-full animate-pulse bg-[#f4f4f6]" />
+                  )}
                 </span>
+                {meta.kind === 'note' && (
+                  <span className="absolute right-1 bottom-1 rounded bg-lav-soft px-1 text-[8.5px] font-semibold tracking-wide text-lav uppercase">Note</span>
+                )}
                 <span
                   className={cx(
                     'absolute top-1 left-1.5 text-[10.5px] font-medium',
@@ -191,11 +214,39 @@ export function PageNavigator() {
           aria-label="Add page"
         >
           <Plus size={22} strokeWidth={1.6} />
-          <Tip text="Add page" side="top" />
+          <Tip text="Add handwritten page" side="top" />
         </button>
+        <div className="mt-1.5 flex gap-1">
+          <button
+            type="button"
+            data-testid="add-note"
+            onClick={() => addNote(list.at(-1)?.id)}
+            className="flex h-7 flex-1 items-center justify-center gap-1 rounded-[8px] border border-line bg-white/60 text-[11.5px] text-ink-2 hover:bg-white hover:text-ink"
+          >
+            <FileText size={12} /> Note
+          </button>
+          <button
+            type="button"
+            data-testid="import-menu"
+            aria-label="Import"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setImportMenu({ x: r.left, y: r.bottom + 4 })
+            }}
+            className="group relative flex h-7 w-8 items-center justify-center rounded-[8px] border border-line bg-white/60 text-ink-2 hover:bg-white hover:text-ink"
+          >
+            <Import size={13} />
+            <Tip text="Import" side="top" />
+          </button>
+        </div>
       </div>
 
       <Menu at={menu?.at ?? null} items={menu ? menuItems(menu.pageId) : []} onClose={() => setMenu(null)} />
+      <Menu
+        at={importMenu}
+        onClose={() => setImportMenu(null)}
+        items={[{ label: 'Markdown file as note…', icon: <FileText size={15} />, onSelect: () => void importMarkdownNote() }]}
+      />
     </div>
   )
 }

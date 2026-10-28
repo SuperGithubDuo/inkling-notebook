@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { livePages, selectActiveNotebook, useStore, type Tool } from '@/store/store'
+import { livePages, selectActiveKind, selectActiveNotebook, useStore, type Tool } from '@/store/store'
 import { activeCanvas } from '@/canvas/stageRef'
 
 const isEditable = (t: EventTarget | null): boolean =>
@@ -29,6 +29,14 @@ export function useShortcuts(): void {
       if (isEditable(e.target)) return
       const inNotebook = s.view.kind === 'notebook'
       if (!inNotebook) return
+      if (selectActiveKind(s) === 'note') {
+        // Notes handle their own editing keys; only page navigation applies here.
+        if (mod && key === 'enter') {
+          e.preventDefault()
+          s.addPage()
+        }
+        return
+      }
       const hasSel = s.selection.length > 0
 
       if (mod) {
