@@ -22,10 +22,13 @@ export const activeCanvas: { handle: CanvasHandle | null } = { handle: null }
  * PNG data URL at page resolution × pixelRatio. Used for PNG export (whole
  * page) and for giving an assistant an image of a selected region.
  */
-export async function renderPageRegionPng(page: PageDoc, region: Rect, pixelRatio = 2): Promise<string | null> {
+/** Konva name of preview-only content that page renders must leave out. */
+export const PREVIEW_NAME = 'inkling-preview'
+
+export async function renderPageRegionPng(page: PageDoc, region: Rect, pixelRatio = 2, pad = 12): Promise<string | null> {
   const world = activeCanvas.handle?.world()
   if (!world) return null
-  const r = clipRect(region, page)
+  const r = clipRect(region, page, pad)
   const out = document.createElement('canvas')
   out.width = Math.max(1, Math.round(r.width * pixelRatio))
   out.height = Math.max(1, Math.round(r.height * pixelRatio))
@@ -47,7 +50,10 @@ export async function renderPageRegionPng(page: PageDoc, region: Rect, pixelRati
   const stage = new Konva.Stage({ container: holder, width: page.width, height: page.height })
   const layer = new Konva.Layer()
   stage.add(layer)
-  layer.add(world.clone({ x: 0, y: 0, scaleX: 1, scaleY: 1 }))
+  const copy = world.clone({ x: 0, y: 0, scaleX: 1, scaleY: 1 })
+  // Proposed (not yet approved) AI marks are not part of the page.
+  copy.find(`.${PREVIEW_NAME}`).forEach((n) => n.destroy())
+  layer.add(copy)
   try {
     const content = layer.toCanvas({ x: r.x, y: r.y, width: r.width, height: r.height, pixelRatio })
     ctx.drawImage(content, 0, 0, out.width, out.height)
@@ -62,8 +68,7 @@ export function renderPagePng(page: PageDoc, pixelRatio = 2): Promise<string | n
 }
 
 /** A region padded a little and clipped to the page: exactly what renderPageRegionPng draws. */
-export function clipRect(region: Rect, page: PageDoc): Rect {
-  const pad = 12
+export function clipRect(region: Rect, page: { width: number; height: number }, pad = 12): Rect {
   const x = Math.max(0, Math.floor(region.x - pad))
   const y = Math.max(0, Math.floor(region.y - pad))
   const right = Math.min(page.width, Math.ceil(region.x + region.width + pad))

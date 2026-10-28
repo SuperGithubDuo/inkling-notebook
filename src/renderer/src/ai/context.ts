@@ -81,6 +81,20 @@ async function renderRegion(page: PageDoc, rect: Rect): Promise<{ image: Encoded
   return { image, region: { pageId: page.id, rect: r, width: image.width, height: image.height } }
 }
 
+/**
+ * Re-renders exactly the page rectangle an earlier request showed (for
+ * example, to mark up the work a chat answer was about).
+ */
+export async function captureRegion(pageId: string, rect: Rect): Promise<{ image: EncodedImage; region: ImageRegion } | null> {
+  const page = useStore.getState().pages[pageId]
+  if (!page) return null
+  const pixelRatio = Math.min(2, Math.max(0.5, MAX_IMAGE_EDGE / Math.max(rect.width, rect.height)))
+  const png = await renderPageRegionPng(page, rect, pixelRatio, 0)
+  if (!png) return null
+  const image = await encodeJpeg(png)
+  return { image, region: { pageId, rect: clipRect(rect, page, 0), width: image.width, height: image.height } }
+}
+
 const clip = (s: string, max: number): string => (s.length > max ? `${s.slice(0, max)}\n[…truncated]` : s)
 
 export function hasSelection(): boolean {

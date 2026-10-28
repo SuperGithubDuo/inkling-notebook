@@ -32,7 +32,7 @@ export function App() {
   useShortcuts()
   useEffect(() => {
     // Wait for the UI font so canvas text is measured with the right metrics.
-    void document.fonts.load('16px Inter').finally(() => useStore.getState().init())
+    void Promise.all([document.fonts.load('16px Inter'), document.fonts.load('500 16px Caveat')]).finally(() => useStore.getState().init())
   }, [])
 
   if (!ready) {

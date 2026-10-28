@@ -3,8 +3,8 @@ import type { TextObject } from '@shared/schema'
 export const FONT_FAMILY: Record<TextObject['font'], string> = {
   sans: 'Inter, ui-sans-serif, system-ui, sans-serif',
   serif: 'Georgia, "Times New Roman", serif',
-  // Reserved for AI handwriting-style annotations (Phase 5).
-  hand: 'Inter, ui-sans-serif, system-ui, sans-serif'
+  // Handwriting style, used for the AI tutor's notes on the page.
+  hand: 'Caveat, Inter, ui-sans-serif, system-ui, sans-serif'
 }
 
 export const TEXT_DEFAULT_SIZE = 26

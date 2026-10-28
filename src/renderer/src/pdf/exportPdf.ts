@@ -21,6 +21,8 @@ export interface ExportDeps {
   readAsset: (notebookId: string, asset: string) => Promise<Uint8Array>
   /** Font for text annotations (TTF/OTF/WOFF). Falls back to Helvetica. */
   fontBytes?: () => Promise<Uint8Array>
+  /** Handwriting font for 'hand' text (the AI tutor's notes). Falls back to the main font. */
+  handFontBytes?: () => Promise<Uint8Array>
   /** Converts GIF/WebP images to PNG (needs a browser canvas). */
   toPng?: (bytes: Uint8Array) => Promise<Uint8Array>
 }
@@ -128,8 +130,17 @@ class Painter {
     /** Displayed page height in points. */
     private readonly height: number,
     private readonly font: PDFFont,
-    private readonly embedImage: (o: ImageObject) => Promise<PDFImage>
+    private readonly embedImage: (o: ImageObject) => Promise<PDFImage>,
+    private readonly handFont: { font: PDFFont; chars: Set<number> } | null = null
   ) {}
+
+  /** The handwriting font for 'hand' text when it has every character needed. */
+  private fontFor(t: TextObject): PDFFont {
+    if (t.font !== 'hand' || !this.handFont) return this.font
+    const { font, chars } = this.handFont
+    for (const ch of t.text) if (ch !== '\n' && !chars.has(ch.codePointAt(0)!)) return this.font
+    return font
+  }
 
   /** SVG path data in page units → drawn in place. */
   private path(d: string, options: Parameters<PDFPage['drawSvgPath']>[1]): void {
@@ -160,12 +171,13 @@ class Painter {
   text(t: TextObject): void {
     const size = t.fontSize / this.k
     const lineHeight = t.fontSize * TEXT_LINE_HEIGHT
-    const lines = wrapText(t.text, t.width, (s) => this.font.widthOfTextAtSize(s, t.fontSize))
+    const font = this.fontFor(t)
+    const lines = wrapText(t.text, t.width, (s) => font.widthOfTextAtSize(s, t.fontSize))
     lines.forEach((line, i) => {
       if (!line) return
       // Konva centres each line in its line box; the baseline sits ~0.35em below the middle.
       const baseline = t.y + i * lineHeight + lineHeight / 2 + t.fontSize * 0.35
-      this.page.drawText(line, { x: t.x / this.k, y: this.height - baseline / this.k, size, font: this.font, color: hexColor(t.color) })
+      this.page.drawText(line, { x: t.x / this.k, y: this.height - baseline / this.k, size, font, color: hexColor(t.color) })
     })
   }
 
@@ -222,6 +234,15 @@ export async function buildNotebookPdf(notebook: NotebookMeta, deps: ExportDeps)
   } catch {
     font = await out.embedFont(StandardFonts.Helvetica)
   }
+  let handFont: { font: PDFFont; chars: Set<number> } | null = null
+  try {
+    if (deps.handFontBytes) {
+      const f = await out.embedFont(await deps.handFontBytes(), { subset: true })
+      handFont = { font: f, chars: new Set(f.getCharacterSet()) }
+    }
+  } catch {
+    handFont = null
+  }
 
   const sources = new Map<string, Promise<PDFDocument>>()
   const source = (asset: string): Promise<PDFDocument> => {
@@ -271,7 +292,7 @@ export async function buildNotebookPdf(notebook: NotebookMeta, deps: ExportDeps)
       page = out.addPage([doc.width / k, doc.height / k])
       size = enterDisplaySpace(page)
     }
-    const painter = new Painter(page, k, size.height, font, embedImage)
+    const painter = new Painter(page, k, size.height, font, embedImage, handFont)
     if (!doc.background) painter.paper(doc)
     for (const o of doc.objects) await painter.object(o)
     page.pushOperators(popGraphicsState())

@@ -29,6 +29,9 @@ import { IconButton, cx } from './ui/primitives'
 import { ErrorCard } from '@/ai/ErrorCard'
 import { PracticeView } from '@/ai/PracticeView'
 import { usePractice } from '@/ai/practiceStore'
+import { useMarkup } from '@/ai/markupStore'
+import { MarkupView } from '@/ai/MarkupView'
+import type { ImageRegion } from '@/ai/context'
 
 const TABS: { id: TutorTab; label: string }[] = [
   { id: 'chat', label: 'Chat' },
@@ -91,7 +94,7 @@ export function TutorPanel({ onOpenSettings, inputId }: { onOpenSettings: () => 
       </div>
 
       {tab === 'chat' && <ChatView onOpenSettings={onOpenSettings} inputId={inputId} />}
-      {tab === 'page' && <Placeholder icon={PenLine} title="Corrections on your page" body="Select your handwritten work with the lasso, then ask the tutor to mark it up. You preview every change and approve it before it is added to your page." onOpenSettings={onOpenSettings} />}
+      {tab === 'page' && <MarkupView onOpenSettings={onOpenSettings} />}
       {tab === 'practice' && <PracticeView onOpenSettings={onOpenSettings} />}
 
       <p className="flex items-center gap-1.5 px-5 pb-3.5 text-[12px] text-ink-3">
@@ -99,15 +102,6 @@ export function TutorPanel({ onOpenSettings, inputId }: { onOpenSettings: () => 
         Sent to Google Gemini only when you ask.
       </p>
     </aside>
-  )
-}
-
-function Placeholder({ icon: Icon, title, body, onOpenSettings }: { icon: typeof Sparkles; title: string; body: string; onOpenSettings: () => void }) {
-  return (
-    <div className="thin-scroll flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-6 pb-3">
-      <Intro icon={Icon} title={title} body={body} />
-      <AiStatusCard onOpenSettings={onOpenSettings} />
-    </div>
   )
 }
 
@@ -218,7 +212,9 @@ function ChatView({ onOpenSettings, inputId }: { onOpenSettings: () => void; inp
           </>
         ) : (
           <div className="flex flex-col gap-3.5">
-            {messages.map((m) => (m.role === 'user' ? <UserMessage key={m.id} m={m} /> : <ModelMessage key={m.id} m={m} onOpenSettings={onOpenSettings} />))}
+            {messages.map((m, i) =>
+              m.role === 'user' ? <UserMessage key={m.id} m={m} /> : <ModelMessage key={m.id} m={m} region={messages[i - 1]?.region} onOpenSettings={onOpenSettings} />
+            )}
           </div>
         )}
       </div>
@@ -268,7 +264,7 @@ function UserMessage({ m }: { m: ChatMessage }) {
   )
 }
 
-function ModelMessage({ m, onOpenSettings }: { m: ChatMessage; onOpenSettings: () => void }) {
+function ModelMessage({ m, region, onOpenSettings }: { m: ChatMessage; region?: ImageRegion; onOpenSettings: () => void }) {
   const [copied, setCopied] = useState(false)
   return (
     <div data-testid="tutor-message" data-role="model" data-status={m.status} className="pr-2">
@@ -303,6 +299,19 @@ function ModelMessage({ m, onOpenSettings }: { m: ChatMessage; onOpenSettings: (
           >
             <Copy size={12} /> {copied ? 'Copied' : 'Copy'}
           </button>
+          {region && (
+            <button
+              type="button"
+              data-testid="tutor-show-on-page"
+              onClick={() => {
+                useTutor.getState().setTab('page')
+                void useMarkup.getState().start({ guidance: m.text, region })
+              }}
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-lav hover:bg-lav-softer"
+            >
+              <PenLine size={12} /> Show this on my page
+            </button>
+          )}
           {m.model && <span className="ml-auto">{modelLabel(m.model)}</span>}
         </div>
       )}

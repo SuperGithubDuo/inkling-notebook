@@ -18,6 +18,7 @@ import type { CanvasObject, Point, ShapeKind, StrokeObject, TextObject } from '@
 import { useStore, type ShapeTool } from '@/store/store'
 import type { CanvasCommand } from './commands'
 import { selectionBounds } from './commands'
+import { MarkupPreview } from '@/ai/MarkupPreview'
 import { eraserHits, lassoSelects, objectAt, pointInRect, textBounds, TEXT_LINE_HEIGHT, type Vec } from './geometry'
 import { outlinePath } from './ink'
 import { paperStyle } from './paper'
@@ -825,6 +826,7 @@ export function PageCanvas({ pageId }: { pageId: string }) {
                 {erasePreview.extra.map((s) => (
                   <StrokeNode key={s.id} stroke={s} />
                 ))}
+                <MarkupPreview pageId={page.id} notebookId={page.notebookId} scale={cam.scale} />
                 {groupMode && selBox && (
                   <Group
                     ref={selGroup}

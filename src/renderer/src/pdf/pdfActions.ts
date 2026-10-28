@@ -1,6 +1,7 @@
 /** PDF import/export actions used from menus. */
 import { selectActiveNotebook, useStore } from '@/store/store'
 import interWoff from '@fontsource/inter/files/inter-latin-400-normal.woff?url'
+import caveatWoff from '@fontsource/caveat/files/caveat-latin-500-normal.woff?url'
 import { loadPdf, readAssetBytes, readPdfPages } from './pdfjs'
 import { buildNotebookPdf } from './exportPdf'
 
@@ -49,6 +50,7 @@ export async function exportActiveNotebookPdf(): Promise<void> {
       getPage: async (id) => useStore.getState().pages[id] ?? (await window.inkling.loadPage(notebook.id, id)).page,
       readAsset: readAssetBytes,
       fontBytes: async () => new Uint8Array(await (await fetch(interWoff)).arrayBuffer()),
+      handFontBytes: async () => new Uint8Array(await (await fetch(caveatWoff)).arrayBuffer()),
       toPng
     })
     const result = await window.inkling.exportPdf(notebook.name, bytes)

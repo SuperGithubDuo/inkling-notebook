@@ -30,7 +30,7 @@ const env = {
   INKLING_TEST_HOOKS: '1',
   INKLING_GEMINI_BASE_URL: fake.url,
   // Pacing is unit-tested; here requests follow each other within milliseconds.
-  INKLING_AI_LIMITS: JSON.stringify({ minIntervalMs: 0, perMinute: 1000 })
+  INKLING_AI_LIMITS: JSON.stringify({ minIntervalMs: 0, perMinute: 1000, duplicateWindowMs: 0 })
 }
 delete env.NODE_OPTIONS
 delete env.ELECTRON_RUN_AS_NODE
@@ -87,6 +87,10 @@ const waitAnswer = async (status = 'done') => {
     status,
     { timeout: 15000 }
   )
+}
+const waitSavedPage = async () => {
+  await sleep(200)
+  await win.waitForSelector('[data-testid="save-status"][data-state="saved"]', { timeout: 6000 })
 }
 const ask = async (text) => {
   await win.fill('[data-testid="tutor-input"]', text)
@@ -419,6 +423,131 @@ try {
   sent = lastGenerate()
   assert.match(textIn(sent), /Create 1 practice problem very similar to the problem in my work above/)
   step('"Try a similar problem" generates practice from the work')
+
+  // ============================================= page: the primary objective
+  console.log('page')
+  // A fresh page: handwrite a problem with a mistake, select it, ask for an explanation.
+  const pagesBefore = (await lib()).notebooks.find((n) => n.name === 'Math Notes').pages.filter((p) => !p.deletedAt).length
+  await win.click('[data-testid="add-page"]')
+  await waitSavedPage()
+  const pages = (await lib()).notebooks.find((n) => n.name === 'Math Notes').pages.filter((p) => !p.deletedAt)
+  assert.equal(pages.length, pagesBefore + 1)
+  const workPageId = pages.at(-1).id
+  const pageObjects = () => win.evaluate((id) => window.__inkling.notebookContext.page(id).then((p) => p.objects), workPageId)
+  await win.click('[data-testid="tool-pen"]')
+  await write('2x+3=11', 140, 180, 46)
+  await write('2x=7', 140, 260, 46)
+  await write('x=3.5', 140, 340, 46)
+  await sleep(300)
+  const userObjects = await pageObjects()
+  await win.click('[data-testid="tool-lasso"]')
+  await drawPage([[110, 150], [520, 150], [520, 420], [110, 420], [110, 152]])
+  await win.waitForSelector('[data-testid="selection-toolbar"]')
+  await win.click('[data-testid="ask-ai-selection"]')
+  await ask('Can you explain where I went wrong?')
+  await waitAnswer()
+  assert.equal(imagesIn(lastGenerate()).length, 1)
+  step('handwrote a problem, selected it, Gemini explained it')
+
+  await win.click('[data-testid="tutor-tab-practice"]')
+  await win.click('[data-testid="practice-generate"]')
+  await win.waitForFunction(() => document.querySelector('[data-testid="practice-position"]')?.textContent === '1 / 2')
+  assert.equal(imagesIn(lastGenerate()).length, 1, 'practice based on the selected work')
+  step('generated practice problems from the selection')
+
+  // "Show this on my page" from the chat answer.
+  await win.click('[data-testid="tutor-tab-chat"]')
+  await win.locator('[data-testid="tutor-show-on-page"]').last().click()
+  await win.waitForSelector('[data-testid="markup-proposal"]')
+  sent = lastGenerate()
+  assert.equal(sent.task, 'annotate')
+  assert.equal(sent.body.generationConfig.responseMimeType, 'application/json')
+  assert.ok(sent.body.generationConfig.responseJsonSchema.properties.annotations)
+  assert.match(textIn(sent), /<tutor_explanation>[\s\S]*x = 4[\s\S]*<\/tutor_explanation>/)
+  const [markImg] = imagesIn(sent)
+  const markSize = await imageSize(markImg.inlineData.data)
+  assert.ok(Math.max(markSize.w, markSize.h) <= 1024)
+  assert.equal(await win.locator('[data-testid="markup-item"]').count(), 4)
+  assert.equal((await pageObjects()).length, userObjects.length, 'nothing added before approval')
+  await win.screenshot({ path: join(shots, 'p4-markup-preview.png') })
+  step(`Gemini proposed 4 marks from a ${markSize.w}×${markSize.h} image; previewed, page unchanged`)
+
+  // Leave out one mark, then approve.
+  await win.locator('[data-testid="markup-item"]').nth(0).uncheck()
+  await win.getByRole('button', { name: 'Add 3 to my page' }).click()
+  await win.waitForSelector('[data-testid="markup-applied"]')
+  await waitSavedPage()
+  let after = await pageObjects()
+  const added = after.slice(userObjects.length)
+  assert.ok(added.length >= 4, `${added.length} objects added`)
+  assert.ok(added.every((o) => o.author === 'ai'))
+  assert.deepEqual(after.slice(0, userObjects.length), userObjects, "the student's own ink is untouched")
+  const notes = added.filter((o) => o.type === 'text')
+  assert.deepEqual(notes.map((t) => t.text).sort(), ['11 − 3 = 8, so x = 4', '2x = 8'])
+  const inkRight = Math.max(...userObjects.flatMap((o) => o.points.map((p) => p[0])))
+  assert.ok(notes.every((t) => t.font === 'hand' && t.x > inkRight), 'notes written beside the work, not over it')
+  assert.equal(added.filter((o) => o.type === 'stroke' && o.color === '#1f9a5a').length, 0, 'the unticked ✓ was left out')
+  // Saved to disk in the page file.
+  const nbId = (await lib()).notebooks.find((n) => n.name === 'Math Notes').id
+  const onDisk = JSON.parse(await readFile(join(dataDir, 'notebooks', nbId, 'pages', `${workPageId}.json`), 'utf8'))
+  assert.equal(onDisk.objects.length, after.length)
+  await win.click('[data-testid="tool-lasso"]')
+  await win.keyboard.press('Escape')
+  await win.screenshot({ path: join(shots, 'p4-markup-applied.png') })
+  step('approved 3 of 4 marks: added as AI-authored objects beside the work, saved')
+
+  // One undo removes them all; redo brings them back.
+  await win.keyboard.press('Control+z')
+  await sleep(200)
+  assert.equal((await pageObjects()).length, userObjects.length)
+  await win.keyboard.press('Control+Shift+z')
+  await sleep(200)
+  after = await pageObjects()
+  assert.equal(after.length, userObjects.length + added.length)
+  step('one undo removes the whole correction; redo restores it')
+
+  // The correction is editable like any object: select it and delete it.
+  const corr = after.find((o) => o.type === 'text' && o.text === '2x = 8')
+  await win.click('[data-testid="tool-text"]')
+  const sf = await surface()
+  await win.mouse.click(sf.x + (corr.x + 12) * sf.k, sf.y + (corr.y + corr.fontSize * 0.6) * sf.k)
+  await win.waitForSelector('textarea')
+  await win.keyboard.press('End')
+  await win.keyboard.type(' (fixed)')
+  await win.click('[data-testid="tool-pen"]')
+  await waitSavedPage()
+  const edited = (await pageObjects()).find((o) => o.id === corr.id)
+  assert.equal(edited.text, '2x = 8 (fixed)', 'AI correction is editable with the text tool')
+  step('the correction is editable with the ordinary text tool')
+
+  // Discard leaves the page alone; a bad markup is rejected.
+  await win.click('[data-testid="markup-view"] >> text=Mark up something else')
+  await win.click('[data-testid="tool-lasso"]')
+  await drawPage([[110, 150], [520, 150], [520, 420], [110, 420], [110, 152]])
+  await win.waitForSelector('[data-testid="selection-toolbar"]')
+  const kept = (await pageObjects()).length
+  await win.click('[data-testid="markup-start"]')
+  await win.waitForSelector('[data-testid="markup-proposal"]')
+  assert.match(textIn(lastGenerate()), /Check my work in the image and mark it up\./)
+  await win.click('[data-testid="markup-discard"]')
+  assert.equal((await pageObjects()).length, kept)
+  fake.reply({ json: { transcription: 'x', summary: 'bad', annotations: [{ kind: 'scribble', box_2d: [1, 2] }] } })
+  await win.click('[data-testid="markup-start"]')
+  await win.locator('[data-testid="tutor-error"][data-code="bad_response"]').waitFor()
+  assert.equal((await pageObjects()).length, kept)
+  step('discarding or a malformed proposal never changes the page')
+
+  // The preview is not part of the page image sent to Gemini.
+  await win.click('[data-testid="markup-start"]')
+  await win.waitForSelector('[data-testid="markup-proposal"]')
+  const markupImage = imagesIn(lastGenerate())[0].inlineData.data
+  await win.click('[data-testid="tutor-tab-chat"]')
+  await ask('And now?')
+  await waitAnswer()
+  assert.equal(imagesIn(lastGenerate())[0].inlineData.data, markupImage, 'preview marks are not in the image sent to Gemini')
+  await win.click('[data-testid="tutor-tab-page"]')
+  await win.click('[data-testid="markup-discard"]')
+  step('while a proposal is previewed, images sent to Gemini show only the page, not the preview')
 
   assert.deepEqual(cspViolations, [])
   step('no Content-Security-Policy violations')

@@ -233,7 +233,7 @@ export class AiService {
       return this.withSuggestion(model, { code: cd.reason, message: cd.reason === 'rate_limited' ? `Gemini's free tier needs a short pause. Try again in ${wait} seconds.` : cd.message, retryAfter: wait })
     }
     if (hash && this.last && this.last.hash === hash && !this.last.failed && now - this.last.at < this.limits.duplicateWindowMs) {
-      return { code: 'duplicate', message: 'That request was just sent. Its answer is above.' }
+      return { code: 'duplicate', message: 'You just sent this exact request, and its answer is already shown. Change something and try again.' }
     }
     while (this.started.length && now - this.started[0]! >= 60_000) this.started.shift()
     const lastStart = this.started[this.started.length - 1]

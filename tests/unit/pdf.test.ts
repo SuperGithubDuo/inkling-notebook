@@ -105,6 +105,21 @@ describe('annotated PDF export', () => {
     expect((await textItems(bytes, 1)).items.map((i) => i.str)).toContain('Plain')
   })
 
+  it('exports the tutor’s handwriting-style notes in Caveat, falling back for missing characters', async () => {
+    const nb = createNotebook('AI', '#3b6fe0', 'book')
+    const doc = createPageDoc(nb.id, nb.pages[0]!.id)
+    doc.objects = [
+      { ...base, id: 'text-000005', author: 'ai', type: 'text', x: 10, y: 10, width: 400, text: '2x = 8', color: '#e5484d', fontSize: 26, font: 'hand' },
+      { ...base, id: 'text-000006', author: 'ai', type: 'text', x: 10, y: 60, width: 400, text: 'so x = 4 → √', color: '#6d63f0', fontSize: 26, font: 'hand' }
+    ]
+    const font = (f: string) => () => readFile(join(root, 'node_modules/@fontsource', f)).then((b) => new Uint8Array(b))
+    const { bytes } = await buildNotebookPdf(nb, { getPage: () => doc, readAsset: async () => new Uint8Array(), fontBytes: font('inter/files/inter-latin-400-normal.woff'), handFontBytes: font('caveat/files/caveat-latin-500-normal.woff') })
+    const pdf = await PDFDocument.load(bytes)
+    const fonts = pdf.context.enumerateIndirectObjects().map(([, o]) => String((o as { get?: (k: unknown) => unknown }).get?.(pdf.context.obj('BaseFont')) ?? '')).filter(Boolean)
+    expect(fonts.some((f) => /Caveat/i.test(f))).toBe(true)
+    expect((await textItems(bytes, 1)).items.map((i) => i.str).join(' ')).toContain('2x = 8')
+  })
+
   it('refuses a notebook with nothing exportable', async () => {
     const nb = createNotebook('Notes only', '#3b6fe0', 'book')
     nb.pages = [createPageMeta('n', 'note')]
