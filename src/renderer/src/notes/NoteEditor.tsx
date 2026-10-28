@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { Placeholder } from '@tiptap/extensions'
 import type { EditorView } from '@tiptap/pm/view'
+import { Selection, TextSelection } from '@tiptap/pm/state'
 import { X } from 'lucide-react'
 import type { NoteNode } from '@shared/schema'
 import { assetUrl } from '@shared/ipc'
@@ -88,6 +89,16 @@ function NoteEditorInner({ pageId }: { pageId: string }) {
           if (event.key === 'Enter') useNoteEditor.setState({ pickerChoose: true })
           // Enter, arrows etc. wait for the picker instead of editing the note.
           if (event.key.length > 1) return true
+        }
+        // Ctrl/⌘+Home/End jump to the start/end of the note. The browser's own
+        // handling stays inside a table cell when the caret is in a table.
+        if ((event.ctrlKey || event.metaKey) && (event.key === 'End' || event.key === 'Home')) {
+          const end = event.key === 'End'
+          const sel = event.shiftKey
+            ? TextSelection.create(view.state.doc, view.state.selection.anchor, Selection[end ? 'atEnd' : 'atStart'](view.state.doc).head)
+            : Selection[end ? 'atEnd' : 'atStart'](view.state.doc)
+          view.dispatch(view.state.tr.setSelection(sel).scrollIntoView())
+          return true
         }
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
           event.preventDefault()

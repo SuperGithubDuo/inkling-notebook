@@ -139,6 +139,10 @@ assert.equal(find(note.doc, 'taskItem').length, 1)
 assert.equal(find(note.doc, 'inlineMath')[0].attrs.latex, 'x = -2 \\text{ or } x = -3')
 assert.equal(find(note.doc, 'table').length, 1)
 assert.ok(find(note.doc, 'text').some((t) => t.marks?.some((m) => m.type === 'link' && m.attrs.href === 'https://example.com/quadratics')))
+const lastBlock = note.doc.content.at(-1)
+assert.equal(lastBlock.type, 'paragraph', 'Ctrl+End leaves the table: the link is in a paragraph after it')
+assert.equal(lastBlock.content[0].text, 'Reference')
+assert.deepEqual(find(find(note.doc, 'table')[0], 'text').map((t) => t.text), ['x', 'f(x)'], 'nothing typed into the table by mistake')
 step('created a note with heading, bold, lists, checklist, formula, table, link and tags')
 
 // Check the box, edit a formula by clicking it, then undo/redo inside the editor.
