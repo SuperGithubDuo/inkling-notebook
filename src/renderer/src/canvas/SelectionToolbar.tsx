@@ -1,4 +1,5 @@
-import { Copy, CopyPlus, Scissors, Trash2 } from 'lucide-react'
+import { Copy, CopyPlus, Scissors, Sparkles, Trash2 } from 'lucide-react'
+import { openTutorChat } from '@/ai/tutorStore'
 import { useStore } from '@/store/store'
 import { IconButton } from '@/components/ui/primitives'
 import type { Rect } from './geometry'
@@ -8,7 +9,7 @@ import type { Camera, Size } from './viewport'
 export function SelectionToolbar({ box, cam, view, below }: { box: Rect; cam: Camera; view: Size; below?: boolean }) {
   const st = useStore.getState()
   const count = useStore((s) => s.selection.length)
-  const width = 196
+  const width = 236
   const left = Math.max(8, Math.min(view.width - width - 8, cam.x + (box.x + box.width / 2) * cam.scale - width / 2))
   const above = cam.y + box.y * cam.scale - 58
   const under = Math.min(view.height - 60, cam.y + (box.y + box.height) * cam.scale + 16)
@@ -22,6 +23,9 @@ export function SelectionToolbar({ box, cam, view, below }: { box: Rect; cam: Ca
       onPointerDown={(e) => e.stopPropagation()}
     >
       <span className="px-2 text-[12px] font-medium text-ink-3 tabular-nums">{count}</span>
+      <IconButton label="Ask AI about this" onClick={openTutorChat} data-testid="ask-ai-selection" className="!text-lav hover:!bg-lav-softer">
+        <Sparkles size={16} />
+      </IconButton>
       <IconButton label="Copy" hint="Ctrl+C" onClick={st.copySelection}>
         <Copy size={16} />
       </IconButton>

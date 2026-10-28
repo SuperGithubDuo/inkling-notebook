@@ -54,7 +54,11 @@ const testHooks = process.env.INKLING_TEST_HOOKS === '1'
 // Tests point the SDK at a local fake Gemini server; ignored in normal runs.
 const geminiBaseUrl = testHooks ? process.env.INKLING_GEMINI_BASE_URL : undefined
 const aiConfig = new AiConfig(configDir, safeStorage)
+// Acceptance tests send many requests in a few seconds; they may relax the
+// free-tier pacing (which unit tests cover). Ignored in normal runs.
+const testLimits = testHooks && process.env.INKLING_AI_LIMITS ? (JSON.parse(process.env.INKLING_AI_LIMITS) as Record<string, number>) : undefined
 const ai = new AiService({
+  limits: testLimits,
   config: aiConfig,
   makeProvider: (apiKey) => new GeminiProvider({ apiKey, baseUrl: geminiBaseUrl }),
   emit: (event) => {

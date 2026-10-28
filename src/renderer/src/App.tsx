@@ -12,10 +12,10 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { SearchPalette } from './components/SearchPalette'
 import { PageCanvas } from './canvas/PageCanvas'
 import { useAi } from './ai/aiStore'
+import { TUTOR_INPUT_ID, openTutorChat } from './ai/tutorStore'
 import { ConsentDialog } from './ai/ConsentDialog'
 import { NoteEditor } from './notes/NoteEditor'
 
-const TUTOR_INPUT_ID = 'tutor-input'
 
 export function App() {
   const ready = useStore((s) => s.ready)
@@ -52,10 +52,7 @@ export function App() {
     )
   }
 
-  const askAi = (): void => {
-    if (!useStore.getState().tutorOpen) useStore.getState().toggle('tutorOpen')
-    requestAnimationFrame(() => document.getElementById(TUTOR_INPUT_ID)?.scrollIntoView())
-  }
+  const askAi = (): void => openTutorChat()
 
   return (
     <div className="flex h-full flex-col bg-white">

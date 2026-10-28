@@ -170,7 +170,11 @@ export function AiSettings() {
             type="checkbox"
             data-testid="ai-consent-toggle"
             checked={status.consented}
-            onChange={async (e) => setStatus(await window.inkling.ai.setConsent(e.target.checked))}
+            onChange={async (e) => {
+              const checked = e.target.checked
+              setStatus({ ...status, consented: checked })
+              setStatus(await window.inkling.ai.setConsent(checked))
+            }}
             className="mt-0.5 accent-[var(--color-accent)]"
           />
           <span className="text-ink-2">

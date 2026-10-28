@@ -61,8 +61,8 @@ export function renderPagePng(page: PageDoc, pixelRatio = 2): Promise<string | n
   return renderPageRegionPng(page, { x: 0, y: 0, width: page.width, height: page.height }, pixelRatio)
 }
 
-/** A region padded a little and clipped to the page. */
-function clipRect(region: Rect, page: PageDoc): Rect {
+/** A region padded a little and clipped to the page: exactly what renderPageRegionPng draws. */
+export function clipRect(region: Rect, page: PageDoc): Rect {
   const pad = 12
   const x = Math.max(0, Math.floor(region.x - pad))
   const y = Math.max(0, Math.floor(region.y - pad))

@@ -81,3 +81,40 @@ textarea {
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------- AI tutor answers */
+.tutor-md > :first-child { margin-top: 0; }
+.tutor-md > :last-child { margin-bottom: 0; }
+.tutor-md p { margin: 0 0 0.6em; }
+.tutor-md h4 { margin: 0.9em 0 0.35em; font-size: 14.5px; font-weight: 600; }
+.tutor-md h5 { margin: 0.8em 0 0.3em; font-size: 13.5px; font-weight: 600; }
+.tutor-md ul, .tutor-md ol { margin: 0 0 0.6em; padding-left: 1.35em; }
+.tutor-md ul { list-style: disc; }
+.tutor-md ol { list-style: decimal; }
+.tutor-md li { margin: 0.2em 0; }
+.tutor-md li > p { margin: 0; }
+.tutor-md strong { font-weight: 600; }
+.tutor-md code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 0.9em; background: #f2f3f6; border-radius: 4px; padding: 0.05em 0.3em; }
+.tutor-md pre { margin: 0 0 0.6em; padding: 8px 10px; background: #f6f7f9; border-radius: 8px; overflow-x: auto; }
+.tutor-md pre code { background: none; padding: 0; }
+.tutor-md blockquote { margin: 0 0 0.6em; padding-left: 10px; border-left: 3px solid var(--color-line); color: var(--color-ink-2); }
+.tutor-md hr { margin: 0.8em 0; border: 0; border-top: 1px solid var(--color-line); }
+.tutor-md a { color: var(--color-accent); text-decoration: underline; }
+.tutor-md .tutor-math-block { margin: 0.5em 0 0.7em; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.tutor-md .katex { font-size: 1.08em; }
+.tutor-md .katex-display { margin: 0; }
+.tutor-md .tutor-table { overflow-x: auto; margin: 0 0 0.6em; }
+.tutor-md table { border-collapse: collapse; font-size: 12.5px; }
+.tutor-md th, .tutor-md td { border: 1px solid var(--color-line); padding: 3px 7px; text-align: left; }
+.tutor-md th { background: #f6f7f9; font-weight: 600; }
+
+.tutor-caret { display: inline-block; width: 7px; height: 14px; margin-left: 2px; vertical-align: -2px; border-radius: 1px; background: var(--color-lav); animation: tutor-blink 1s steps(2) infinite; }
+@keyframes tutor-blink { 50% { opacity: 0; } }
+.tutor-dots { display: inline-flex; gap: 3px; }
+.tutor-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--color-lav); opacity: 0.35; animation: tutor-dot 1.2s infinite ease-in-out; }
+.tutor-dots i:nth-child(2) { animation-delay: 0.15s; }
+.tutor-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes tutor-dot { 40% { opacity: 1; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) {
+  .tutor-caret, .tutor-dots i { animation: none; opacity: 1; }
+}

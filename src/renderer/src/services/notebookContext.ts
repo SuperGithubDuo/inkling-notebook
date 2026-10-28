@@ -18,7 +18,7 @@ import { noteToPlainText } from '@shared/noteText'
 import { useStore, type RunResult } from '@/store/store'
 import type { CanvasCommand } from '@/canvas/commands'
 import { objectBounds, unionRects, type Rect } from '@/canvas/geometry'
-import { renderPageRegionPng } from '@/canvas/stageRef'
+import { clipRect, renderPageRegionPng } from '@/canvas/stageRef'
 import { docToMarkdown, markdownToDoc } from '@/notes/format'
 import { currentPageRefs, resolvePage } from '@/notes/pages'
 
@@ -42,6 +42,8 @@ export interface SelectionContext {
   bounds: Rect
   /** PNG data URL of that region as displayed (ink, shapes, PDF), for vision models. */
   image: string | null
+  /** The page rectangle the image shows (the bounds plus a small margin). */
+  imageRect: Rect
 }
 
 async function pageDoc(pageId: string, notebookId: string): Promise<PageDoc | null> {
@@ -83,7 +85,7 @@ export const notebookContext = {
   },
 
   /** The lasso selection on the open page, or null if nothing is selected. */
-  async selection(): Promise<SelectionContext | null> {
+  async selection(options: { pixelRatio?: number } = {}): Promise<SelectionContext | null> {
     const s = useStore.getState()
     const page = s.activePageId ? s.pages[s.activePageId] : undefined
     if (!page || !s.selection.length) return null
@@ -91,7 +93,7 @@ export const notebookContext = {
     const objects = page.objects.filter((o) => ids.has(o.id))
     const bounds = unionRects(objects.map(objectBounds))
     if (!bounds) return null
-    return { pageId: page.id, objects, bounds, image: await renderPageRegionPng(page, bounds) }
+    return { pageId: page.id, objects, bounds, imageRect: clipRect(bounds, page), image: await renderPageRegionPng(page, bounds, options.pixelRatio) }
   },
 
   /**
