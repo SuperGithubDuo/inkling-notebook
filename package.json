@@ -9,13 +9,14 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "node tests/e2e/phase1.e2e.mjs && node tests/e2e/phase2.e2e.mjs && node tests/e2e/regressions.e2e.mjs && node tests/e2e/phase3.e2e.mjs",
+    "test:e2e": "node tests/e2e/phase1.e2e.mjs && node tests/e2e/phase2.e2e.mjs && node tests/e2e/regressions.e2e.mjs && node tests/e2e/phase3.e2e.mjs && node tests/e2e/phase4.e2e.mjs",
     "test:e2e:phase2": "node tests/e2e/phase2.e2e.mjs"
   },
   "author": "",
   "license": "UNLICENSED",
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
+    "@google/genai": "^2.31.0",
     "@pdf-lib/fontkit": "^1.1.1",
     "@tiptap/core": "^3.32.0",
     "@tiptap/extension-image": "^3.32.0",

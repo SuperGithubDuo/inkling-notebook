@@ -3,7 +3,9 @@
  * connection yet, so every AI control is visibly marked as unavailable and
  * nothing from the notebook leaves this computer.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { modelLabel } from '@shared/ai'
+import { useAi } from '@/ai/aiStore'
 import { BookOpen, ChartColumn, Lightbulb, Mic, PenLine, Send, Settings, Sparkles, Target, X } from 'lucide-react'
 import { useStore } from '@/store/store'
 import { IconButton, Tip, cx } from './ui/primitives'
@@ -85,16 +87,7 @@ export function TutorPanel({ onOpenSettings, inputId }: { onOpenSettings: () => 
           <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-2">{body}</p>
         </div>
 
-        <div data-testid="ai-status" className="mt-5 rounded-[14px] border border-[#e4e2fb] bg-lav-softer p-4">
-          <div className="flex items-center gap-2 text-[13px] font-semibold text-ink">
-            <span className="h-2 w-2 rounded-full bg-[#c4c7d0]" />
-            Not connected
-          </div>
-          <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-2">
-            The tutor will run on Claude through the Anthropic API, using a key you provide in Settings. That connection
-            is not built yet, so these controls are inactive and nothing on your pages is sent anywhere.
-          </p>
-        </div>
+        <AiStatusCard onOpenSettings={onOpenSettings} />
 
         <div className="mt-auto pt-5">
           <div className="grid grid-cols-3 gap-2.5">
@@ -139,5 +132,31 @@ export function TutorPanel({ onOpenSettings, inputId }: { onOpenSettings: () => 
         Your notes stay on this computer.
       </p>
     </aside>
+  )
+}
+
+function AiStatusCard({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const status = useAi((s) => s.status)
+  useEffect(() => {
+    void useAi.getState().load()
+  }, [])
+  const ready = !!status?.hasKey && status.consented
+  return (
+    <div data-testid="ai-status" data-state={ready ? 'ready' : 'setup'} className="mt-5 rounded-[14px] border border-[#e4e2fb] bg-lav-softer p-4">
+      <div className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+        <span className={ready ? 'h-2 w-2 rounded-full bg-[#2fae66]' : 'h-2 w-2 rounded-full bg-[#c4c7d0]'} />
+        {ready ? `Connected · ${modelLabel(status!.model)}` : 'Set up the AI Tutor'}
+      </div>
+      <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-2">
+        {ready
+          ? 'Runs on Google Gemini’s free tier. Only what you ask about is sent.'
+          : 'Add a free Google Gemini API key in Settings. Nothing from your notebook is sent until you allow it and ask.'}
+      </p>
+      {!ready && (
+        <button type="button" onClick={onOpenSettings} className="mt-2.5 rounded-lg bg-white px-3 py-1.5 text-[12.5px] font-medium text-accent shadow-[0_0_0_1px_#e4e2fb] hover:bg-accent-softer">
+          Open AI settings
+        </button>
+      )}
+    </div>
   )
 }

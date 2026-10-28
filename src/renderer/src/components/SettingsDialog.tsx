@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react'
-import { FolderOpen, Sparkles, X } from 'lucide-react'
+import { FolderOpen, X } from 'lucide-react'
 import { useStore } from '@/store/store'
 import { IconButton } from './ui/primitives'
+import { AiSettings } from '@/ai/AiSettings'
+import { useAi } from '@/ai/aiStore'
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const dataDir = useStore((s) => s.dataDir)
@@ -9,7 +11,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     ref.current?.focus()
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape' && !useAi.getState().consentOpen) onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -17,7 +19,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1f2430]/25" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} tabIndex={-1} role="dialog" aria-modal aria-label="Settings" className="animate-pop w-[520px] rounded-2xl bg-white p-6 shadow-pop outline-none">
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal aria-label="Settings" className="animate-pop thin-scroll max-h-[calc(100vh-48px)] w-[560px] max-w-[calc(100vw-32px)] overflow-x-hidden overflow-y-auto rounded-2xl bg-white p-6 shadow-pop outline-none">
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-[18px] font-semibold">Settings</h2>
           <IconButton label="Close settings" onClick={onClose}>
@@ -43,16 +45,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </section>
 
         <section>
-          <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-ink-3 uppercase">AI Tutor</h3>
-          <div className="rounded-xl border border-[#e4e2fb] bg-lav-softer p-4">
-            <div className="flex items-center gap-2 text-[14px] font-medium">
-              <Sparkles size={15} className="text-lav" /> Anthropic Claude — not configured
-            </div>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">
-              API key, model choice and context permissions will live here once the AI connection is implemented. Keys
-              will be stored by the desktop process, never in page files or the interface.
-            </p>
-          </div>
+          <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-ink-3 uppercase">AI Tutor · Google Gemini</h3>
+          <AiSettings />
         </section>
       </div>
     </div>

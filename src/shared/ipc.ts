@@ -1,5 +1,6 @@
 import type { Library, NoteDoc, PageDoc } from './schema'
 import type { Connections, GraphData, SearchHit } from './search'
+import type { AiEvent, AiModelId, AiRequest, AiStartResult, AiStatus, AiTestResult, AiError, ModelAvailability } from './ai'
 
 /** Outcome of a save. `conflict` means the file changed on disk since we last
  * read it; our version was written to a side-by-side conflict copy instead. */
@@ -56,6 +57,20 @@ export interface InklingApi {
   /** Pages and links for the knowledge graph. */
   graph(options?: { notebookId?: string }): Promise<GraphData>
   showDataFolder(): Promise<void>
+  /** AI tutor. The key stays in the main process; only its last 4 characters come back. */
+  ai: {
+    status(): Promise<AiStatus>
+    setKey(key: string): Promise<AiStatus | { error: string }>
+    clearKey(): Promise<AiStatus>
+    setModel(model: AiModelId): Promise<AiStatus>
+    setConsent(accepted: boolean): Promise<AiStatus>
+    test(): Promise<AiTestResult>
+    refreshModels(): Promise<{ ok: true; models: ModelAvailability[] } | { ok: false; error: AiError }>
+    start(request: AiRequest): Promise<AiStartResult>
+    cancel(requestId: string): Promise<void>
+    /** Subscribes to streamed answers; returns an unsubscribe function. */
+    onEvent(handler: (event: AiEvent) => void): () => void
+  }
   /** Main asks the renderer to flush pending saves before the window closes. */
   onFlushRequest(handler: () => Promise<void>): void
 }
@@ -81,6 +96,16 @@ export const IPC = {
   connections: 'index:connections',
   graph: 'index:graph',
   showDataFolder: 'app:show-data-folder',
+  aiStatus: 'ai:status',
+  aiSetKey: 'ai:set-key',
+  aiClearKey: 'ai:clear-key',
+  aiSetModel: 'ai:set-model',
+  aiSetConsent: 'ai:set-consent',
+  aiTest: 'ai:test',
+  aiRefreshModels: 'ai:refresh-models',
+  aiStart: 'ai:start',
+  aiCancel: 'ai:cancel',
+  aiEvent: 'ai:event',
   flushRequest: 'app:flush-request',
   flushDone: 'app:flush-done'
 } as const

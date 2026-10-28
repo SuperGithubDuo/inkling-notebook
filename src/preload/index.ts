@@ -23,6 +23,22 @@ const api: InklingApi = {
   connections: (pageId) => ipcRenderer.invoke(IPC.connections, pageId),
   graph: (options) => ipcRenderer.invoke(IPC.graph, options ?? {}),
   showDataFolder: () => ipcRenderer.invoke(IPC.showDataFolder),
+  ai: {
+    status: () => ipcRenderer.invoke(IPC.aiStatus),
+    setKey: (key) => ipcRenderer.invoke(IPC.aiSetKey, key),
+    clearKey: () => ipcRenderer.invoke(IPC.aiClearKey),
+    setModel: (model) => ipcRenderer.invoke(IPC.aiSetModel, model),
+    setConsent: (accepted) => ipcRenderer.invoke(IPC.aiSetConsent, accepted),
+    test: () => ipcRenderer.invoke(IPC.aiTest),
+    refreshModels: () => ipcRenderer.invoke(IPC.aiRefreshModels),
+    start: (request) => ipcRenderer.invoke(IPC.aiStart, request),
+    cancel: (requestId) => ipcRenderer.invoke(IPC.aiCancel, requestId),
+    onEvent: (handler) => {
+      const listener = (_e: unknown, event: Parameters<typeof handler>[0]): void => handler(event)
+      ipcRenderer.on(IPC.aiEvent, listener)
+      return () => ipcRenderer.removeListener(IPC.aiEvent, listener)
+    }
+  },
   onFlushRequest: (handler) => {
     ipcRenderer.on(IPC.flushRequest, () => {
       void handler().finally(() => ipcRenderer.send(IPC.flushDone))

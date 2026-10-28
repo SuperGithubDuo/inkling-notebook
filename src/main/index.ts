@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { promises as fs } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
 import { z } from 'zod'
@@ -9,6 +9,10 @@ import { IMAGE_MIME, MAX_IMAGE_BYTES, MAX_PDF_BYTES, Storage } from './storage'
 import { exportMarkdownWithImages, importMarkdownImages } from './markdownFiles'
 import { SearchIndex } from './searchIndex'
 import type { Library } from '@shared/schema'
+import { aiRequestSchema, apiKeySchema, modelIdSchema } from '@shared/ai'
+import { AiConfig } from './ai/config'
+import { AiService } from './ai/service'
+import { GeminiProvider } from './ai/gemini'
 
 const MAX_MARKDOWN_BYTES = 10 * 1024 * 1024
 
@@ -42,6 +46,22 @@ async function buildIndex(library: Library): Promise<void> {
   }
 }
 let mainWindow: BrowserWindow | null = null
+
+// AI settings and the encrypted key live in the app's private config folder,
+// never in the notebook library.
+const configDir = process.env.INKLING_CONFIG_DIR ?? app.getPath('userData')
+const testHooks = process.env.INKLING_TEST_HOOKS === '1'
+// Tests point the SDK at a local fake Gemini server; ignored in normal runs.
+const geminiBaseUrl = testHooks ? process.env.INKLING_GEMINI_BASE_URL : undefined
+const aiConfig = new AiConfig(configDir, safeStorage)
+const ai = new AiService({
+  config: aiConfig,
+  makeProvider: (apiKey) => new GeminiProvider({ apiKey, baseUrl: geminiBaseUrl }),
+  emit: (event) => {
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.aiEvent, event)
+  }
+})
+const aiReady = aiConfig.load()
 
 // Image assets are served from the notebook folder through a read-only scheme.
 protocol.registerSchemesAsPrivileged([
@@ -117,7 +137,7 @@ function createWindow(): void {
       webSecurity: true,
       spellcheck: true,
       // Acceptance tests get read access to the assistant context API.
-      additionalArguments: process.env.INKLING_TEST_HOOKS === '1' ? ['--inkling-test-hooks'] : []
+      additionalArguments: testHooks ? ['--inkling-test-hooks'] : []
     }
   })
   mainWindow = win
@@ -324,6 +344,29 @@ function registerIpc(): void {
       return { saved: true, path: result.filePath }
     }
   )
+  handle(IPC.aiStatus, z.tuple([]), async () => {
+    await aiReady
+    return ai.status()
+  })
+  handle(IPC.aiSetKey, z.tuple([z.string().max(300)]), async (raw) => {
+    await aiReady
+    const key = apiKeySchema.safeParse(raw)
+    if (!key.success) return { error: key.error.issues[0]?.message ?? 'Invalid key' }
+    return ai.setKey(key.data)
+  })
+  handle(IPC.aiClearKey, z.tuple([]), async () => ai.clearKey())
+  handle(IPC.aiSetModel, z.tuple([modelIdSchema]), async (model) => ai.setModel(model))
+  handle(IPC.aiSetConsent, z.tuple([z.boolean()]), async (accepted) => ai.setConsent(accepted))
+  handle(IPC.aiTest, z.tuple([]), async () => {
+    await aiReady
+    return ai.test()
+  })
+  handle(IPC.aiRefreshModels, z.tuple([]), async () => ai.refreshModels())
+  handle(IPC.aiStart, z.tuple([aiRequestSchema]), async (request) => {
+    await aiReady
+    return ai.start(request)
+  })
+  handle(IPC.aiCancel, z.tuple([z.string().uuid()]), async (id) => ai.cancel(id))
   handle(IPC.showDataFolder, z.tuple([]), async () => {
     await fs.mkdir(dataDir, { recursive: true })
     await shell.openPath(dataDir)

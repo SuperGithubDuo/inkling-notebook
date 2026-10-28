@@ -11,6 +11,8 @@ import { LibraryView } from './components/LibraryView'
 import { SettingsDialog } from './components/SettingsDialog'
 import { SearchPalette } from './components/SearchPalette'
 import { PageCanvas } from './canvas/PageCanvas'
+import { useAi } from './ai/aiStore'
+import { ConsentDialog } from './ai/ConsentDialog'
 import { NoteEditor } from './notes/NoteEditor'
 
 const TUTOR_INPUT_ID = 'tutor-input'
@@ -24,8 +26,8 @@ export function App() {
   const tutorOpen = useStore((s) => s.tutorOpen)
   const activeKind = useStore(selectActiveKind)
   const searchOpen = useStore((s) => s.searchOpen)
-  const [settings, setSettings] = useState(false)
-  const openSettings = useCallback(() => setSettings(true), [])
+  const settings = useAi((s) => s.settingsOpen)
+  const openSettings = useCallback(() => useAi.getState().openSettings(true), [])
 
   useShortcuts()
   useEffect(() => {
@@ -78,7 +80,8 @@ export function App() {
           </div>
         )}
       </div>
-      {settings && <SettingsDialog onClose={() => setSettings(false)} />}
+      {settings && <SettingsDialog onClose={() => useAi.getState().openSettings(false)} />}
+      <ConsentDialog />
       {searchOpen && <SearchPalette onClose={() => useStore.getState().setSearchOpen(false)} />}
     </div>
   )
