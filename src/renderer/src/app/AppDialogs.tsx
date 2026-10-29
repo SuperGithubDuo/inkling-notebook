@@ -129,6 +129,7 @@ function About({ onClose }: { onClose: () => void }) {
           Version <strong>{info?.version ?? '…'}</strong>
           {beta && <span className="ml-1.5 rounded-full bg-accent-soft px-1.5 py-px text-[11px] font-semibold text-accent">BETA</span>}
         </p>
+        {beta && <p className="mt-1 text-[12.5px] text-ink-2">Every feature is free while Inkling is in beta.</p>}
         {info && (
           <p className="mt-0.5 text-[12px] text-ink-3">
             {platformName(info.platform)} {info.arch} · Electron {info.electron}

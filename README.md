@@ -11,9 +11,14 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 | 4.6 | Local AI tutor on Ollama (default; Qwen3-VL), Gemini optional and 18+ only, narrow-window layout | ✅ done (live-model results: see *Local model results*) |
 | 4.7 | Free cloud beta: Inkling beta server on Cloudflare Workers AI (Qwen 3.8 27B), per-tester daily allowances inside the free tier, Ollama and Gemini kept | ✅ built and tested against a fake model; live-model run pending (see *Cloud beta*) |
 | 5 | Advanced AI editing on the canvas, more providers (OpenRouter, Anthropic Claude), handwriting search | planned |
-| 6 | Packaging, installers, theming, accessibility pass | planned |
+| 4.8 | Beta release: installers (Windows NSIS, macOS DMG), updates, release workflow, data-safety fixes, daily backups/restore, welcome, About, feedback, privacy | ✅ built; installers and Windows/macOS runs pending the first workflow run (see [`docs/ROADMAP.md`](docs/ROADMAP.md)) |
+| 6 | Signing and notarization, accessibility audit, website | planned |
 
-## Requirements
+## Download and install (users)
+
+Testers install Inkling from the release page; no Node.js, npm or terminal needed. See [`docs/INSTALL.md`](docs/INSTALL.md). Release notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md). How installers are built, signed and published: [`docs/RELEASING.md`](docs/RELEASING.md).
+
+## Requirements (development)
 
 - Node.js **22.13 or later in the 22.x line, 24.x, or 26+** (Node 22 LTS or 24 LTS recommended), with the npm that ships with it. This is the strictest range among the toolchain: Electron 45 and `@electron/get` need ≥ 22.12, pdf.js needs ≥ 22.13, and Vitest 5 doesn't support the odd-numbered 23.x/25.x lines. `package.json` declares it under `engines`. Node 20 is not supported.
 - Windows 10/11, macOS or Linux, with internet access during install (the Electron runtime is about 100 MB).
@@ -36,7 +41,9 @@ npm run electron:install   # downloads node_modules/electron/dist; fails loudly 
 
 Set `ELECTRON_SKIP_BINARY_DOWNLOAD=1` to skip the download, as CI does, since typecheck, unit tests and the build never launch Electron. Electron's usual download settings (`ELECTRON_MIRROR`, `electron_config_cache`, proxy variables) still apply.
 
-Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Windows, `~/Library/Application Support/Inkling/Library` on macOS). Set `INKLING_DATA_DIR` to use another folder. Settings → Storage shows the path.
+Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Windows, `~/Library/Application Support/Inkling/Library` on macOS, `~/.config/Inkling/Library` on Linux), the same folder for development and installed builds. Daily backups go to `Backups` next to it. Set `INKLING_DATA_DIR` to use another folder (its backups then go to `<folder>-backups`). Settings → Storage shows the path, the backups, *Back up now* and *Restore*.
+
+Installers: `npm run dist:win` / `dist:mac` / `dist:linux` on that system (see [`docs/RELEASING.md`](docs/RELEASING.md)).
 
 ## Testing
 
@@ -44,7 +51,9 @@ Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Window
 npm run typecheck   # strict TypeScript, no emit
 npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets, notes/Markdown, search/links/graph, PDF export, assistant context
 npm run build
-npm run test:e2e    # drives the real Electron app with mouse input: Phase 1–4, regressions, local AI (Ollama), cloud beta, layout
+npm run test:e2e    # drives the real Electron app with mouse input: Phase 1–4, regressions, local AI (Ollama), cloud beta, layout, release (first launch, crash, repair, backups, upgrade, single instance)
+npm run test:perf   # a 330-page notebook with a 150,000-point page: start-up, stroke latency, frame time, saving, search
+npm run dist:linux && npm run test:packaged   # the packaged app itself (on Windows/macOS: set INKLING_PACKAGED_APP)
 npm run test:smoke:fake   # the real-Gemini smoke test, run against the local fake (no key needed)
 npm run test:live         # optional: handwriting scenarios against a REAL local model in Ollama
 npm run test:live:app     # optional: the full on-page correction workflow in the app with a REAL local model
@@ -345,7 +354,6 @@ useStore.getState().run(
 - The cloud beta's free allowance is small: about 75 typical interactions a day for all testers together (estimated; see *Cloud beta results*). It is shared through one Cloudflare account and resets at midnight UTC, which is the afternoon or evening in the Americas. The live-model run that measures real costs, quality and speed is still to be done.
 - The cloud beta's model has no JSON mode on Workers AI, so practice sets, answer checks and markups rely on the instructions plus Inkling's validation: an answer in the wrong format is rejected with "Try again" and still costs allowance.
 - The beta server can only declare, not verify, that its Cloudflare account is on the Workers Free plan (`ACCOUNT_PLAN`). On a Workers Paid account, usage beyond the free allowance would be billed, though the server's own cap still stops at 9,000 Neurons a day.
-
 - The local tutor's quality and speed depend on the model and the computer. Small models (2B) misread handwriting more often; see *Local model results* for what has actually been measured.
 - Gemini is for adults only (Google's terms). Inkling can't tell whether your Google Cloud project has billing enabled. Use a key from a project without billing to be sure of no charges.
 - Tutor conversations last for the session only and are not saved with the notebook.
@@ -362,7 +370,8 @@ useStore.getState().run(
 - PDF links, form fields and text selection are not interactive inside Inkling.
 - Highlights exported to PNG are blended normally, not multiplied, over PDF content (PDF export uses a true multiply blend).
 - Very large PDFs import page by page with a progress notice; a 500-page PDF creates 500 page files.
-- No installer yet; `npm run build` produces the app for `npm start`. Packaging (electron-builder) is planned for Phase 6.
+- Installers are not yet code-signed: Windows and macOS show a security prompt on first open, and macOS can't install updates in-app (Inkling links to the release instead). See `docs/RELEASING.md`.
+- The Windows and macOS installers and acceptance runs are set up in `.github/workflows/release.yml` but haven't run yet; everything else here was verified on Linux. Real pens, touch screens and display scaling have not been tested (`docs/DEVICE-TESTING.md`).
 - Automated tests run on Linux in CI. Windows 11 was tested once by independent QA at Phase 4 (see the Phase 4.5 notes below); macOS has not been tested on real hardware, and stylus pressure, palm rejection and touch gestures have not been tested on physical pen or touch devices.
 - In windows narrower than about 1180 px some toolbar buttons fold away (they all have shortcuts or Markdown input rules), and the AI Tutor button shows only its icon. The notebook title is shortened at the minimum width (960 px).
 - The production build still warns about chunks over 500 kB: the main renderer chunk (1.7 MB minified: React, Konva, Tiptap, KaTeX) and the on-demand PDF export chunk. pdf.js and the export code load only when first used.

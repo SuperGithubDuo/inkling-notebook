@@ -37,7 +37,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: xvfb-run -a npm run test:e2e
-      - run: xvfb-run -a node tests/e2e/release.e2e.mjs
+      - run: xvfb-run -a node tests/e2e/perf.e2e.mjs
       - name: Package for Linux and smoke-test the packaged app
         run: |
           npm run dist:linux
@@ -144,7 +144,6 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:e2e
-      - run: node tests/e2e/release.e2e.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

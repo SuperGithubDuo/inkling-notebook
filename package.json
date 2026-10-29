@@ -12,7 +12,7 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "node tests/e2e/phase1.e2e.mjs && node tests/e2e/phase2.e2e.mjs && node tests/e2e/regressions.e2e.mjs && node tests/e2e/phase3.e2e.mjs && node tests/e2e/phase4.e2e.mjs && node tests/e2e/ollama.e2e.mjs && node tests/e2e/cloud.e2e.mjs && node tests/e2e/layout.e2e.mjs",
+    "test:e2e": "node tests/e2e/phase1.e2e.mjs && node tests/e2e/phase2.e2e.mjs && node tests/e2e/regressions.e2e.mjs && node tests/e2e/phase3.e2e.mjs && node tests/e2e/phase4.e2e.mjs && node tests/e2e/ollama.e2e.mjs && node tests/e2e/cloud.e2e.mjs && node tests/e2e/layout.e2e.mjs && node tests/e2e/release.e2e.mjs",
     "test:e2e:phase2": "node tests/e2e/phase2.e2e.mjs",
     "test:smoke": "vitest run -c vitest.smoke.config.mts",
     "test:smoke:fake": "vitest run -c vitest.smoke-fake.config.mts",
@@ -28,7 +28,8 @@
     "dist:win": "npm run build && node scripts/notices.mjs && electron-builder --win --publish never",
     "dist:mac": "npm run build && node scripts/notices.mjs && electron-builder --mac --publish never",
     "dist:linux": "npm run build && node scripts/notices.mjs && electron-builder --linux --publish never",
-    "test:packaged": "node tests/e2e/packaged.e2e.mjs"
+    "test:packaged": "node tests/e2e/packaged.e2e.mjs",
+    "test:perf": "node tests/e2e/perf.e2e.mjs"
   },
   "author": {
     "name": "Inkling"

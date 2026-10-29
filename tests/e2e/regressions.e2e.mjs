@@ -65,7 +65,7 @@ await app.close()
 // Corrupt the page file; the .bak holds the previous good version.
 await writeFile(await pageFile('Math Notes'), '{"schemaVersion": 2, "objects": [ trunc')
 await launch()
-await win.waitForSelector('[role="status"]:has-text("Recovered from backup")')
+await win.waitForSelector('[role="status"]:has-text("from its backup")')
 assert.equal((await readPage('Math Notes')).objects.length, 1, 'restored the backup')
 await draw([[100, 300], [300, 340]])
 await waitSaved()
