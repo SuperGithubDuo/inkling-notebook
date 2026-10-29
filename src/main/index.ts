@@ -32,7 +32,7 @@ function pinUserData(): void {
   const legacy = join(appData, 'inkling')
   try {
     if (existsSync(legacy) && !existsSync(target)) renameSync(legacy, target)
-    else if (existsSync(legacy) && existsSync(target) && realpathSync(legacy) !== realpathSync(target)) {
+    else if (existsSync(legacy) && existsSync(target) && realpathSync.native(legacy) !== realpathSync.native(target)) {
       console.warn(`Both ${legacy} and ${target} exist; using ${target}. The other folder is left untouched.`)
     }
   } catch (err) {

@@ -79,6 +79,8 @@ try {
   const nb = lib.notebooks.find((n) => n.pages.some((p) => p.id === pageId))
   const pagePath = join(facts.userData, 'Library', 'notebooks', nb.id, 'pages', `${pageId}.json`)
   assert.equal(JSON.parse(await readFile(pagePath, 'utf8')).objects.length, 1)
+  // For tests that continue with this library (installer upgrade/uninstall checks).
+  await writeFile(join(shots, 'packaged-state.json'), JSON.stringify({ userData: facts.userData, libPath, pagePath, version: facts.version }, null, 2))
   step('a stroke is saved to the library folder')
 
   // PDF import: pdf.js and its resources come from inside the packaged app.

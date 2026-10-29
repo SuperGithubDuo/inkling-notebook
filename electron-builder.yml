@@ -26,8 +26,10 @@ asar: true
 win:
   icon: build/icon.ico
   target:
+    # x64 only for the beta: one installer for every Windows 10/11 PC. Windows on ARM runs it
+    # through built-in x64 emulation; a native arm64 build can be added later.
     - target: nsis
-      arch: [x64, arm64]
+      arch: [x64]
   # Signing: set WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD (a .pfx) in the release
   # workflow, or configure Azure Trusted Signing (win.azureSignOptions).
   # electron-updater then also checks that updates are signed by the same publisher.

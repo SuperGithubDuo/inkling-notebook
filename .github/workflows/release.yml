@@ -1,17 +1,29 @@
 name: Release
 
-# Builds the Windows and macOS installers and tests them on real Windows and
-# macOS runners.
-# - Run it by hand (Actions → Release → Run workflow) to get the installers
-#   as downloadable workflow artifacts. Nothing is published.
-# - Push a version tag (git tag v0.2.0-beta.1 && git push origin v0.2.0-beta.1)
-#   to also upload them to a DRAFT GitHub release, which stays private until
-#   someone presses Publish on GitHub.
-# Signing and notarization switch on when the secrets below exist; see docs/RELEASING.md.
+# Builds Inkling's installers on real Windows and macOS machines and tests them.
+#
+# How to start it (see docs/RELEASING.md):
+# - Push any branch named build/<something>: `build/windows` builds Windows,
+#   `build/macos` builds macOS, `build/all` (or any other name) builds both.
+#   Works from any branch, including beta-release, without touching main.
+# - Actions → Release → Run workflow (only once this file is on the default
+#   branch: GitHub lists manual workflows from the default branch only).
+# - Push a tag v* to also upload the installers to a DRAFT GitHub release.
+#   Drafts are private until someone presses Publish.
+#
+# Nothing is published by branch builds or manual runs: installers are kept as
+# workflow artifacts. Signing switches on when the signing secrets exist.
 
 on:
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: Which installers to build
+        type: choice
+        options: [windows, macos, both]
+        default: windows
   push:
+    branches: ['build/**']
     tags: ['v*']
 
 permissions:
@@ -19,99 +31,135 @@ permissions:
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  checks:
-    name: Checks (Linux, full acceptance suite)
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      publish: ${{ steps.plan.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - id: plan
+        shell: bash
+        run: |
+          want=both
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then want="${{ inputs.platforms }}"; fi
+          case "$GITHUB_REF_NAME" in *win*) want=windows ;; *mac*) want=macos ;; esac
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then want=both; fi
+          case "$want" in
+            windows) m='["windows-2022"]' ;;
+            macos) m='["macos-15"]' ;;
+            *) m='["windows-2022","macos-15"]' ;;
+          esac
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "publish=always" >> "$GITHUB_OUTPUT"; else echo "publish=never" >> "$GITHUB_OUTPUT"; fi
+          echo "Building for: $m"
+
+  checks:
+    name: Checks (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - run: xvfb-run -a npm run test:e2e
-      - run: xvfb-run -a node tests/e2e/perf.e2e.mjs
-      - name: Package for Linux and smoke-test the packaged app
+      - run: node scripts/ci-run.mjs typecheck npm run typecheck
+      - run: node scripts/ci-run.mjs "unit tests" npm test
+      - run: node scripts/ci-run.mjs build npm run build
+      - name: Beta server (Cloudflare Worker) typecheck and bundle
+        working-directory: beta-server
         run: |
-          npm run dist:linux
-          xvfb-run -a npm run test:packaged
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results-linux
-          path: test-results
-          if-no-files-found: ignore
+          npm ci
+          node ../scripts/ci-run.mjs "beta-server typecheck" npm run typecheck
+          node ../scripts/ci-run.mjs "beta-server bundle" npx wrangler deploy --dry-run --outdir /tmp/beta-bundle
 
   installers:
     name: Installer (${{ matrix.os }})
-    needs: checks
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
-      # The cloud AI beta server built into the app (a repository variable, not a secret).
+      # The cloud AI beta server built into the app, and where feedback goes (repository variables, not secrets).
       MAIN_VITE_INKLING_BETA_URL: ${{ vars.INKLING_BETA_URL }}
       MAIN_VITE_INKLING_FEEDBACK_URL: ${{ vars.INKLING_FEEDBACK_URL }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # macOS: Developer ID Application certificate (.p12, base64) and password; notarization.
-      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      # Windows: code-signing certificate (.pfx, base64) and password.
-      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - name: Decide signing and update mode
+      - run: node scripts/ci-run.mjs "unit tests" npm test
+      - name: Signing credentials
         shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: |
+          # Only non-empty secrets are passed on: electron-builder treats an empty CSC_LINK as a certificate.
+          put() { if [ -n "$2" ]; then { echo "$1<<__EOF__"; echo "$2"; echo "__EOF__"; } >> "$GITHUB_ENV"; fi; }
           signed=no
-          if [ "$RUNNER_OS" = "macOS" ] && [ -n "$CSC_LINK" ]; then signed=yes; fi
-          if [ "$RUNNER_OS" = "Windows" ] && [ -n "$WIN_CSC_LINK" ]; then signed=yes; fi
+          if [ "$RUNNER_OS" = macOS ] && [ -n "$MAC_CSC_LINK" ]; then
+            signed=yes; put CSC_LINK "$MAC_CSC_LINK"; put CSC_KEY_PASSWORD "$MAC_CSC_KEY_PASSWORD"
+            put APPLE_ID "$APPLE_ID"; put APPLE_APP_SPECIFIC_PASSWORD "$APPLE_APP_SPECIFIC_PASSWORD"; put APPLE_TEAM_ID "$APPLE_TEAM_ID"
+          fi
+          if [ "$RUNNER_OS" = Windows ] && [ -n "$WIN_CSC_LINK" ]; then
+            signed=yes; put CSC_LINK "$WIN_CSC_LINK"; put CSC_KEY_PASSWORD "$WIN_CSC_KEY_PASSWORD"
+          fi
+          [ "$RUNNER_OS" = macOS ] && [ "$signed" = no ] && echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
           echo "SIGNED=$signed" >> "$GITHUB_ENV"
-          # Self-installing updates only for signed builds; unsigned betas only say a new version exists.
+          # Self-installing updates only for signed builds; unsigned betas only say that a new version exists.
           if [ "$signed" = yes ]; then echo "MAIN_VITE_INKLING_UPDATE_MODE=auto" >> "$GITHUB_ENV"; else echo "MAIN_VITE_INKLING_UPDATE_MODE=notify" >> "$GITHUB_ENV"; fi
-          if [ "$RUNNER_OS" = "macOS" ] && [ "$signed" = no ]; then echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"; echo "MAC_ADHOC=yes" >> "$GITHUB_ENV"; fi
-          echo "Signed build: $signed"
-      - run: npm run build
-      - run: node scripts/notices.mjs
+          if [ "$signed" = yes ]; then echo "::notice title=Signing::Signed build"; else echo "::warning title=Signing::Unsigned build: for testers only (security prompts on first open)"; fi
+          if [ -n "$MAIN_VITE_INKLING_BETA_URL" ]; then echo "::notice title=Cloud AI::Built with the beta server $MAIN_VITE_INKLING_BETA_URL"; else echo "::warning title=Cloud AI::No INKLING_BETA_URL variable: this build has no cloud AI server built in"; fi
+      - run: node scripts/ci-run.mjs build npm run build
+      - run: node scripts/ci-run.mjs "licence notices" node scripts/notices.mjs
       - name: Build installers
         shell: bash
         run: |
-          publish=never
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then publish=always; fi
-          extra=()
-          if [ "$RUNNER_OS" = "macOS" ] && [ -n "$APPLE_ID" ] && [ "$SIGNED" = yes ]; then extra+=(-c.mac.notarize=true); fi
-          # Without a Developer ID, sign ad hoc: Apple silicon Macs refuse to run completely unsigned apps.
-          if [ "${MAC_ADHOC:-}" = yes ]; then extra+=(-c.mac.identity=-); fi
-          if [ "$RUNNER_OS" = "Windows" ]; then npx electron-builder --win --publish "$publish" "${extra[@]}"; else npx electron-builder --mac --publish "$publish" "${extra[@]}"; fi
+          args=(--publish "${{ needs.plan.outputs.publish }}")
+          if [ "$RUNNER_OS" = Windows ]; then args+=(--win); else args+=(--mac); fi
+          if [ "$RUNNER_OS" = macOS ] && [ "$SIGNED" = yes ] && [ -n "${APPLE_ID:-}" ]; then args+=(-c.mac.notarize=true); fi
+          # Unsigned Mac builds are signed ad hoc (Apple silicon won't run unsigned code). Ad-hoc
+          # signatures can't satisfy the hardened runtime's library validation, so it is off for them.
+          if [ "$RUNNER_OS" = macOS ] && [ "$SIGNED" = no ]; then args+=(-c.mac.identity=- -c.mac.hardenedRuntime=false); fi
+          node scripts/ci-run.mjs "electron-builder" npx electron-builder "${args[@]}"
+          ls -la release
       - name: Smoke-test the packaged app
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then export INKLING_PACKAGED_APP="release/win-unpacked/Inkling.exe"; else export INKLING_PACKAGED_APP="release/mac-arm64/Inkling.app/Contents/MacOS/Inkling"; fi
-          npm run test:packaged
+          if [ "$RUNNER_OS" = Windows ]; then app=release/win-unpacked/Inkling.exe; else app=release/mac-arm64/Inkling.app/Contents/MacOS/Inkling; fi
+          INKLING_PACKAGED_APP="$app" node scripts/ci-run.mjs "packaged app" node tests/e2e/packaged.e2e.mjs
+      - name: Install, update, uninstall, reinstall (notebooks must survive)
+        shell: bash
+        run: |
+          # A second build with a higher version stands in for "the next update".
+          next="$(node -p "require('./package.json').version").ci${GITHUB_RUN_NUMBER}"
+          if [ "$RUNNER_OS" = Windows ]; then plat=--win; else plat=--mac; fi
+          extra=()
+          if [ "$RUNNER_OS" = macOS ] && [ "$SIGNED" = no ]; then extra+=(-c.mac.identity=- -c.mac.hardenedRuntime=false); fi
+          node scripts/ci-run.mjs "electron-builder (next version)" npx electron-builder $plat --publish never -c.extraMetadata.version="$next" -c.directories.output=release-next "${extra[@]}"
+          # Start from a clean profile: the smoke test above already used this machine's Inkling folder.
+          if [ "$RUNNER_OS" = Windows ]; then rm -rf "$APPDATA/Inkling"; a=$(ls release/Inkling-Setup-*.exe | head -1); b=$(ls release-next/Inkling-Setup-*.exe | head -1)
+          else rm -rf "$HOME/Library/Application Support/Inkling"; a=$(ls release/Inkling-*-arm64.dmg | head -1); b=$(ls release-next/Inkling-*-arm64.dmg | head -1); fi
+          node scripts/ci-run.mjs "installer lifecycle" node tests/e2e/installer.e2e.mjs "$a" "$b"
       - uses: actions/upload-artifact@v4
         with:
-          name: inkling-${{ matrix.os }}
+          name: inkling-${{ runner.os }}
           path: |
             release/*.exe
             release/*.dmg
@@ -122,31 +170,41 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-${{ matrix.os }}
+          name: test-results-installer-${{ runner.os }}
           path: test-results
           if-no-files-found: ignore
 
   acceptance:
-    name: Acceptance suite (${{ matrix.os }})
-    needs: checks
+    name: Acceptance (${{ matrix.os }})
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - run: npm run test:e2e
+      - run: node scripts/ci-run.mjs build npm run build
+      # Each suite separately, so one failure doesn't hide the others.
+      - { name: Phase 1, if: always(), run: node scripts/ci-run.mjs "phase1" node tests/e2e/phase1.e2e.mjs }
+      - { name: Phase 2, if: always(), run: node scripts/ci-run.mjs "phase2" node tests/e2e/phase2.e2e.mjs }
+      - { name: Regressions, if: always(), run: node scripts/ci-run.mjs "regressions" node tests/e2e/regressions.e2e.mjs }
+      - { name: Phase 3, if: always(), run: node scripts/ci-run.mjs "phase3" node tests/e2e/phase3.e2e.mjs }
+      - { name: Phase 4 (Gemini), if: always(), run: node scripts/ci-run.mjs "phase4" node tests/e2e/phase4.e2e.mjs }
+      - { name: Ollama, if: always(), run: node scripts/ci-run.mjs "ollama" node tests/e2e/ollama.e2e.mjs }
+      - { name: Cloud beta, if: always(), run: node scripts/ci-run.mjs "cloud" node tests/e2e/cloud.e2e.mjs }
+      - { name: Layout, if: always(), run: node scripts/ci-run.mjs "layout" node tests/e2e/layout.e2e.mjs }
+      - { name: Release, if: always(), run: node scripts/ci-run.mjs "release" node tests/e2e/release.e2e.mjs }
+      - { name: Large notebook, if: always(), run: node scripts/ci-run.mjs "perf" node tests/e2e/perf.e2e.mjs }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: acceptance-${{ matrix.os }}
+          name: test-results-acceptance-${{ runner.os }}
           path: test-results
           if-no-files-found: ignore

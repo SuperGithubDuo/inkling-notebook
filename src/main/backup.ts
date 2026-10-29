@@ -20,6 +20,20 @@ import { promises as fs } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { parseLibraryJson } from './storage'
 
+/** Renames a folder, retrying while Windows antivirus or indexing briefly holds files in it. */
+async function renameDir(from: string, to: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.rename(from, to)
+      return
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (attempt >= 10 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw err
+      await new Promise((r) => setTimeout(r, 100 * (attempt + 1)))
+    }
+  }
+}
+
 export const MANIFEST = 'inkling-backup.json'
 export const AUTO_KEEP = 7
 export const AUTO_INTERVAL_MS = 20 * 60 * 60 * 1000
@@ -102,7 +116,7 @@ export async function createBackup(dataDir: string, parentDir: string, opts: { k
   }
   await fs.writeFile(join(tmp, MANIFEST), JSON.stringify(manifest, null, 2))
   // Only a complete backup gets its final name.
-  await fs.rename(tmp, dir)
+  await renameDir(tmp, dir)
   return { path: dir, ...manifestInfo(manifest) }
 }
 
@@ -179,8 +193,14 @@ export async function restoreBackup(dataDir: string, backupDir: string, backupsD
   await copyTree(backupDir, incoming, { link: false }, { files: 0 })
   await fs.rm(join(incoming, MANIFEST), { force: true })
   const outgoing = `${dataDir}.replaced-${Date.now()}`
-  if (await exists(dataDir)) await fs.rename(dataDir, outgoing)
-  await fs.rename(incoming, dataDir)
+  if (await exists(dataDir)) await renameDir(dataDir, outgoing)
+  try {
+    await renameDir(incoming, dataDir)
+  } catch (err) {
+    // Put the current library back rather than leave no library at all.
+    if (await exists(outgoing)) await renameDir(outgoing, dataDir).catch(() => undefined)
+    throw err
+  }
   // The replaced library is in the verified "before restore" snapshot; an empty one had nothing to keep.
   if (await exists(outgoing)) {
     if (safety || !(await exists(join(outgoing, 'notebooks')))) await fs.rm(outgoing, { recursive: true, force: true })

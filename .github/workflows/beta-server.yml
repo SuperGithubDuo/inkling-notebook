@@ -1,0 +1,153 @@
+name: Beta AI server
+
+# Deploys the cloud AI beta server (beta-server/) to Cloudflare and tests it
+# against the REAL model (@cf/qwen/qwen3.8-27b), from GitHub's runners.
+#
+# Start it by pushing the branch `deploy/beta-server` (works from any branch,
+# without touching main), or Actions → Beta AI server → Run workflow once this
+# file is on the default branch.
+#
+# Needs these repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_ACCOUNT_ID   your account ID (dashboard → Workers & Pages → right-hand column)
+#   CLOUDFLARE_API_TOKEN    a token with: Account › Workers Scripts: Edit,
+#                           Account › Account Settings: Read, Account › Billing: Read,
+#                           Account › Workers AI: Read, User › Memberships: Read,
+#                           User › User Details: Read
+#   INKLING_ADMIN_TOKEN     a long random string (≥ 32 characters) for managing testers
+#
+# It refuses to deploy to an account on Workers Paid (where usage beyond the free
+# allowance is billed) unless that is explicitly confirmed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      live_test:
+        description: Run the real-model tests after deploying (uses ~2,000–3,000 of today's 10,000 free Neurons)
+        type: boolean
+        default: true
+  push:
+    branches: ['deploy/beta-server']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
+
+      - name: Required secrets
+        shell: bash
+        run: |
+          missing=()
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
+          [ ${#INKLING_ADMIN_TOKEN} -ge 32 ] || missing+=("INKLING_ADMIN_TOKEN (at least 32 characters)")
+          if [ ${#missing[@]} -gt 0 ]; then echo "::error title=Missing secrets::Add these repository secrets: ${missing[*]} (see the top of .github/workflows/beta-server.yml)"; exit 1; fi
+
+      - name: Check the Cloudflare plan (free usage only)
+        shell: bash
+        env:
+          CONFIRMED: ${{ vars.INKLING_ACCOUNT_PLAN_CONFIRMED }}
+        run: |
+          api() { curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4$1"; }
+          v=$(api /user/tokens/verify | jq -r '.result.status // "invalid"')
+          [ "$v" = active ] || { echo "::error title=Cloudflare token::The API token is not valid (status: $v)."; exit 1; }
+          subs=$(api "/accounts/$CLOUDFLARE_ACCOUNT_ID/subscriptions")
+          if [ "$(echo "$subs" | jq -r '.success')" != true ]; then
+            msg=$(echo "$subs" | jq -r '[.errors[]?.message] | join("; ")')
+            if [ "$CONFIRMED" = workers-free ]; then
+              echo "::warning title=Cloudflare plan::Could not read the account's subscriptions ($msg); continuing because INKLING_ACCOUNT_PLAN_CONFIRMED=workers-free."
+            else
+              echo "::error title=Cloudflare plan::Could not check whether the account is on Workers Free ($msg). Give the token 'Account › Billing: Read', or set the repository variable INKLING_ACCOUNT_PLAN_CONFIRMED=workers-free after checking the plan yourself."
+              exit 1
+            fi
+          else
+            plans=$(echo "$subs" | jq -r '[.result[]? | "\(.rate_plan.id // "?") (\(.rate_plan.public_name // .product.name // "?"))"] | join(", ")')
+            echo "::notice title=Cloudflare plan::Account subscriptions: ${plans:-none (free plans only)}"
+            if echo "$subs" | jq -e '[.result[]? | (.rate_plan.id // "" | ascii_upcase) | select(test("WORKERS") and (test("FREE") | not))] | length > 0' >/dev/null; then
+              if [ "$CONFIRMED" != workers-paid-ok ]; then
+                echo "::error title=Cloudflare plan::This account is on a paid Workers plan, where AI usage beyond the free allowance is billed. Deploy to an account on Workers Free, or set INKLING_ACCOUNT_PLAN_CONFIRMED=workers-paid-ok to accept paid usage (the server's own cap still stops at 9,000 Neurons a day)."
+                exit 1
+              fi
+              echo "::warning title=Cloudflare plan::Workers Paid account accepted by INKLING_ACCOUNT_PLAN_CONFIRMED."
+            fi
+          fi
+
+      - name: Typecheck the server
+        working-directory: beta-server
+        run: |
+          npm ci
+          node ../scripts/ci-run.mjs "beta-server typecheck" npm run typecheck
+
+      - name: Deploy
+        id: deploy
+        working-directory: beta-server
+        shell: bash
+        run: |
+          node ../scripts/ci-run.mjs "wrangler deploy" npx wrangler deploy 2>&1 | tee /tmp/deploy.log
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          [ -n "$url" ] || { echo "::error title=Deploy::Deployed, but no workers.dev address was printed. Open Workers & Pages in the Cloudflare dashboard once to create your workers.dev subdomain."; exit 1; }
+          printf '%s' "$INKLING_ADMIN_TOKEN" | node ../scripts/ci-run.mjs "set ADMIN_TOKEN" npx wrangler secret put ADMIN_TOKEN
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Beta server deployed::$url  (set this as the repository variable INKLING_BETA_URL to build it into the app)"
+
+      - name: Check the deployed server
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          for i in $(seq 1 20); do body=$(curl -sS "$URL/" || true); [[ "$body" == *"Inkling AI beta server"* ]] && break; sleep 3; done
+          [[ "$body" == *"Inkling AI beta server"* ]] || { echo "::error title=Deployed server::$URL did not answer as expected: $body"; exit 1; }
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$URL/v1/tutor" -H 'content-type: application/json' -d '{}')
+          [ "$code" = 401 ] || { echo "::error title=Security::POST /v1/tutor without an access code returned $code, expected 401"; exit 1; }
+          code=$(curl -sS -o /dev/null -w '%{http_code}' "$URL/admin/testers")
+          [ "$code" = 404 ] || { echo "::error title=Security::/admin without the admin token returned $code, expected 404"; exit 1; }
+          summary=$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN")
+          echo "::notice title=Beta server today::$summary"
+
+      - name: Live test against the real model
+        if: github.event_name == 'push' || inputs.live_test
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+          INKLING_LIVE_PROBE: '1'
+        run: |
+          npm ci
+          created=$(curl -sS -X POST "$URL/admin/testers" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN" -H 'content-type: application/json' -d '{"name":"CI live test","dailyNeurons":4000}')
+          id=$(echo "$created" | jq -r .id); code=$(echo "$created" | jq -r .accessCode)
+          [ "$code" != null ] || { echo "::error title=Live test::Could not create a test tester: $created"; exit 1; }
+          echo "::add-mask::$code"
+          set +e
+          INKLING_BETA_URL="$URL" INKLING_BETA_TOKEN="$code" node scripts/ci-run.mjs "live cloud test" npm run test:live:cloud
+          status=$?
+          set -e
+          # The test code is revoked whatever happened.
+          curl -sS -X PATCH "$URL/admin/testers/$id" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN" -H 'content-type: application/json' -d '{"revoked":true}' >/dev/null
+          node scripts/live-summary.mjs
+          echo "::notice title=Beta server after the test::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN")"
+          exit $status
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-cloud-report
+          path: test-results/live-cloud-*
+          if-no-files-found: ignore

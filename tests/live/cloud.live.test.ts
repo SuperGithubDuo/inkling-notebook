@@ -76,9 +76,10 @@ describe.skipIf(!enabled)(`live cloud beta, ${CLOUD_MODEL}`, () => {
   beforeAll(async () => {
     let url = env.INKLING_BETA_URL ?? ''
     let token = env.INKLING_BETA_TOKEN ?? ''
+    // The settings probe calls Workers AI directly, so it needs account credentials in either mode.
+    if (env.INKLING_LIVE_PROBE === '1' && direct) await probe(workersAiRest({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN }))
     if (!deployed) {
       const ai = workersAiRest({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN })
-      if (env.INKLING_LIVE_PROBE === '1') await probe(ai)
       server = await startBetaServer({
         ai,
         // The whole test may use at most this much of today's allowance.
