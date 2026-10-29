@@ -39,7 +39,7 @@ export function FloatingToolbar({ onAskAi, compact }: { onAskAi: () => void; com
         <button
           type="button"
           onClick={onAskAi}
-          className={`${compact ? '' : 'ml-1.5'} flex h-11 items-center gap-2 rounded-[16px] bg-gradient-to-r from-[#5b55e8] to-[#6d63f0] px-5 text-[15px] font-medium text-white shadow-[0_4px_14px_-4px_rgb(91_85_232/0.6)] hover:brightness-105`}
+          className={`${compact ? '' : 'ml-1.5'} flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-[16px] bg-gradient-to-r from-[#5b55e8] to-[#6d63f0] px-5 text-[15px] font-medium text-white shadow-[0_4px_14px_-4px_rgb(91_85_232/0.6)] hover:brightness-105`}
         >
           <Sparkles size={17} />
           Ask AI

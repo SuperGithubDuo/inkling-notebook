@@ -42,10 +42,41 @@ npm run typecheck   # strict TypeScript, no emit
 npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets, notes/Markdown, search/links/graph, PDF export, assistant context
 npm run build
 npm run test:e2e    # drives the real Electron app with mouse input (Phase 1–4 and regression suites)
-GEMINI_API_KEY=… npm run test:smoke   # optional: 4 small requests to the real Gemini API
+npm run test:smoke:fake   # the real-Gemini smoke test, run against the local fake (no key needed)
 ```
 
-Automated tests never call Google. They run the official `@google/genai` SDK against a local fake of the Gemini REST API (`tests/support/fakeGemini.mjs`), which speaks the same wire format (SSE streaming, `x-goog-api-key`, Google's error bodies) and records every request, including images and structured-output schemas. The optional smoke test (`tests/smoke/`) checks a real key end to end: connection test, a streamed answer, a markup of a handwriting image (`tests/fixtures/handwriting-linear.png`) turned into valid canvas commands, and a practice set. Set `GEMINI_MODEL=gemini-3.5-flash-lite` to try the lighter model. It is skipped when no key is set.
+Automated tests never call Google. They run the official `@google/genai` SDK against a local fake of the Gemini REST API (`tests/support/fakeGemini.mjs`), which speaks the same wire format (SSE streaming, `x-goog-api-key`, Google's error bodies) and records every request, including images and structured-output schemas. ### Real Gemini smoke test (optional)
+
+`tests/smoke/gemini.smoke.test.ts` checks a real key end to end through Inkling's own AI service: which of Inkling's models the key can use, a streamed chat answer and a follow-up that depends on it, cancelling an answer, a rejected key, reading and explaining the handwriting in `tests/fixtures/handwriting-linear.png` and turning Gemini's markup into valid canvas objects, and a practice set whose right and wrong answers Gemini checks. It sends about 11 small requests, paced to stay under the free tier's per-minute limits, so it takes a minute or two. It is skipped when no key is set.
+
+Use a key from a Google Cloud project **without billing** (Google AI Studio creates one), so nothing can be charged. Don't paste the key into a command line that is saved to history:
+
+```powershell
+# Windows PowerShell
+$env:GEMINI_API_KEY = Read-Host 'Gemini key'
+npm run test:smoke
+Remove-Item Env:GEMINI_API_KEY
+```
+
+```bash
+# macOS / Linux
+read -rs GEMINI_API_KEY && export GEMINI_API_KEY
+npm run test:smoke
+unset GEMINI_API_KEY
+```
+
+Set `GEMINI_MODEL=gemini-3.5-flash-lite` to test the lighter model. Both supported models are listed with a free tier on Google's pricing page, but what a given key can use is decided per project; the first test prints each model's availability for your key. In the app itself, the key goes in **Settings → AI Tutor**, where it is encrypted with the OS keychain; see *Real-Gemini checklist* below for the in-app flows to try.
+
+### Real-Gemini checklist (in the app)
+
+With a free-tier key saved in Settings → AI Tutor (the connection test should list your model as available):
+
+1. **Chat** — ask "Solve 3x + 5 = 20" in the tutor; the answer should stream in with typeset maths. Ask "now double it" (expect 10). Ask something long and press Stop mid-answer. Then remove the key's last character in Settings and check you get the invalid-key message (restore it afterwards).
+2. **Handwriting** — write `2x + 3 = 11`, `2x = 7`, `x = 3.5` on a page, lasso it, ✨ → *Check my work*. Note whether Gemini reads every line correctly and spots that 11 − 3 = 8.
+3. **Practice** — Practice tab → easy, 2 problems, topic "linear equations". Reveal a hint, type a right answer and check it, then a wrong one.
+4. **On-page corrections** — with the same selection, On Page tab → *Mark up my selection*. Check the preview sits on the right lines, untick one mark, *Add to my page*, then move one of the added marks, undo (Ctrl+Z) until they are gone and redo (Ctrl+Shift+Z).
+
+Each step is one or two requests, well inside the free per-minute limits.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the typecheck, unit tests and production build on every push to `main` and on pull requests. The Electron acceptance tests need a display and are run locally.
 
@@ -237,4 +268,13 @@ useStore.getState().run(
 - Highlights exported to PNG are blended normally, not multiplied, over PDF content (PDF export uses a true multiply blend).
 - Very large PDFs import page by page with a progress notice; a 500-page PDF creates 500 page files.
 - No installer yet; `npm run build` produces the app for `npm start`. Packaging (electron-builder) is planned for Phase 6.
-- Automated tests run on Linux. Windows and macOS have not been tested on real hardware yet, and stylus pressure, palm rejection and touch gestures have not been tested on physical pen or touch devices.
+- Automated tests run on Linux in CI. Windows 11 was tested once by independent QA at Phase 4 (see the Phase 4.5 notes below); macOS has not been tested on real hardware, and stylus pressure, palm rejection and touch gestures have not been tested on physical pen or touch devices.
+- The production build still warns about chunks over 500 kB: the main renderer chunk (1.7 MB minified: React, Konva, Tiptap, KaTeX) and the on-demand PDF export chunk. pdf.js and the export code load only when first used.
+
+### Phase 4.5 notes (Windows stabilisation)
+
+- **Clean install** — Electron 45 stopped downloading its binary on install; `postinstall` now does it (see *Install and run*).
+- **PDF unit tests on Windows** — the tests passed pdf.js a backslash path for its fonts; they now use a forward-slash path with a trailing `/` (`tests/support/pdfjsData.mjs`). App code was not affected.
+- **Intermittent resize failure** ("opposite corner fixed", seen once on Windows) — not reproduced: 25 normal and 10 CPU-starved runs on Linux, plus probes with 125–175 % display scaling, a window resize mid-drag and the pointer thrown past the opposite corner, all kept the corner within 0.003 page units (tolerance 1.5). The test now waits for the specific edit to reach disk and confirms the handle is under the pointer before dragging, and reports the full geometry and a screenshot if it fails again; it then passed 20 of 20 runs on Linux. Repeated runs on Windows (`npm run test:e2e:phase2`, ideally 20×) are still needed to close this out.
+- **Narrow windows** — below about 1000 px wide the top toolbar overlaps the notebook title and save status, and below about 750 px the bottom tool dock covers the tutor's composer and the zoom controls are clipped. Not fixed in this milestone (it needs a responsive toolbar layout); the *Ask AI* label no longer wraps.
+- **Real Gemini** — not yet run against Google's API in this milestone (no key was configured in the test environment). Run the smoke test above, then try the four flows in the app.
