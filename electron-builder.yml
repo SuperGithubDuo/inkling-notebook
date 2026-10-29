@@ -1,0 +1,79 @@
+# Installers for Inkling. Build with `npm run dist` (current OS) or the
+# "Release" GitHub Actions workflow (Windows + macOS). See docs/RELEASING.md.
+appId: com.inkling.notebook
+productName: Inkling
+copyright: Copyright © 2026 Inkling
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - "!**/*.map"
+  # pdf.js's optional native canvas is for Node; Inkling renders PDFs in the window.
+  - "!node_modules/@napi-rs/**"
+  # pdf.js ships source maps and an unused legacy build.
+  - "!node_modules/pdfjs-dist/legacy/**"
+extraResources:
+  - from: THIRD_PARTY_NOTICES.txt
+    to: THIRD_PARTY_NOTICES.txt
+  - from: LICENSE.txt
+    to: LICENSE.txt
+asar: true
+# Notebooks live in the user's app-data folder, never inside the app, so
+# installing, updating or uninstalling the app can't touch them.
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+  # Signing: set WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD (a .pfx) in the release
+  # workflow, or configure Azure Trusted Signing (win.azureSignOptions).
+  # electron-updater then also checks that updates are signed by the same publisher.
+nsis:
+  # One click, per user, no administrator rights: the simplest install for students.
+  oneClick: true
+  perMachine: false
+  # Uninstalling removes the app only. Notebooks, backups and settings stay.
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Inkling
+  runAfterFinish: true
+  artifactName: Inkling-Setup-${version}-${arch}.${ext}
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.education
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    # The zip is what in-app updates download on macOS.
+    - target: zip
+      arch: [arm64, x64]
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Signing and notarization switch on when CSC_LINK / CSC_KEY_PASSWORD
+  # (Developer ID Application certificate) and APPLE_ID /
+  # APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID are set; see docs/RELEASING.md.
+  notarize: false
+dmg:
+  artifactName: Inkling-${version}-${arch}.${ext}
+  title: Inkling ${version}
+
+linux:
+  # Not distributed; used to test the packaged app on Linux CI and development machines.
+  icon: build/icon.png
+  category: Education
+  target: [AppImage, dir]
+  artifactName: Inkling-${version}-${arch}.${ext}
+
+publish:
+  provider: github
+  owner: SuperGithubDuo
+  repo: inkling-notebook
+  # Releases are created as drafts: nothing is public until a person publishes it.
+  releaseType: draft

@@ -1,0 +1,10 @@
+Inkling
+Copyright (c) 2026 Inkling. All rights reserved.
+
+This is pre-release (beta) software, provided for evaluation "as is", without
+warranty of any kind. Your notebooks are stored on your own computer; keep
+backups of anything important (Inkling makes daily backups automatically, and
+"Back up now" saves a copy anywhere you choose).
+
+Inkling includes open-source components under their own licences; see
+THIRD_PARTY_NOTICES.txt.

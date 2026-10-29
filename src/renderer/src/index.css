@@ -62,7 +62,7 @@ textarea {
   outline-offset: 2px;
 }
 /* A dialog takes focus so keyboard users start inside it; the panel itself needs no ring. */
-[role='dialog']:focus-visible {
+[role='dialog'][tabindex]:focus-visible:not(input) {
   outline: none;
 }
 

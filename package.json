@@ -1,7 +1,7 @@
 {
   "name": "inkling",
-  "version": "0.1.0",
-  "description": "AI-native handwriting notebook",
+  "version": "0.2.0-beta.1",
+  "description": "Handwritten notes with an AI tutor",
   "main": "out/main/index.js",
   "engines": {
     "node": "^22.13.0 || ^24.0.0 || >=26.0.0"
@@ -22,15 +22,29 @@
     "electron:install": "node scripts/ensure-electron.mjs --strict",
     "test:e2e:ollama": "node tests/e2e/ollama.e2e.mjs",
     "test:e2e:cloud": "node tests/e2e/cloud.e2e.mjs",
-    "test:live:cloud": "vitest run -c vitest.live.config.mts tests/live/cloud.live.test.ts"
+    "test:live:cloud": "vitest run -c vitest.live.config.mts tests/live/cloud.live.test.ts",
+    "notices": "node scripts/notices.mjs",
+    "dist": "npm run build && node scripts/notices.mjs && electron-builder --publish never",
+    "dist:win": "npm run build && node scripts/notices.mjs && electron-builder --win --publish never",
+    "dist:mac": "npm run build && node scripts/notices.mjs && electron-builder --mac --publish never",
+    "dist:linux": "npm run build && node scripts/notices.mjs && electron-builder --linux --publish never",
+    "test:packaged": "node tests/e2e/packaged.e2e.mjs"
   },
-  "author": "",
+  "author": {
+    "name": "Inkling"
+  },
   "license": "UNLICENSED",
   "dependencies": {
+    "@google/genai": "^2.31.0",
+    "electron-updater": "^6.8.11",
+    "pdfjs-dist": "^6.4.299",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
     "@fontsource/caveat": "^5.3.0",
     "@fontsource/inter": "^5.3.0",
-    "@google/genai": "^2.31.0",
     "@pdf-lib/fontkit": "^1.1.1",
+    "@tailwindcss/vite": "^4.3.3",
     "@tiptap/core": "^3.32.0",
     "@tiptap/extension-image": "^3.32.0",
     "@tiptap/extension-list": "^3.32.0",
@@ -41,38 +55,38 @@
     "@tiptap/pm": "^3.32.0",
     "@tiptap/react": "^3.32.0",
     "@tiptap/starter-kit": "^3.32.0",
-    "d3-force": "^3.0.0",
-    "electron-updater": "^6.8.11",
-    "katex": "^0.18.10",
-    "konva": "^10.9.0",
-    "lucide-react": "^1.62.0",
-    "marked": "^17.0.6",
-    "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^6.4.299",
-    "perfect-freehand": "^1.2.3",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "react-konva": "^19.3.2",
-    "zod": "^4.6.7",
-    "zustand": "^5.0.16"
-  },
-  "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
     "@types/d3-force": "^3.0.10",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "d3-force": "^3.0.0",
     "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "esbuild": "^0.28.2",
     "happy-dom": "^21.0.4",
+    "katex": "^0.18.10",
+    "konva": "^10.9.0",
+    "lucide-react": "^1.62.0",
+    "marked": "^17.0.6",
+    "pdf-lib": "^1.17.1",
+    "perfect-freehand": "^1.2.3",
     "playwright-core": "^1.64.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-konva": "^19.3.2",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "zustand": "^5.0.16"
   },
   "productName": "Inkling",
-  "private": true
+  "private": true,
+  "homepage": "https://github.com/SuperGithubDuo/inkling-notebook",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SuperGithubDuo/inkling-notebook.git"
+  }
 }

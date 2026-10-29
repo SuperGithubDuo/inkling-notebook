@@ -263,17 +263,28 @@ try {
   // ==================================== 7. pinned data folder, one instance
   console.log('data folder and single instance')
   const d = await profile('folder', { INKLING_SKIP_WELCOME: '1' })
-  delete d.env.INKLING_DATA_DIR
+  // The lowercase-folder move only matters where file names are case-sensitive (Linux), and only Linux
+  // lets the test redirect the app-data folder. Elsewhere the single-instance check runs on its own.
+  const linux = process.platform === 'linux'
+  if (linux) delete d.env.INKLING_DATA_DIR
   // A data folder from an older development build, under the lowercase name.
+  const legacyLib = JSON.stringify({ schemaVersion: 2, folders: [], notebooks: [{ id: 'nb-legacy-01', name: 'Legacy notebook', color: '#3b6fe0', icon: 'book', favorite: false, folderId: null, createdAt: 1, updatedAt: 1, deletedAt: null, pages: [{ id: 'pg-legacy-01', kind: 'canvas', title: '', tags: [], createdAt: 1, updatedAt: 1, deletedAt: null }] }] })
   const legacy = join(d.home, 'config', 'inkling')
-  await mkdir(join(legacy, 'Library'), { recursive: true })
-  await writeFile(join(legacy, 'Library', 'library.json'), JSON.stringify({ schemaVersion: 2, folders: [], notebooks: [{ id: 'nb-legacy-01', name: 'Legacy notebook', color: '#3b6fe0', icon: 'book', favorite: false, folderId: null, createdAt: 1, updatedAt: 1, deletedAt: null, pages: [{ id: 'pg-legacy-01', kind: 'canvas', title: '', tags: [], createdAt: 1, updatedAt: 1, deletedAt: null }] }] }))
+  if (linux) {
+    await mkdir(join(legacy, 'Library'), { recursive: true })
+    await writeFile(join(legacy, 'Library', 'library.json'), legacyLib)
+  } else {
+    await mkdir(d.dataDir, { recursive: true })
+    await writeFile(join(d.dataDir, 'library.json'), legacyLib)
+  }
   current = await launch(d.env)
   ;({ app, win } = current)
   await win.getByText('Legacy notebook').first().waitFor()
-  assert.ok(await stat(join(d.home, 'config', 'Inkling', 'Library', 'library.json')))
-  assert.equal(await stat(legacy).then(() => true, () => false), false, 'the old folder was moved, not copied')
-  step('the data folder is pinned to “Inkling”; an older lowercase folder is moved over with its notebooks')
+  if (linux) {
+    assert.ok(await stat(join(d.home, 'config', 'Inkling', 'Library', 'library.json')))
+    assert.equal(await stat(legacy).then(() => true, () => false), false, 'the old folder was moved, not copied')
+    step('the data folder is pinned to “Inkling”; an older lowercase folder is moved over with its notebooks')
+  }
 
   // A second copy exits at once and leaves the first one running.
   const env2 = { ...d.env }
