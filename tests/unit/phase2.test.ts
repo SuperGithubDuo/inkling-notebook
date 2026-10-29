@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { CanvasObject, PageDoc, ShapeObject, StrokeObject } from '../../src/shared/schema'
 import { createPageDoc } from '../../src/shared/factory'
 import { migratePage } from '../../src/shared/migrate'
-import { buildTransaction, pasteCommands, transformObject, CommandError, type CommandContext } from '../../src/renderer/src/canvas/commands'
+import { buildTransaction, pasteCommands, selectionBounds, transformObject, CommandError, type CommandContext } from '../../src/renderer/src/canvas/commands'
 import { applyTransaction, invertTransaction } from '../../src/renderer/src/canvas/history'
 import { lassoSelects, objectBounds, type Vec } from '../../src/renderer/src/canvas/geometry'
 import { cutRuns, densify } from '../../src/renderer/src/canvas/eraser'
@@ -112,6 +112,40 @@ describe('canvas commands', () => {
     const r = run(page([src]), pasteCommands([src], 24, 24))
     expect(r.page.objects[1]!.id).not.toBe(src.id)
     expect((r.page.objects[1] as StrokeObject).points[0]).toEqual([24, 24])
+  })
+})
+
+describe('selection resize', () => {
+  // Regression for the Phase 2 acceptance check "opposite corner fixed": the
+  // canvas commits a corner-handle resize as one transformObjects about the
+  // selection's opposite corner. That corner of the selection bounds (stroke
+  // width included, since widths scale too) must stay put, at any scale.
+  const word = (): StrokeObject[] => [
+    stroke('stroke-a', [[218.5 + 2, 258.3 + 2], [250, 318], [270, 263], [290, 308]]),
+    stroke('stroke-b', [[290, 260], [320, 320.3 - 2], [340, 265], [360, 310]]),
+    stroke('stroke-c', [[360, 262], [390, 318], [410, 266], [432.5 - 2, 312]])
+  ]
+  it.each([0.5, 1.2, 1.92, 3])('keeps the top-left fixed when scaling ×%s from the bottom-right', (k) => {
+    const objs = word()
+    const ids = new Set(objs.map((o) => o.id))
+    const b0 = selectionBounds(objs, ids)!
+    const r = run(page(objs), [{ type: 'transformObjects', ids: [...ids], sx: k, sy: k, tx: b0.x * (1 - k), ty: b0.y * (1 - k) }])
+    const b1 = selectionBounds(r.page.objects, ids)!
+    expect(Math.abs(b1.x - b0.x)).toBeLessThan(0.02)
+    expect(Math.abs(b1.y - b0.y)).toBeLessThan(0.02)
+    expect(b1.width / b0.width).toBeCloseTo(k, 3)
+    expect(b1.height / b0.height).toBeCloseTo(k, 3)
+  })
+  it('keeps the bottom-right fixed when scaling from the top-left', () => {
+    const objs = word()
+    const ids = new Set(objs.map((o) => o.id))
+    const b0 = selectionBounds(objs, ids)!
+    const k = 0.75
+    const [x1, y1] = [b0.x + b0.width, b0.y + b0.height]
+    const r = run(page(objs), [{ type: 'transformObjects', ids: [...ids], sx: k, sy: k, tx: x1 * (1 - k), ty: y1 * (1 - k) }])
+    const b1 = selectionBounds(r.page.objects, ids)!
+    expect(Math.abs(b1.x + b1.width - x1)).toBeLessThan(0.02)
+    expect(Math.abs(b1.y + b1.height - y1)).toBeLessThan(0.02)
   })
 })
 

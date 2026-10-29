@@ -48,6 +48,30 @@ const waitSaved = async () => {
   await sleep(150)
   await win.waitForSelector('[data-testid="save-status"][data-state="saved"]', { timeout: 6000 })
 }
+/**
+ * Waits until the page on disk differs from `prev` and the app reports it
+ * saved, so an assertion never reads the file from before the edit. (The
+ * save-status chip alone can still show the previous "saved" for a moment.)
+ */
+const waitPersisted = async (prev) => {
+  const was = JSON.stringify(prev.objects)
+  const deadline = Date.now() + 6000
+  for (;;) {
+    await win.waitForSelector('[data-testid="save-status"][data-state="saved"]', { timeout: 6000 })
+    const now = await readPage().catch(() => null)
+    if (now && JSON.stringify(now.objects) !== was) return now
+    if (Date.now() > deadline) throw new Error('the edit was never saved')
+    await sleep(50)
+  }
+}
+/**
+ * Hovers a Transformer handle and waits for Konva to show its resize cursor,
+ * i.e. the handle really is under the pointer before the drag starts.
+ */
+const hoverHandle = async (x, y) => {
+  await win.mouse.move(x, y)
+  await win.waitForFunction(() => /resize/.test(document.querySelector('.konvajs-content')?.style.cursor ?? ''), null, { timeout: 3000 })
+}
 
 /** Page geometry on screen: origin and pixels per page unit. */
 async function surface() {
@@ -101,8 +125,7 @@ await win.waitForSelector('[data-testid="selection-toolbar"]')
 assert.equal((await win.locator('[data-testid="selection-toolbar"]').textContent()).trim().charAt(0), '3')
 let s = await surface()
 await drag([toScreen(s, 250, 230), toScreen(s, 350, 290)], { steps: 10 })
-await waitSaved()
-pg = await readPage()
+pg = await waitPersisted(pg)
 const dx = pg.objects[0].points[0][0] - original[0].points[0][0]
 const dy = pg.objects[0].points[0][1] - original[0].points[0][1]
 assert.ok(Math.abs(dx - 100) < 2 && Math.abs(dy - 60) < 2, `moved by ${dx},${dy}`)
@@ -116,16 +139,19 @@ step('lasso selected handwriting and moved it as vector data')
 const before = bounds(pg.objects)
 s = await surface()
 const [hx, hy] = toScreen(s, before.x1, before.y1)
+// The handle sits `padding` (6 px) outside the selection's corner.
+await hoverHandle(hx + 6, hy + 6)
 await drag([[hx + 6, hy + 6], [hx + 6 + 120, hy + 6 + 60]], { steps: 12 })
-await waitSaved()
-pg = await readPage()
+pg = await waitPersisted(pg)
 const after = bounds(pg.objects)
 const sx = (after.x1 - after.x0) / (before.x1 - before.x0)
 const sy = (after.y1 - after.y0) / (before.y1 - before.y0)
-assert.ok(sx > 1.15, `scaled ${sx}`)
-assert.ok(Math.abs(sx - sy) < 0.03, `uniform scale ${sx} vs ${sy}`)
+const geom = `before ${JSON.stringify(before)} after ${JSON.stringify(after)} at ${s.k.toFixed(4)} px/unit`
+assert.ok(sx > 1.15, `scaled ${sx}; ${geom}`)
+assert.ok(Math.abs(sx - sy) < 0.03, `uniform scale ${sx} vs ${sy}; ${geom}`)
 pg.objects.forEach((o, i) => assert.equal(o.points.length, original[i].points.length, 'no points lost when resizing'))
-assert.ok(Math.abs(after.x0 - before.x0) < 1.5 && Math.abs(after.y0 - before.y0) < 1.5, 'opposite corner fixed')
+if (!(Math.abs(after.x0 - before.x0) < 1.5 && Math.abs(after.y0 - before.y0) < 1.5)) await win.screenshot({ path: join(shots, 'phase2-resize-corner-failure.png') })
+assert.ok(Math.abs(after.x0 - before.x0) < 1.5 && Math.abs(after.y0 - before.y0) < 1.5, `opposite corner fixed (moved ${(after.x0 - before.x0).toFixed(3)}, ${(after.y0 - before.y0).toFixed(3)}); ${geom}`)
 step(`resized selection ×${sx.toFixed(2)} without corrupting strokes`)
 
 // ---- Undo / redo the transform
