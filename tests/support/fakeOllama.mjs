@@ -67,13 +67,16 @@ export function defaultAnswer(body) {
   }
 }
 
-export async function startFakeOllama() {
+export async function startFakeOllama(options = {}) {
   const queue = []
   const requests = []
   let tags = DEFAULT_TAGS
   let version = '0.40.13'
+  let down = false
 
   const server = http.createServer((req, res) => {
+    // "Not running": drop the connection, as a closed port would refuse it.
+    if (down) return req.socket.destroy()
     let raw = ''
     req.on('data', (c) => (raw += c))
     req.on('end', async () => {
@@ -117,7 +120,7 @@ export async function startFakeOllama() {
       res.end(JSON.stringify({ model: body.model, message: { role: 'assistant', content: '' }, done: true, done_reason: answer.doneReason ?? 'stop', prompt_eval_count: 300, eval_count: 60 }) + '\n')
     })
   })
-  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  await new Promise((r) => server.listen(options.port ?? 0, '127.0.0.1', r))
   const url = `http://127.0.0.1:${server.address().port}`
   return {
     url,
@@ -131,6 +134,10 @@ export async function startFakeOllama() {
     },
     setVersion(v) {
       version = v
+    },
+    /** Simulates Ollama being stopped (connections dropped) or started again. */
+    setDown(value) {
+      down = value
     },
     chats: () => requests.filter((r) => r.path === '/api/chat' && r.task !== 'test'),
     close: () =>

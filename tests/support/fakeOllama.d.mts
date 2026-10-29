@@ -30,9 +30,10 @@ export interface FakeOllama {
   reply(answer: FakeOllamaAnswer | ((req: FakeOllamaRequest) => FakeOllamaAnswer | Promise<FakeOllamaAnswer>)): void
   setTags(list: FakeOllamaTag[]): void
   setVersion(v: string): void
+  setDown(value: boolean): void
   chats(): FakeOllamaRequest[]
   close(): Promise<void>
 }
-export function startFakeOllama(): Promise<FakeOllama>
+export function startFakeOllama(options?: { port?: number }): Promise<FakeOllama>
 export function taskOf(body: unknown): string
 export function defaultAnswer(body: unknown): FakeOllamaAnswer

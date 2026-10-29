@@ -20,5 +20,5 @@
       "@/*": ["./src/renderer/src/*"]
     }
   },
-  "include": ["src", "tests/unit", "tests/smoke", "electron.vite.config.mts", "vitest.config.mts", "vitest.smoke.config.mts", "vitest.smoke-fake.config.mts"]
+  "include": ["src", "tests/unit", "tests/smoke", "tests/live", "electron.vite.config.mts", "vitest.config.mts", "vitest.smoke.config.mts", "vitest.smoke-fake.config.mts", "vitest.live.config.mts"]
 }

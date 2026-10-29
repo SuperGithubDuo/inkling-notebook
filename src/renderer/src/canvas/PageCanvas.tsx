@@ -791,6 +791,8 @@ export function PageCanvas({ pageId }: { pageId: string }) {
         <>
           <div
             data-testid="page-surface"
+            data-page-id={page.id}
+            data-page-width={page.width}
             className="pointer-events-none absolute top-0 left-0 shadow-[0_1px_3px_rgb(30_36_60/0.08),0_8px_24px_-12px_rgb(30_36_60/0.18)]"
             style={{
               transform: `translate(${cam.x}px, ${cam.y}px)`,

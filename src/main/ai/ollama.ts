@@ -191,7 +191,8 @@ export class OllamaProvider implements AiProvider {
     try {
       res = await fetch(`${this.baseUrl}${path}`, { ...init, signal: s })
     } catch (err) {
-      throw classifyOllamaError(err, { aborted: !!signal?.aborted, timedOut: timeout.aborted })
+      if (timeout.aborted && !signal?.aborted) throw new ProviderError('network', `Ollama at ${this.baseUrl} didn't respond. Restart the Ollama app and try again.`)
+      throw classifyOllamaError(err, { aborted: !!signal?.aborted, timedOut: false })
     }
     const text = await res.text().catch(() => '')
     if (!res.ok) throw httpError(res.status, text)

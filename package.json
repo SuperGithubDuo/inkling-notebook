@@ -12,12 +12,15 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "node tests/e2e/phase1.e2e.mjs && node tests/e2e/phase2.e2e.mjs && node tests/e2e/regressions.e2e.mjs && node tests/e2e/phase3.e2e.mjs && node tests/e2e/phase4.e2e.mjs",
+    "test:e2e": "node tests/e2e/phase1.e2e.mjs && node tests/e2e/phase2.e2e.mjs && node tests/e2e/regressions.e2e.mjs && node tests/e2e/phase3.e2e.mjs && node tests/e2e/phase4.e2e.mjs && node tests/e2e/ollama.e2e.mjs",
     "test:e2e:phase2": "node tests/e2e/phase2.e2e.mjs",
     "test:smoke": "vitest run -c vitest.smoke.config.mts",
     "test:smoke:fake": "vitest run -c vitest.smoke-fake.config.mts",
+    "test:live": "vitest run -c vitest.live.config.mts",
+    "test:live:app": "node tests/live/ollama-app.live.mjs",
     "postinstall": "node scripts/ensure-electron.mjs",
-    "electron:install": "node scripts/ensure-electron.mjs --strict"
+    "electron:install": "node scripts/ensure-electron.mjs --strict",
+    "test:e2e:ollama": "node tests/e2e/ollama.e2e.mjs"
   },
   "author": "",
   "license": "UNLICENSED",
