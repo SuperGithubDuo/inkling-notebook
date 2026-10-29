@@ -183,7 +183,7 @@ describe('AI config and key storage', () => {
     const config = new AiConfig(dir, fakeCipher())
     await config.load()
     expect(config.provider).toBe('ollama')
-    expect(config.model).toBe('qwen3-vl:4b')
+    expect(config.model).toBe('qwen3-vl:4b-instruct')
     expect(config.geminiModel).toBe('gemini-3.8-flash')
     // The old consent had no age confirmation.
     expect(config.consented).toBe(false)
@@ -192,14 +192,14 @@ describe('AI config and key storage', () => {
   it('keeps a model per provider and rejects a model of the wrong provider', async () => {
     const config = new AiConfig(await mkdtemp(join(tmpdir(), 'inkling-ai-')), fakeCipher())
     await config.load()
-    await config.setModel('qwen3-vl:2b')
+    await config.setModel('qwen3-vl:2b-instruct')
     await expect(config.setModel('gemini-3.8-flash; rm -rf')).rejects.toThrow()
     await config.setProvider('gemini')
-    await expect(config.setModel('qwen3-vl:2b')).rejects.toThrow()
+    await expect(config.setModel('qwen3-vl:2b-instruct')).rejects.toThrow()
     await config.setModel('gemini-3.5-flash-lite')
     expect(config.model).toBe('gemini-3.5-flash-lite')
     await config.setProvider('ollama')
-    expect(config.model).toBe('qwen3-vl:2b')
+    expect(config.model).toBe('qwen3-vl:2b-instruct')
   })
 })
 

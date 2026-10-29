@@ -135,9 +135,14 @@ export const TASKS: Record<AiTask, TaskSpec> = {
  * shared Gemini-style box_2d [ymin, xmin, ymax, xmax] before validation, so
  * everything after this point (validation, placement on the page) is shared.
  */
+/** Token caps for local models: generous for the task, but a runaway answer on a CPU stops in minutes, not a quarter of an hour. */
+const LOCAL_MAX_TOKENS: Record<AiTask, number> = { chat: 1200, practice: 2500, check: 700, annotate: 1500 }
+
 export function taskSpec(task: AiTask, provider: AiProviderId): TaskSpec {
-  const spec = TASKS[task]
-  if (provider !== 'ollama' || task !== 'annotate') return spec
+  const base = TASKS[task]
+  if (provider !== 'ollama') return base
+  const spec = { ...base, maxOutputTokens: Math.min(base.maxOutputTokens, LOCAL_MAX_TOKENS[task]) }
+  if (task !== 'annotate') return spec
   const schema = structuredClone(spec.jsonSchema!) as { properties: { annotations: { items: { properties: Record<string, unknown>; required: string[] } } } }
   const item = schema.properties.annotations.items
   const { box_2d, ...rest } = item.properties

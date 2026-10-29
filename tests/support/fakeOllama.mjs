@@ -11,8 +11,10 @@
 import http from 'node:http'
 
 export const DEFAULT_TAGS = [
-  { name: 'qwen3-vl:4b', size: 3_300_000_000, digest: 'sha256:qwen4b', capabilities: ['completion', 'vision', 'thinking'] },
-  { name: 'qwen3-vl:2b', size: 1_900_000_000, digest: 'sha256:qwen2b', capabilities: ['completion', 'vision', 'thinking'] },
+  { name: 'qwen3-vl:4b-instruct', size: 3_300_000_000, digest: 'sha256:qwen4bi', capabilities: ['completion', 'vision', 'tools'] },
+  { name: 'qwen3-vl:2b-instruct', size: 1_900_000_000, digest: 'sha256:qwen2bi', capabilities: ['completion', 'vision', 'tools'] },
+  // The plain tag is Qwen3-VL's thinking build.
+  { name: 'qwen3-vl:4b', size: 3_300_000_000, digest: 'sha256:qwen4b', capabilities: ['completion', 'vision', 'tools', 'thinking'] },
   { name: 'llama3.2:3b', size: 2_000_000_000, digest: 'sha256:llama', capabilities: ['completion', 'tools'] },
   { name: 'nomic-embed-text:latest', size: 270_000_000, digest: 'sha256:embed', capabilities: ['embedding'] }
 ]

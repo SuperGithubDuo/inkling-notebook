@@ -1,9 +1,9 @@
 /**
  * Optional live test against a REAL local model in Ollama — no mocks.
  *
- *   ollama pull qwen3-vl:4b        # once, ~3.3 GB
+ *   ollama pull qwen3-vl:4b-instruct        # once, ~3.3 GB
  *   npm run test:live              # Ollama must be running on 127.0.0.1:11434
- *   INKLING_LIVE_MODEL=qwen3-vl:2b npm run test:live
+ *   INKLING_LIVE_MODEL=qwen3-vl:2b-instruct npm run test:live
  *
  * Skipped (not failed) when Ollama isn't running or the model isn't installed.
  * Runs the handwriting scenarios through Inkling's own AiService +
@@ -37,7 +37,7 @@ import { buildTransaction } from '../../src/renderer/src/canvas/commands'
 import { createPageDoc } from '../../src/shared/factory'
 
 const url = process.env.INKLING_LIVE_OLLAMA_URL ?? OLLAMA_DEFAULT_URL
-const model = process.env.INKLING_LIVE_MODEL ?? 'qwen3-vl:4b'
+const model = process.env.INKLING_LIVE_MODEL ?? 'qwen3-vl:4b-instruct'
 const root = join(import.meta.dirname, '../..')
 const fixtures = join(root, 'tests/fixtures/handwriting')
 
@@ -141,7 +141,14 @@ describe.skipIf(!available.ok)(`live local model ${model}`, () => {
   const flat = (s: string): string => s.replace(/[\s$\\{}]/g, '').replace(/−/g, '-').replace(/\^2|²/g, '²').toLowerCase()
   const chatWith = (parts: AiPart[]): AiRequest => ({ task: 'chat', turns: [{ role: 'user', parts }] })
   const CHECK = 'Check my work. Find the first mistake, if any, explain why it is wrong and how to fix it.'
-  const MARKUP = 'Check my work in the image and mark it up.'
+  // The two ways the app asks for a markup (src/renderer/src/ai/markupStore.ts):
+  // "Mark up my selection", and "Show this on my page" under a chat answer.
+  const markup = (image: AiPart): AiRequest => ({ task: 'annotate', turns: [{ role: 'user', parts: [{ text: 'Check my work in the image and mark it up.' }, image] }] })
+  const showOnPage = (explanation: string, image: AiPart): AiRequest => ({
+    task: 'annotate',
+    turns: [{ role: 'user', parts: [{ text: `<tutor_explanation>\n${explanation.slice(0, 4000)}\n</tutor_explanation>\nMark up my work in the image so it matches this explanation.` }, image] }]
+  })
+  const claimsMistake = (s: string): boolean => /(incorrect|mistake|error|wrong|not correct|should be|instead of|negatives? of|sign)/i.test(s) && !/(no (mistakes?|errors?)|not wrong|isn't wrong)/i.test(s)
 
   const placeable = (set: AnnotationSet): boolean => {
     const page = createPageDoc('nb', 'pg')
@@ -163,10 +170,15 @@ describe.skipIf(!available.ok)(`live local model ${model}`, () => {
     check(chat, 'gives the roots −2 and −3', /-2/.test(t) && /-3/.test(t))
     check(chat, 'says x = 2, 3 is wrong', /(mistake|error|incorrect|wrong|sign|not correct|should be)/i.test(chat.text))
 
-    const mark = await run('A', { task: 'annotate', turns: [{ role: 'user', parts: [selection, image, { text: MARKUP }] }] })
-    check(mark, 'structured output validates', !!mark.validated, mark.error ?? mark.text.slice(0, 200))
-    const set = parseTaskResult('annotate', mark.text)
-    if (set) {
+    // "Mark up my selection" (no explanation), then "Show this on my page" (with the chat answer).
+    for (const [label, request] of [
+      ['A', markup(image)],
+      ['A+explanation', showOnPage(chat.text, image)]
+    ] as const) {
+      const mark = await run(label, request)
+      check(mark, 'structured output validates', !!mark.validated, mark.error ?? mark.text.slice(0, 200))
+      const set = parseTaskResult('annotate', mark.text)
+      if (!set) continue
       const tr = flat(set.transcription)
       check(mark, 'transcribed line 1', /x²\+5x\+6=0/.test(tr), set.transcription)
       check(mark, 'transcribed line 2', /\(x\+2\)\(x\+3\)=0/.test(tr), set.transcription)
@@ -176,6 +188,7 @@ describe.skipIf(!available.ok)(`live local model ${model}`, () => {
       const centreY = (b: number[]): number => (b[0]! + b[2]!) / 2
       check(mark, 'the mistake mark is on the last line', wrong.some((a) => centreY(a.box_2d) > 600), wrong.map((a) => `${a.kind}@${a.box_2d.join(',')}`).join(' '))
       check(mark, 'correction gives −2 and −3', set.annotations.some((a) => a.text && /-2/.test(flat(a.text)) && /-3/.test(flat(a.text))), set.annotations.map((a) => a.text ?? '').join(' | '))
+      check(mark, 'summary says there is a mistake', claimsMistake(set.summary), set.summary)
       check(mark, 'marks become valid canvas commands', placeable(set))
     }
   })
@@ -187,12 +200,13 @@ describe.skipIf(!available.ok)(`live local model ${model}`, () => {
     const t = flat(chat.text)
     check(chat, 'read 2x + 3 = 11', /2x\+3=11/.test(t))
     check(chat, 'says it is correct', /(correct|right|well done|no mistake|valid)/i.test(chat.text) && !/(is wrong|incorrect|mistake is)/i.test(chat.text))
-    const mark = await run('B', { task: 'annotate', turns: [{ role: 'user', parts: [selection, image, { text: MARKUP }] }] })
+    const mark = await run('B', markup(image))
     check(mark, 'structured output validates', !!mark.validated, mark.error ?? mark.text.slice(0, 200))
     const set = parseTaskResult('annotate', mark.text)
     if (set) {
       check(mark, 'uses a check mark', set.annotations.some((a) => a.kind === 'check'), set.annotations.map((a) => a.kind).join(','))
       check(mark, 'no cross on correct work', !set.annotations.some((a) => a.kind === 'cross'), set.annotations.map((a) => a.kind).join(','))
+      check(mark, 'summary and notes do not claim a mistake', !claimsMistake([set.summary, ...set.annotations.map((a) => a.text ?? '')].join(' ')), [set.summary, ...set.annotations.map((a) => a.text ?? '')].join(' | '))
     }
   })
 
@@ -218,8 +232,10 @@ describe.skipIf(!available.ok)(`live local model ${model}`, () => {
     const page = `<page title="Kinematics handout p. 3">\nText of the PDF page:\n3.2 Uniform acceleration\nA car starts from rest and accelerates uniformly at 2.5 m/s² for 8.0 s. The equations of motion for constant acceleration are v = u + at and s = ut + ½at².\nExercise 3.2.1: Find the final speed and the distance travelled.\n</page>`
     const chat = await run('E', chatWith([{ text: page }, { text: 'Solve exercise 3.2.1 from this PDF page. Give both answers with units.' }]))
     check(chat, 'answered', chat.ok, chat.error)
-    check(chat, 'final speed 20 m/s', /\b20(\.0)?\s*(\\,|\s)*(\\text\{)?\s*m\s*\/\s*s/i.test(chat.text) || /v\s*=\s*20\b/.test(chat.text))
-    check(chat, 'distance 80 m', /\b80(\.0)?\s*(\\,|\s)*(\\text\{)?\s*m\b/i.test(chat.text) || /s\s*=\s*80\b/.test(chat.text))
+    // LaTeX units (20\ \text{m/s}) flattened to plain text first.
+    const plain = chat.text.replace(/\\(text|mathrm)\{([^}]*)\}/g, '$2').replace(/\\[ ,;!]/g, ' ').replace(/\s+/g, ' ')
+    check(chat, 'final speed 20 m/s', /\b20(\.0)?\s*m\s*\/\s*s\b/i.test(plain), plain.slice(0, 300))
+    check(chat, 'distance 80 m', /\b80(\.0)?\s*m\b(?!\/)/i.test(plain), plain.slice(0, 300))
   })
 
   it('P: practice problems with hints, and checks answers', { timeout: 900_000 }, async () => {

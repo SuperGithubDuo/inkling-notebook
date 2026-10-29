@@ -117,6 +117,27 @@ function Intro({ icon: Icon, title, body }: { icon: typeof Sparkles; title: stri
   )
 }
 
+/**
+ * Seconds since an answer was requested, once it takes a while. A local model
+ * on a modest computer can need a minute or more, mostly reading the image.
+ */
+function Elapsed() {
+  const local = useAi((s) => s.status?.provider !== 'gemini')
+  const [start] = useState(() => Date.now())
+  const [now, setNow] = useState(start)
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const secs = Math.floor((now - start) / 1000)
+  if (secs < 5) return null
+  return (
+    <span data-testid="tutor-elapsed" className="tabular-nums">
+      {secs} s{local && secs >= 15 ? ' · the model is working on this computer; this can take a minute or two' : ''}
+    </span>
+  )
+}
+
 /** Where questions go, in one line under the tutor. */
 function ProviderNote() {
   const status = useAi((s) => s.status)
@@ -146,7 +167,7 @@ export function AiStatusCard({ onOpenSettings, compact }: { onOpenSettings: () =
       ? 'A local vision model reads your handwriting. Nothing leaves this computer.'
       : status?.ollama.running === false
         ? 'The tutor runs free on this computer with Ollama. Install and open Ollama, then check again in AI settings.'
-        : `The tutor needs the ${status?.model ?? 'qwen3-vl:4b'} model in Ollama. AI settings shows how to install it.`
+        : `The tutor needs the ${status?.model ?? 'qwen3-vl:4b-instruct'} model in Ollama. AI settings shows how to install it.`
   } else {
     title = ready ? `Connected · ${modelLabel(status!.model)}` : status?.hasKey ? 'Allow sending to Gemini' : 'Set up the AI Tutor'
     body = ready
@@ -296,6 +317,7 @@ function ModelMessage({ m, region, onOpenSettings }: { m: ChatMessage; region?: 
             <i />
           </span>
           Thinking…
+          <Elapsed />
         </div>
       )}
       {m.text && (

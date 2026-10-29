@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { OllamaProvider, isLoopbackUrl } from '../../src/main/ai/ollama'
+import { OllamaProvider, isLooping, isLoopbackUrl } from '../../src/main/ai/ollama'
 import { AiConfig, type SecretCipher } from '../../src/main/ai/config'
 import { AiService } from '../../src/main/ai/service'
 import { GeminiProvider } from '../../src/main/ai/gemini'
@@ -61,15 +61,16 @@ describe('Ollama provider (against a fake Ollama API)', () => {
     const p = new OllamaProvider({ baseUrl: fake.url })
     expect(await p.version()).toBe('0.40.13')
     const models = await p.listModels()
-    expect(models.find((m) => m.id === 'qwen3-vl:4b')).toMatchObject({ vision: true, thinking: true, canGenerate: true, sizeBytes: 3_300_000_000 })
+    expect(models.find((m) => m.id === 'qwen3-vl:4b-instruct')).toMatchObject({ vision: true, thinking: false, canGenerate: true, sizeBytes: 3_300_000_000 })
+    expect(models.find((m) => m.id === 'qwen3-vl:4b')).toMatchObject({ vision: true, thinking: true })
     expect(models.find((m) => m.id === 'llama3.2:3b')).toMatchObject({ vision: false, canGenerate: true })
     expect(models.find((m) => m.id === 'nomic-embed-text:latest')?.canGenerate).toBe(false)
     // Capabilities are cached per model.
     await p.listModels()
-    expect(fake.requests.filter((r) => r.path === '/api/show').length).toBe(4)
+    expect(fake.requests.filter((r) => r.path === '/api/show').length).toBe(5)
   })
 
-  it('streams a chat with history and images, the system prompt, and thinking turned off', async () => {
+  it('streams a chat with history and images, the system prompt, and thinking turned off with room for it', async () => {
     const p = new OllamaProvider({ baseUrl: fake.url })
     const out = await collect(
       p.stream({
@@ -93,21 +94,23 @@ describe('Ollama provider (against a fake Ollama API)', () => {
     expect(body.messages[1].content).toBe('Check this')
     expect(body.stream).toBe(true)
     expect(body.think).toBe(false)
-    expect(body.options).toMatchObject({ num_predict: 500, temperature: 0.3, num_ctx: 8192 })
+    // A thinking build gets extra tokens: Ollama may still let it reason, and that counts toward num_predict.
+    expect(body.options).toMatchObject({ num_predict: 500 + 3072, temperature: 0.3, num_ctx: 8192 })
     expect(body.format).toBeUndefined()
   })
 
   it('omits the thinking switch for models that have no thinking mode', async () => {
-    fake.setTags([{ name: 'llava:7b', capabilities: ['completion', 'vision'] }])
     const p = new OllamaProvider({ baseUrl: fake.url })
-    await collect(p.stream({ model: 'llava:7b', system: 's', turns: [{ role: 'user', parts: [{ text: 'hi' }] }], maxOutputTokens: 50 }))
-    expect('think' in fake.chats().at(-1)!.body).toBe(false)
+    await collect(p.stream({ model: 'qwen3-vl:4b-instruct', system: 's', turns: [{ role: 'user', parts: [{ text: 'hi' }] }], maxOutputTokens: 50 }))
+    const body = fake.chats().at(-1)!.body
+    expect('think' in body).toBe(false)
+    expect(body.options.num_predict).toBe(50)
   })
 
   it('sends the task JSON schema as the output format', async () => {
     const p = new OllamaProvider({ baseUrl: fake.url })
     const spec = taskSpec('practice', 'ollama')
-    const out = await collect(p.stream({ model: 'qwen3-vl:4b', system: spec.system, turns: [{ role: 'user', parts: [{ text: 'Create 2 practice problems' }] }], jsonSchema: spec.jsonSchema, maxOutputTokens: 2000 }))
+    const out = await collect(p.stream({ model: 'qwen3-vl:4b-instruct', system: spec.system, turns: [{ role: 'user', parts: [{ text: 'Create 2 practice problems' }] }], jsonSchema: spec.jsonSchema, maxOutputTokens: 2000 }))
     expect(fake.chats().at(-1)!.body.format).toEqual(spec.jsonSchema)
     expect(parseTaskResult('practice', out.text)?.problems).toHaveLength(2)
   })
@@ -115,34 +118,47 @@ describe('Ollama provider (against a fake Ollama API)', () => {
   it('explains a stopped server, a missing model, a text-only model, memory and mid-stream errors', async () => {
     const offline = new OllamaProvider({ baseUrl: 'http://127.0.0.1:9' })
     expect((await errorOf(offline.version())).code).toBe('offline')
-    expect((await errorOf(collect(offline.stream({ model: 'qwen3-vl:4b', system: 's', turns: [{ role: 'user', parts: [{ text: 'x' }] }], maxOutputTokens: 5 })))).code).toBe('offline')
+    expect((await errorOf(collect(offline.stream({ model: 'qwen3-vl:4b-instruct', system: 's', turns: [{ role: 'user', parts: [{ text: 'x' }] }], maxOutputTokens: 5 })))).code).toBe('offline')
 
     const p = new OllamaProvider({ baseUrl: fake.url })
     const req = (model: string, image = false) =>
       collect(p.stream({ model, system: 's', turns: [{ role: 'user', parts: [{ text: 'x' }, ...(image ? [{ image: { mimeType: 'image/png' as const, data: IMAGE } }] : [])] }], maxOutputTokens: 5 }))
 
-    const missing = await errorOf(req('qwen3-vl:8b'))
+    const missing = await errorOf(req('qwen3-vl:8b-instruct'))
     expect(missing.code).toBe('model_unavailable')
-    expect(missing.message).toContain('ollama pull qwen3-vl:8b')
+    expect(missing.message).toContain('ollama pull qwen3-vl:8b-instruct')
 
     const textOnly = await errorOf(req('llama3.2:3b', true))
     expect(textOnly.code).toBe('model_unavailable')
     expect(textOnly.message).toMatch(/can't read images/)
 
     fake.reply({ error: 'model requires more system memory (5.1 GiB) than is available (3.2 GiB)', status: 500 })
-    const memory = await errorOf(req('qwen3-vl:4b'))
+    const memory = await errorOf(req('qwen3-vl:4b-instruct'))
     expect(memory.code).toBe('server')
     expect(memory.message).toMatch(/more memory/)
 
     fake.reply({ chunks: ['partial '], midStreamError: 'llama runner process has terminated: exit status 2' })
-    expect((await errorOf(req('qwen3-vl:4b'))).code).toBe('server')
+    expect((await errorOf(req('qwen3-vl:4b-instruct'))).code).toBe('server')
+  })
+
+  it('stops a model that is repeating itself', async () => {
+    expect(isLooping('The roots are −2 and −3. '.repeat(10))).toBe(false) // under 600 chars
+    expect(isLooping('Setting each factor to zero gives the roots of the equation. '.repeat(30))).toBe(true)
+    const normal = Array.from({ length: 40 }, (_, i) => `Step ${i}: subtract ${i} from both sides and simplify the result. `).join('')
+    expect(isLooping(normal)).toBe(false)
+    fake.reply({ chunks: Array.from({ length: 60 }, () => 'so the answer is x equals two and x equals three, ') })
+    const p = new OllamaProvider({ baseUrl: fake.url })
+    const err = await errorOf(collect(p.stream({ model: 'qwen3-vl:2b-instruct', system: 's', turns: [{ role: 'user', parts: [{ text: 'x' }] }], maxOutputTokens: 1200 })))
+    expect(err.code).toBe('bad_response')
+    expect(err.message).toMatch(/repeating itself/)
+    expect(fake.chats().at(-1)!.body.options.presence_penalty).toBe(1.5)
   })
 
   it('cancels a running answer', async () => {
     fake.reply({ chunks: ['one ', 'two '], chunkDelayMs: 50, hang: true })
     const p = new OllamaProvider({ baseUrl: fake.url })
     const controller = new AbortController()
-    const stream = p.stream({ model: 'qwen3-vl:4b', system: 's', turns: [{ role: 'user', parts: [{ text: 'long' }] }], maxOutputTokens: 5 }, controller.signal)
+    const stream = p.stream({ model: 'qwen3-vl:4b-instruct', system: 's', turns: [{ role: 'user', parts: [{ text: 'long' }] }], maxOutputTokens: 5 }, controller.signal)
     const err = errorOf(
       (async () => {
         for await (const c of stream) if (c.type === 'text') controller.abort()
@@ -184,7 +200,10 @@ describe('Qwen boxes', () => {
     const cloud = taskSpec('annotate', 'gemini')
     expect(cloud.system).toContain('[ymin, xmin, ymax, xmax]')
     expect(cloud.normalize).toBeUndefined()
-    expect(taskSpec('chat', 'ollama')).toBe(taskSpec('chat', 'gemini'))
+    expect(taskSpec('chat', 'ollama').system).toBe(taskSpec('chat', 'gemini').system)
+    // Local answers are capped lower: a runaway answer on a CPU must not take a quarter of an hour.
+    expect(taskSpec('chat', 'ollama').maxOutputTokens).toBe(1200)
+    expect(taskSpec('chat', 'gemini').maxOutputTokens).toBe(4096)
   })
 })
 
@@ -227,12 +246,14 @@ describe('AI service on local Ollama', () => {
   it('is the default: local, no key, no consent prompt, and status reports the server and models', async () => {
     const { service } = await makeService()
     const status = await service.freshStatus()
-    expect(status).toMatchObject({ provider: 'ollama', local: true, needsKey: false, consented: true, model: 'qwen3-vl:4b' })
+    expect(status).toMatchObject({ provider: 'ollama', local: true, needsKey: false, consented: true, model: 'qwen3-vl:4b-instruct' })
     expect(status.ollama).toMatchObject({ running: true, version: '0.40.13', url: fake.url })
     expect(status.models).toEqual([
-      { id: 'qwen3-vl:4b', status: 'available', sizeBytes: 3_300_000_000, vision: true },
-      { id: 'qwen3-vl:2b', status: 'available', sizeBytes: 1_900_000_000, vision: true },
-      { id: 'qwen3-vl:8b', status: 'missing' }
+      { id: 'qwen3-vl:4b-instruct', status: 'available', sizeBytes: 3_300_000_000, vision: true, thinking: false },
+      { id: 'qwen3-vl:2b-instruct', status: 'available', sizeBytes: 1_900_000_000, vision: true, thinking: false },
+      { id: 'qwen3-vl:8b-instruct', status: 'missing' },
+      // An installed thinking build is offered too, flagged as such.
+      { id: 'qwen3-vl:4b', status: 'available', label: 'qwen3-vl:4b', sizeBytes: 3_300_000_000, vision: true, thinking: true }
     ])
     expect(aiReady(status)).toBe(true)
   })
@@ -241,7 +262,7 @@ describe('AI service on local Ollama', () => {
     fake.setTags([...DEFAULT_TAGS, { name: 'llava:7b', size: 4_700_000_000, capabilities: ['completion', 'vision'] }])
     const { service } = await makeService()
     const ids = (await service.freshStatus()).models.map((m) => m.id)
-    expect(ids).toEqual(['qwen3-vl:4b', 'qwen3-vl:2b', 'qwen3-vl:8b', 'llava:7b'])
+    expect(ids).toEqual(['qwen3-vl:4b-instruct', 'qwen3-vl:2b-instruct', 'qwen3-vl:8b-instruct', 'qwen3-vl:4b', 'llava:7b'])
   })
 
   it('reports a stopped server and a missing model with what to do', async () => {
@@ -253,9 +274,9 @@ describe('AI service on local Ollama', () => {
     expect(!test.ok && test.error.code).toBe('offline')
 
     const { service } = await makeService()
-    await service.setModel('qwen3-vl:8b')
+    await service.setModel('qwen3-vl:8b-instruct')
     const missing = await service.test()
-    expect(!missing.ok && missing.error).toMatchObject({ code: 'model_unavailable', message: expect.stringContaining('ollama pull qwen3-vl:8b') })
+    expect(!missing.ok && missing.error).toMatchObject({ code: 'model_unavailable', message: expect.stringContaining('ollama pull qwen3-vl:8b-instruct') })
     expect(aiReady(service.status())).toBe(false)
   })
 
@@ -273,7 +294,7 @@ describe('AI service on local Ollama', () => {
     const id = idOf(service.start({ task: 'chat', turns: [{ role: 'user', parts: [{ text: 'Solve it' }, { image: { mimeType: 'image/jpeg', data: IMAGE } }] }] }))
     const end = await finished(id)
     expect(events.filter((e) => e.requestId === id && e.type === 'delta')).toHaveLength(3)
-    expect(end).toMatchObject({ type: 'done', model: 'qwen3-vl:4b', usage: { inputTokens: 300, outputTokens: 60, firstTokenMs: expect.any(Number), totalMs: expect.any(Number) } })
+    expect(end).toMatchObject({ type: 'done', model: 'qwen3-vl:4b-instruct', usage: { inputTokens: 300, outputTokens: 60, firstTokenMs: expect.any(Number), totalMs: expect.any(Number) } })
   })
 
   it('returns a validated annotation set in the shared box format', async () => {
@@ -326,7 +347,7 @@ describe('AI service on local Ollama', () => {
     await service.freshStatus()
     fake.reply({ error: 'model requires more system memory (5 GiB) than is available (3 GiB)', status: 500 })
     const end = await finished(idOf(service.start({ task: 'chat', turns: [{ role: 'user', parts: [{ text: 'memory' }] }] })))
-    expect(end).toMatchObject({ type: 'error', error: { code: 'server', suggestModel: 'qwen3-vl:2b' } })
+    expect(end).toMatchObject({ type: 'error', error: { code: 'server', suggestModel: 'qwen3-vl:2b-instruct' } })
   })
 
   it('switches between providers, keeping Gemini behind its key and consent', async () => {
@@ -337,6 +358,6 @@ describe('AI service on local Ollama', () => {
     const req: AiRequest = { task: 'chat', turns: [{ role: 'user', parts: [{ text: 'hi' }] }] }
     expect(service.start(req)).toMatchObject({ error: { code: 'consent_required' } })
     const back = await service.setProvider('ollama')
-    expect(back).toMatchObject({ provider: 'ollama', consented: true, model: 'qwen3-vl:4b' })
+    expect(back).toMatchObject({ provider: 'ollama', consented: true, model: 'qwen3-vl:4b-instruct' })
   })
 })

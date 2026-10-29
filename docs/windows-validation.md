@@ -64,7 +64,7 @@ for ($i = 1; $i -le 20; $i++) { npm run test:e2e:phase2 > "phase2-run-$i.log" 2>
 
 ```powershell
 ollama --version          # 0.12.7 or later
-ollama pull qwen3-vl:4b   # 3.3 GB, once
+ollama pull qwen3-vl:4b-instruct   # 3.3 GB, once
 ollama list
 ```
 
@@ -73,7 +73,7 @@ In Inkling: Settings (gear) → **AI Tutor**.
 - [ ] **Ollama (on this computer)** is selected by default and marked DEFAULT; Gemini is marked 18+.
 - [ ] "Ollama x.y.z is running on this computer." Quit Ollama from the tray and press **Check again**: "Ollama isn't running" with a link to ollama.com/download. Reopen Ollama, **Check again**: running.
 - [ ] Qwen3-VL 4B shows *installed · 3.3 GB*; 2B / 8B show *not installed* with their download size (unless you installed them).
-- [ ] Click Qwen3-VL 8B (not installed): an install box with `ollama pull qwen3-vl:8b` and a Copy button appears. **Test connection** says it isn't installed. Nothing is downloaded.
+- [ ] Click Qwen3-VL 8B (not installed): an install box with `ollama pull qwen3-vl:8b-instruct` and a Copy button appears. **Test connection** says it isn't installed. Nothing is downloaded.
 - [ ] Click Qwen3-VL 4B, **Test connection**: "Model answered in N s". Record N (first, cold): ____ s; press it again (warm): ____ s.
 - [ ] No API key field and no consent prompt for Ollama. The tutor footer says "Answered on this computer by Ollama."
 
@@ -82,11 +82,11 @@ In Inkling: Settings (gear) → **AI Tutor**.
 Automated, with the bundled handwriting images:
 
 ```powershell
-npm run test:live                                   # qwen3-vl:4b
-$env:INKLING_LIVE_MODEL = 'qwen3-vl:2b'; npm run test:live; Remove-Item Env:INKLING_LIVE_MODEL   # optional
+npm run test:live                                   # qwen3-vl:4b-instruct
+$env:INKLING_LIVE_MODEL = 'qwen3-vl:2b-instruct'; npm run test:live; Remove-Item Env:INKLING_LIVE_MODEL   # optional
 ```
 
-- [ ] Attach `test-results\live-ollama-qwen3-vl_4b.md` (and `.json`). It lists, per scenario, whether the reading and the maths were right, whether the answer streamed, first-text and total time, and whether structured output validated. Failing checks are expected to be reported there, not hidden.
+- [ ] Attach `test-results\live-ollama-qwen3-vl_4b-instruct.md` (and `.json`). It lists, per scenario, whether the reading and the maths were right, whether the answer streamed, first-text and total time, and whether structured output validated. Failing checks are expected to be reported there, not hidden.
 
 By hand, with **your own handwriting** (mouse, pen or touch), in the app:
 
@@ -109,7 +109,7 @@ Using scenario A above:
 - [ ] Untick one mark, then **Add N to my page**: the marks become normal objects; your own strokes are untouched.
 - [ ] Select an AI mark with the lasso and move it; edit the correction text with the Text tool.
 - [ ] Ctrl+Z removes all the AI marks in one step (after undoing your own move/edit); Ctrl+Shift+Z restores them.
-- [ ] Or run it automatically: `npm run build; npm run test:live:app` and attach `test-results\live-app-qwen3-vl_4b.md` and the screenshots.
+- [ ] Or run it automatically: `npm run build; npm run test:live:app` and attach `test-results\live-app-qwen3-vl_4b-instruct.md` and the screenshots.
 
 ## 8. Narrow windows
 

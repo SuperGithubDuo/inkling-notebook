@@ -50,13 +50,22 @@ export type GeminiModelId = z.infer<typeof geminiModelIdSchema>
 /** @deprecated name kept for older imports; use geminiModelIdSchema. */
 export const modelIdSchema = geminiModelIdSchema
 
-/** Local vision models Inkling recommends; any other installed vision model can be chosen too. */
+/**
+ * Local vision models Inkling recommends; any other installed vision model can
+ * be chosen too. The "-instruct" builds answer directly. The plain tags
+ * (qwen3-vl:4b etc.) are Qwen3-VL's *thinking* builds: they reason at length
+ * before every answer and Ollama doesn't let that be switched off, which made
+ * them about 3× slower on a CPU in testing (same answers), so they are listed
+ * only when installed, marked as slower.
+ */
 export const OLLAMA_MODELS: readonly AiModelInfo[] = [
-  { id: 'qwen3-vl:4b', label: 'Qwen3-VL 4B', size: '3.3 GB', description: 'Recommended. Good handwriting reading on most laptops (8 GB RAM or more).' },
-  { id: 'qwen3-vl:2b', label: 'Qwen3-VL 2B', size: '1.9 GB', description: 'Lighter and faster, for older or low-memory computers. Less accurate.' },
-  { id: 'qwen3-vl:8b', label: 'Qwen3-VL 8B', size: '6.1 GB', description: 'Most capable. Needs about 16 GB RAM or a GPU with 8 GB.' }
+  { id: 'qwen3-vl:4b-instruct', label: 'Qwen3-VL 4B', size: '3.3 GB', description: 'Recommended. Good handwriting reading on most laptops (8 GB RAM or more).' },
+  { id: 'qwen3-vl:2b-instruct', label: 'Qwen3-VL 2B', size: '1.9 GB', description: 'Lighter and faster, for older or low-memory computers. Less accurate.' },
+  { id: 'qwen3-vl:8b-instruct', label: 'Qwen3-VL 8B', size: '6.2 GB', description: 'Most capable. Needs about 16 GB RAM or a GPU with 8 GB.' }
 ] as const
-export const OLLAMA_DEFAULT_MODEL = 'qwen3-vl:4b'
+export const OLLAMA_DEFAULT_MODEL = 'qwen3-vl:4b-instruct'
+/** Shown for an installed model that reasons before answering (e.g. qwen3-vl:4b). */
+export const THINKING_MODEL_NOTE = 'Thinking build: reasons step by step before answering, so it is much slower, especially without a GPU. The matching “-instruct” model answers directly.'
 /** An Ollama model name such as `qwen3-vl:4b` or `user/model:tag`. */
 export const ollamaModelIdSchema = z
   .string()
@@ -66,7 +75,7 @@ export const ollamaModelIdSchema = z
 export type AiModelId = string
 export const OLLAMA_DEFAULT_URL = 'http://127.0.0.1:11434'
 
-export const modelLabel = (id: string): string => [...GEMINI_MODELS, ...OLLAMA_MODELS].find((m) => m.id === id)?.label ?? id
+export const modelLabel = (id: string): string => [...GEMINI_MODELS, ...OLLAMA_MODELS].find((m) => m.id === id)?.label ?? id.replace(/^qwen3-vl:(\d+)b$/, 'Qwen3-VL $1B (thinking)')
 
 /** Version of the data-use notice. Raising it asks the user to agree again. */
 export const CONSENT_VERSION = 2
@@ -158,6 +167,8 @@ export interface ModelAvailability {
   sizeBytes?: number
   /** Local models: false when the installed model cannot read images. */
   vision?: boolean
+  /** Local models: a reasoning ("thinking") build, slower. */
+  thinking?: boolean
 }
 
 /** State of the local Ollama server, as of the last check. */

@@ -216,7 +216,7 @@ export class AiService {
         if (this.ollama.running === false) return { ok: false, error: offline() }
         const listed = this.ollamaModels?.find((m) => m.id === model)
         if (!listed) return { ok: false, error: { code: 'model_unavailable', message: notInstalled(model) } }
-        if (listed.vision === false) return { ok: false, error: { code: 'model_unavailable', message: `${model} can't read images, so it can't see handwriting. Choose a vision model such as qwen3-vl:4b.` } }
+        if (listed.vision === false) return { ok: false, error: { code: 'model_unavailable', message: `${model} can't read images, so it can't see handwriting. Choose a vision model such as qwen3-vl:4b-instruct.` } }
       } else {
         this.models = await provider.listModels()
         this.modelsCheckedAt = new Date(this.now()).toISOString()
@@ -348,7 +348,7 @@ export class AiService {
   private withSuggestion(model: AiModelId, error: AiError): AiError {
     if (this.config.provider === 'ollama') {
       // Memory or speed trouble with a bigger model: the smaller one is installed, so offer it.
-      const small = 'qwen3-vl:2b'
+      const small = 'qwen3-vl:2b-instruct'
       const hasSmall = this.ollamaModels?.some((m) => m.id === small)
       if (model !== small && hasSmall && (error.code === 'server' || (error.code === 'network' && /took too long/.test(error.message)))) return { ...error, suggestModel: small }
       return error
@@ -383,11 +383,11 @@ export class AiService {
     const recommended = OLLAMA_MODELS.map((m): ModelAvailability => {
       const found = find(m.id)
       if (!installed) return { id: m.id, status: 'unknown' }
-      return found ? { id: m.id, status: 'available', sizeBytes: found.sizeBytes, vision: found.vision } : { id: m.id, status: 'missing' }
+      return found ? { id: m.id, status: 'available', sizeBytes: found.sizeBytes, vision: found.vision, thinking: found.thinking } : { id: m.id, status: 'missing' }
     })
     const extra = (installed ?? [])
       .filter((m) => m.canGenerate && m.vision && !OLLAMA_MODELS.some((r) => r.id === m.id))
-      .map((m): ModelAvailability => ({ id: m.id, status: 'available', label: m.id, sizeBytes: m.sizeBytes, vision: true }))
+      .map((m): ModelAvailability => ({ id: m.id, status: 'available', label: m.id, sizeBytes: m.sizeBytes, vision: true, thinking: m.thinking }))
     const chosen = this.config.ollamaModel
     // A chosen model that is neither recommended nor an installed vision model still shows up, as missing or non-vision.
     const orphan: ModelAvailability[] =

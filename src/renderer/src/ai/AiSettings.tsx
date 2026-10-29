@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from 'react'
 import { CircleAlert, CircleCheck, Copy, Cpu, KeyRound, LoaderCircle, RefreshCw, ShieldAlert } from 'lucide-react'
-import { GEMINI_ELIGIBILITY, GEMINI_MODELS, OLLAMA_MODELS, PROVIDERS, type AiError, type AiModelId, type AiProviderId, type AiStatus, type ModelAvailability } from '@shared/ai'
+import { GEMINI_ELIGIBILITY, GEMINI_MODELS, OLLAMA_MODELS, PROVIDERS, THINKING_MODEL_NOTE, modelLabel, type AiError, type AiModelId, type AiProviderId, type AiStatus, type ModelAvailability } from '@shared/ai'
 import { cx } from '@/components/ui/primitives'
 import { GET_KEY_URL, GEMINI_TERMS_URL, OLLAMA_DOWNLOAD_URL, useAi } from './aiStore'
 
@@ -171,12 +171,14 @@ function OllamaModelRow({ m, selected, running, onChoose }: { m: ModelAvailabili
       <span className={cx('mt-0.5 h-4 w-4 shrink-0 rounded-full border-2', selected ? 'border-accent bg-[radial-gradient(circle,var(--color-accent)_40%,transparent_45%)]' : 'border-[#c7cad3]')} />
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-x-2 text-[13.5px] font-medium">
-          {info?.label ?? m.label ?? m.id}
+          {info?.label ?? modelLabel(m.id)}
           <code className="text-[11.5px] font-normal text-ink-3">{m.id}</code>
           {m.status === 'available' && <span className="text-[11.5px] font-normal text-[#1f7a46]">installed{fmtSize(m.sizeBytes) ? ` · ${fmtSize(m.sizeBytes)}` : ''}</span>}
           {m.status === 'missing' && running && <span className="text-[11.5px] font-normal text-ink-3">not installed{info?.size ? ` · ${info.size} download` : ''}</span>}
         </span>
-        <span className="block text-[12.5px] text-ink-3">{info?.description ?? 'Another vision model installed in Ollama. Untested with Inkling.'}</span>
+        <span className="block text-[12.5px] text-ink-3">
+          {info?.description ?? (m.thinking ? THINKING_MODEL_NOTE : 'Another vision model installed in Ollama. Untested with Inkling.')}
+        </span>
       </span>
     </button>
   )

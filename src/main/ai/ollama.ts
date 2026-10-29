@@ -18,8 +18,34 @@ const FIRST_TOKEN_TIMEOUT_MS = 240_000
 /** Once it streams, a long silence means something is stuck. */
 const IDLE_TIMEOUT_MS = 90_000
 const LIST_TIMEOUT_MS = 8_000
-/** Images plus the instructions and a few turns of history need more than Ollama's small default context. */
+/**
+ * Context window. An image (~1,000 tokens), the instructions and a few turns
+ * of history fit comfortably in 8K. More costs memory: with 12K, Qwen3-VL 4B
+ * grew past 6 GB and was killed by the OS on an 8 GB test machine.
+ */
 const CONTEXT_TOKENS = 8192
+/**
+ * Extra tokens for a thinking build's reasoning. Ollama (0.40) ignores
+ * `think: false` for Qwen3-VL's thinking builds, and the reasoning counts
+ * towards num_predict: without room for it the answer itself gets cut off.
+ */
+const THINKING_BUDGET = 3072
+
+/**
+ * Small local models occasionally fall into a loop, repeating the same phrase
+ * until the token limit — minutes on a CPU. Seen in testing with
+ * qwen3-vl:2b-instruct (2,500+ tokens on a ~250-token answer). Stop as soon
+ * as the end of the answer has occurred many times in its recent text.
+ */
+export function isLooping(text: string): boolean {
+  if (text.length < 600) return false
+  const tail = text.slice(-48)
+  if (!tail.trim()) return false
+  const recent = text.slice(-1600)
+  let count = 0
+  for (let i = recent.indexOf(tail); i >= 0; i = recent.indexOf(tail, i + 1)) count++
+  return count >= 6
+}
 
 export interface OllamaOptions {
   /** Defaults to http://127.0.0.1:11434. Must be a loopback address. */
@@ -106,14 +132,15 @@ export class OllamaProvider implements AiProvider {
           model: request.model,
           messages: toMessages(request.system, request.turns),
           stream: true,
-          // Qwen3-VL "thinking" builds reason at length before answering; the
-          // tutor's instructions already ask for the steps, so skip it.
+          // Ask thinking builds not to reason at length (newer Ollama versions honour it).
           ...(thinking ? { think: false } : {}),
           ...(request.jsonSchema ? { format: request.jsonSchema } : {}),
           options: {
-            num_predict: request.maxOutputTokens,
+            num_predict: request.maxOutputTokens + (thinking ? THINKING_BUDGET : 0),
             num_ctx: CONTEXT_TOKENS,
-            ...(request.temperature !== undefined ? { temperature: request.temperature } : {})
+            ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+            // Qwen's recommended setting against repetition, for free text only (it would fight JSON keys).
+            ...(request.jsonSchema ? {} : { presence_penalty: 1.5 })
           }
         })
       })
@@ -128,6 +155,8 @@ export class OllamaProvider implements AiProvider {
 
     let usage = {}
     let finishReason: string | undefined
+    let answer = ''
+    let checkedAt = 0
     const decoder = new TextDecoder()
     let buffered = ''
     const reader = res.body.getReader()
@@ -150,7 +179,16 @@ export class OllamaProvider implements AiProvider {
           }
           if (chunk.error) throw httpError(500, JSON.stringify({ error: chunk.error }), request.model)
           const text = chunk.message?.content
-          if (text) yield { type: 'text', text }
+          if (text) {
+            answer += text
+            if (answer.length - checkedAt >= 200) {
+              checkedAt = answer.length
+              if (isLooping(answer)) {
+                throw new ProviderError('bad_response', 'The local model got stuck repeating itself, so Inkling stopped it. Try again, or choose a larger model in AI settings.')
+              }
+            }
+            yield { type: 'text', text }
+          }
           if (chunk.done) {
             finishReason = chunk.done_reason === 'length' ? 'MAX_TOKENS' : chunk.done_reason?.toUpperCase()
             usage = { inputTokens: chunk.prompt_eval_count, outputTokens: chunk.eval_count }
@@ -256,13 +294,17 @@ function httpError(status: number, body: string, model?: string): ProviderError 
     return new ProviderError('model_unavailable', `${name} isn't installed in Ollama.${pullHint(model)}`)
   }
   if (/does not support (images|vision)|image input/i.test(message)) {
-    return new ProviderError('model_unavailable', `${name} can't read images, so it can't see handwriting. Choose a vision model such as qwen3-vl:4b in AI settings.`)
+    return new ProviderError('model_unavailable', `${name} can't read images, so it can't see handwriting. Choose a vision model such as qwen3-vl:4b-instruct in AI settings.`)
   }
   if (/more system memory|out of memory|insufficient memory|cudaMalloc|failed to allocate/i.test(message)) {
-    return new ProviderError('server', `${name} needs more memory than this computer has free. Close other apps or choose a smaller model (qwen3-vl:2b) in AI settings.`)
+    return new ProviderError('server', `${name} needs more memory than this computer has free. Close other apps or choose a smaller model (qwen3-vl:2b-instruct) in AI settings.`)
   }
-  if (/unexpectedly stopped|exit status|llama runner/i.test(message)) {
-    return new ProviderError('server', `Ollama's model process stopped while answering (${shorten(message)}). Try again; if it repeats, choose a smaller model.`)
+  if (/unexpectedly stopped|exit status|llama runner|llama-server|EOF|signal: killed|terminated/i.test(message)) {
+    // In testing this was the operating system stopping the model for lack of memory.
+    return new ProviderError(
+      'server',
+      `Ollama's model stopped while answering, usually because the computer ran out of memory. Close other apps and try again, or choose a smaller model (qwen3-vl:2b-instruct) in AI settings. (${shorten(message)})`
+    )
   }
   if (status === 400) return new ProviderError('bad_request', `Ollama could not process this request: ${shorten(message)}`)
   if (status >= 500) return new ProviderError('server', `Ollama reported an error: ${shorten(message)}`, 5)
@@ -273,7 +315,7 @@ export function classifyOllamaError(err: unknown, ctx: { aborted: boolean; timed
   if (err instanceof ProviderError) return err
   if (ctx.aborted) return new ProviderError('canceled', 'Stopped.')
   if (ctx.timedOut) {
-    return new ProviderError('network', 'The local model took too long to answer. A smaller model (qwen3-vl:2b) or a smaller selection is faster on this computer.')
+    return new ProviderError('network', 'The local model took too long to answer. A smaller model (qwen3-vl:2b-instruct) or a smaller selection is faster on this computer.')
   }
   const e = err as { name?: string; message?: string; cause?: { code?: string } }
   if (e?.name === 'AbortError') return new ProviderError('canceled', 'Stopped.')

@@ -4,9 +4,9 @@
  * it, ask the tutor, "Show this on my page", look at the preview, approve,
  * then undo, redo and edit the AI's correction.
  *
- *   ollama pull qwen3-vl:4b
+ *   ollama pull qwen3-vl:4b-instruct
  *   npm run build && npm run test:live:app            (xvfb-run -a … on headless Linux)
- *   INKLING_LIVE_MODEL=qwen3-vl:2b npm run test:live:app
+ *   INKLING_LIVE_MODEL=qwen3-vl:2b-instruct npm run test:live:app
  *
  * Skips (exit 0) when Ollama isn't running or the model isn't installed.
  * Model-quality checks are reported, not asserted: the run fails only if the
@@ -24,7 +24,7 @@ import { strokesFor } from '../support/handwriting.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const shots = join(root, 'test-results')
 await mkdir(shots, { recursive: true })
-const model = process.env.INKLING_LIVE_MODEL ?? 'qwen3-vl:4b'
+const model = process.env.INKLING_LIVE_MODEL ?? 'qwen3-vl:4b-instruct'
 const ollama = 'http://127.0.0.1:11434'
 const slug = model.replace(/[^a-z0-9.-]+/gi, '_')
 const LONG = 15 * 60_000
@@ -163,9 +163,13 @@ try {
       await win.keyboard.press('End')
       await win.keyboard.type(' ✓')
       await win.click('[data-testid="tool-pen"]')
-      await sleep(400)
-      const edited = (await objects()).find((o) => o.id === text.id)
-      assert.ok(edited.text.endsWith(' ✓'), 'the AI correction is editable')
+      // The edit commits when the text box closes; wait for it to reach the page.
+      let edited
+      for (let i = 0; i < 50 && !edited?.text.endsWith(' ✓'); i++) {
+        await sleep(100)
+        edited = (await objects()).find((o) => o.id === text.id)
+      }
+      assert.ok(edited?.text.endsWith(' ✓'), `the AI correction is editable (text is now “${edited?.text}”)`)
       log(`Edited the AI note “${text.text}” with the text tool.`)
     } else log('The proposal had no text note to edit.')
   }
