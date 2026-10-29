@@ -122,7 +122,7 @@ function Intro({ icon: Icon, title, body }: { icon: typeof Sparkles; title: stri
  * on a modest computer can need a minute or more, mostly reading the image.
  */
 function Elapsed() {
-  const local = useAi((s) => s.status?.provider !== 'gemini')
+  const local = useAi((s) => s.status?.provider === 'ollama')
   const [start] = useState(() => Date.now())
   const [now, setNow] = useState(start)
   useEffect(() => {
@@ -142,6 +142,14 @@ function Elapsed() {
 function ProviderNote() {
   const status = useAi((s) => s.status)
   if (status?.provider === 'gemini') return <span data-testid="ai-provider-note">Sent to Google Gemini only when you ask.</span>
+  if (status?.provider === 'cloud') {
+    const q = status.cloud.quota
+    return (
+      <span data-testid="ai-provider-note">
+        Sent to Inkling’s beta server only when you ask.{q ? ` About ${q.approxAnswersLeft} answer${q.approxAnswersLeft === 1 ? '' : 's'} left today.` : ''}
+      </span>
+    )
+  }
   return <span data-testid="ai-provider-note">Answered on this computer by Ollama. Nothing leaves your device.</span>
 }
 
@@ -149,18 +157,24 @@ function ProviderNote() {
 export function AiStatusCard({ onOpenSettings, compact }: { onOpenSettings: () => void; compact?: boolean }) {
   const status = useAi((s) => s.status)
   const ready = !!status && aiReady(status)
-  const local = status?.provider !== 'gemini'
+  const local = status?.provider === 'ollama'
+  const cloud = status?.provider === 'cloud'
   if (compact && ready) {
     return (
       <p data-testid="ai-status" data-state="ready" className="mt-4 flex items-center justify-center gap-1.5 text-[12px] text-ink-3">
         <span className="h-1.5 w-1.5 rounded-full bg-[#2fae66]" />
-        {local ? `On this computer · ${modelLabel(status!.model)}` : `Connected · ${modelLabel(status!.model)} · free tier`}
+        {local ? `On this computer · ${modelLabel(status!.model)}` : cloud ? `Inkling beta · ${modelLabel(status!.model)} · free, limited daily` : `Connected · ${modelLabel(status!.model)} · free tier`}
       </p>
     )
   }
   let title: string
   let body: string
-  if (local) {
+  if (cloud) {
+    title = ready ? `Inkling beta · ${modelLabel(status!.model)}` : 'Set up the AI Tutor'
+    body = ready
+      ? 'Free for beta testers, with a daily allowance. Only what you ask about is sent.'
+      : 'Enter the beta access code the Inkling team sent you in AI settings. Nothing to download. Or use a local model with Ollama.'
+  } else if (local) {
     const missing = status?.models.find((m) => m.id === status.model)?.status === 'missing'
     title = ready ? `On this computer · ${modelLabel(status!.model)}` : status?.ollama.running === false ? 'Start Ollama to use the tutor' : missing ? `Install ${modelLabel(status!.model)}` : 'Set up the AI Tutor'
     body = ready

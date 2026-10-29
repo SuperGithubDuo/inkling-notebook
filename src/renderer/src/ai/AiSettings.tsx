@@ -1,14 +1,31 @@
 /**
- * AI section of Settings: which provider answers (local Ollama by default, or
- * Google Gemini for adults), then that provider's setup. Ollama: whether it
+ * AI section of Settings: which provider answers (Inkling's free cloud beta,
+ * local Ollama, or Google Gemini for adults), then that provider's setup.
+ * Cloud beta: server address, access code, today's allowance, consent. Ollama: whether it
  * runs, which vision models are installed and how to install one, model
  * choice and a connection test. Gemini: key, model choice (free models only,
  * checked against the models the key can use), connection test and consent.
  * Nothing is installed or downloaded from here.
  */
 import { useEffect, useState } from 'react'
-import { CircleAlert, CircleCheck, Copy, Cpu, KeyRound, LoaderCircle, RefreshCw, ShieldAlert } from 'lucide-react'
-import { GEMINI_ELIGIBILITY, GEMINI_MODELS, OLLAMA_MODELS, PROVIDERS, THINKING_MODEL_NOTE, modelLabel, type AiError, type AiModelId, type AiProviderId, type AiStatus, type ModelAvailability } from '@shared/ai'
+import { CircleAlert, CircleCheck, Cloud, Copy, Cpu, KeyRound, LoaderCircle, RefreshCw, ShieldAlert } from 'lucide-react'
+import {
+  CLOUD_DATA_NOTE,
+  CLOUD_MODEL_LABEL,
+  CLOUD_TERMS_URL,
+  GEMINI_ELIGIBILITY,
+  GEMINI_MODELS,
+  OLLAMA_MODELS,
+  PROVIDERS,
+  THINKING_MODEL_NOTE,
+  modelLabel,
+  type AiError,
+  type AiModelId,
+  type AiProviderId,
+  type AiStatus,
+  type CloudQuota,
+  type ModelAvailability
+} from '@shared/ai'
 import { cx } from '@/components/ui/primitives'
 import { GET_KEY_URL, GEMINI_TERMS_URL, OLLAMA_DOWNLOAD_URL, useAi } from './aiStore'
 
@@ -34,8 +51,8 @@ export function AiSettings() {
 
   return (
     <div className="space-y-4" data-testid="ai-settings" data-provider={status.provider}>
-      <div role="radiogroup" aria-label="AI provider" className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-        {(['ollama', 'gemini'] as const).map((id) => {
+      <div role="radiogroup" aria-label="AI provider" className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+        {(['cloud', 'ollama', 'gemini'] as const).map((id) => {
           const selected = status.provider === id
           return (
             <button
@@ -52,8 +69,10 @@ export function AiSettings() {
               <span className="min-w-0">
                 <span className="flex flex-wrap items-center gap-1.5 text-[13.5px] font-medium">
                   {PROVIDERS[id].label}
-                  {id === 'ollama' ? (
-                    <span className="rounded-full bg-[#e9f6ee] px-1.5 py-px text-[10.5px] font-semibold text-[#1f7a46]">DEFAULT</span>
+                  {id === 'cloud' ? (
+                    <span className="rounded-full bg-accent-soft px-1.5 py-px text-[10.5px] font-semibold text-accent">BETA</span>
+                  ) : id === 'ollama' ? (
+                    <span className="rounded-full bg-[#e9f6ee] px-1.5 py-px text-[10.5px] font-semibold text-[#1f7a46]">PRIVATE</span>
                   ) : (
                     <span className="rounded-full bg-[#fff1dc] px-1.5 py-px text-[10.5px] font-semibold text-[#9a6200]">18+</span>
                   )}
@@ -64,8 +83,180 @@ export function AiSettings() {
           )
         })}
       </div>
-      {status.provider === 'ollama' ? <OllamaSettings status={status} /> : <GeminiSettings status={status} />}
+      {status.provider === 'cloud' ? <CloudSettings status={status} /> : status.provider === 'ollama' ? <OllamaSettings status={status} /> : <GeminiSettings status={status} />}
     </div>
+  )
+}
+
+// ------------------------------------------------------------- Cloud beta
+
+/** Today's allowance in words: a share of the day and roughly how many answers. */
+export function quotaText(q: CloudQuota): string {
+  const left = Math.max(0, Math.min(q.testerLimit - q.testerUsed, q.globalLimit - q.globalUsed))
+  if (left <= 0 || q.approxAnswersLeft <= 0) return 'Today’s free allowance is used up.'
+  const share = Math.round((100 * left) / Math.max(1, q.testerLimit))
+  return `About ${q.approxAnswersLeft} answer${q.approxAnswersLeft === 1 ? '' : 's'} left today (${Math.min(100, share)}% of your daily allowance).`
+}
+
+const resetTime = (iso: string): string => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+function CloudSettings({ status }: { status: AiStatus }) {
+  const { setStatus } = useAi.getState()
+  const cloud = status.cloud
+  const [url, setUrl] = useState(cloud.urlFromBuild ? '' : (cloud.url ?? ''))
+  const [token, setToken] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [test, setTest] = useState<TestState>({ kind: 'idle' })
+
+  const save = async (): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    const result = await window.inkling.ai.setBetaAccess(token.trim(), cloud.urlFromBuild ? null : url.trim() || null)
+    setBusy(false)
+    if ('error' in result) return setError(result.error.message)
+    setStatus(result)
+    setToken('')
+    setTest({ kind: 'ok', latencyMs: 0 })
+  }
+  const runTest = async (): Promise<void> => {
+    setTest({ kind: 'running' })
+    const result = await window.inkling.ai.test()
+    setStatus(await window.inkling.ai.status())
+    setTest(result.ok ? { kind: 'ok', latencyMs: result.latencyMs } : { kind: 'error', error: result.error })
+  }
+
+  return (
+    <div className="space-y-4" data-testid="ai-cloud">
+      <div className="flex items-start gap-2.5 rounded-xl border border-line px-3 py-2.5 text-[13px]" data-testid="ai-cloud-about">
+        <Cloud size={15} className="mt-0.5 shrink-0 text-ink-3" />
+        <span className="text-ink-2">
+          <span className="font-medium text-ink">Free for beta testers, nothing to download.</span> Answers come from {CLOUD_MODEL_LABEL}. Each tester has a
+          daily allowance, and the whole beta shares Cloudflare’s free daily limit, so answers can run out for the day; they never become paid.
+        </span>
+      </div>
+
+      <div>
+        <span className="mb-1.5 block text-[13.5px] font-medium">Beta access</span>
+        {cloud.hasToken ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 rounded-xl border border-line bg-[#fafafb] px-3 py-2">
+              <KeyRound size={14} className="text-ink-3" />
+              <span className="flex-1 text-[13px] text-ink-2" data-testid="ai-beta-saved">
+                {cloud.tester ? <>Signed in as <strong className="text-ink">{cloud.tester}</strong> · </> : null}code ending in <code>…{cloud.tokenHint}</code>
+              </span>
+              <button type="button" data-testid="ai-beta-remove" onClick={async () => setStatus(await window.inkling.ai.clearBetaAccess())} className="rounded-lg px-2 py-1 text-[12.5px] text-[#c03a3e] hover:bg-[#fdf0f0]">
+                Remove
+              </button>
+            </div>
+            <p className="text-[12px] text-ink-3">
+              Server: <code>{cloud.url}</code>
+              {cloud.urlFromBuild ? ' (built into this version)' : ''}
+            </p>
+          </div>
+        ) : (
+          <form
+            className="space-y-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (token.trim()) void save()
+            }}
+          >
+            {cloud.urlFromBuild ? (
+              <p className="text-[12px] text-ink-3">
+                Server: <code>{cloud.url}</code> (built into this version)
+              </p>
+            ) : (
+              <input
+                type="url"
+                value={url}
+                data-testid="ai-beta-url"
+                aria-label="Beta server address"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="Server address (https://…)"
+                onChange={(e) => setUrl(e.target.value)}
+                className="w-full rounded-xl border border-line bg-white px-3 py-2 text-[13px] outline-none select-text focus:border-accent"
+              />
+            )}
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={token}
+                data-testid="ai-beta-token"
+                aria-label="Beta access code"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="Access code (starts with ink_)"
+                onChange={(e) => setToken(e.target.value)}
+                className="min-w-0 flex-1 rounded-xl border border-line bg-white px-3 py-2 text-[13px] outline-none select-text focus:border-accent"
+              />
+              <button type="submit" data-testid="ai-beta-save" disabled={!token.trim() || (!cloud.urlFromBuild && !url.trim()) || busy} className="rounded-xl bg-accent px-3.5 text-[13px] font-medium text-white disabled:opacity-40">
+                {busy ? 'Checking…' : 'Save'}
+              </button>
+            </div>
+          </form>
+        )}
+        {error && (
+          <p className="mt-1.5 text-[12.5px] text-[#c03a3e]" data-testid="ai-beta-error">
+            {error}
+          </p>
+        )}
+        {!cloud.hasToken && <p className="mt-1.5 text-[12px] text-ink-3">The Inkling team sends testers a server address and a personal access code. It's stored encrypted on this computer, never in your notebooks.</p>}
+        {cloud.hasToken && cloud.tokenProtection && cloud.tokenProtection !== 'encrypted' && (
+          <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-[#9a6200]">
+            <ShieldAlert size={13} className="mt-px shrink-0" />
+            {cloud.tokenProtection === 'weak' ? 'No system keyring was found, so the code is saved with weak protection.' : 'This system cannot encrypt secrets, so the code is kept only until Inkling closes.'}
+          </p>
+        )}
+      </div>
+
+      {cloud.hasToken && (
+        <div className="rounded-xl border border-line px-3 py-2.5 text-[13px]" data-testid="ai-beta-quota">
+          {cloud.quota ? (
+            <>
+              <span className="font-medium text-ink">{quotaText(cloud.quota)}</span>
+              <Meter used={cloud.quota.testerUsed} limit={cloud.quota.testerLimit} />
+              <span className="block text-[12px] text-ink-3">
+                Resets at {resetTime(cloud.quota.resetAt)} (midnight UTC). The beta as a whole has used {Math.round((100 * cloud.quota.globalUsed) / Math.max(1, cloud.quota.globalLimit))}% of today’s shared allowance.
+              </span>
+            </>
+          ) : (
+            <span className="text-ink-3">Today’s allowance appears after the connection test.</span>
+          )}
+        </div>
+      )}
+
+      <TestRow test={test} disabled={!cloud.hasToken} onTest={() => void runTest()} okText={(ms) => (ms ? `Connected (${ms} ms). The test uses none of your allowance.` : 'Access code accepted.')} />
+
+      <div className="rounded-xl border border-line px-3 py-2.5">
+        <label className="flex items-start gap-2.5 text-[13px]">
+          <input
+            type="checkbox"
+            data-testid="ai-consent-toggle"
+            checked={cloud.consented}
+            onChange={async (e) => setStatus(await window.inkling.ai.setConsent(e.target.checked))}
+            className="mt-0.5 accent-[var(--color-accent)]"
+          />
+          <span className="text-ink-2">
+            <span className="font-medium text-ink">Allow sending notebook content to Inkling’s beta server.</span> {CLOUD_DATA_NOTE} Don't include sensitive personal
+            information.{' '}
+            <a href={CLOUD_TERMS_URL} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+              Cloudflare’s data policy
+            </a>
+          </span>
+        </label>
+      </div>
+    </div>
+  )
+}
+
+function Meter({ used, limit }: { used: number; limit: number }) {
+  const pct = Math.min(100, Math.round((100 * used) / Math.max(1, limit)))
+  return (
+    <span className="my-1.5 block h-1.5 overflow-hidden rounded-full bg-[#eef0f3]" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - pct} aria-label="Allowance left today">
+      <span className={cx('block h-full rounded-full', pct > 85 ? 'bg-[#e5a12b]' : 'bg-accent')} style={{ width: `${100 - pct}%` }} />
+    </span>
   )
 }
 

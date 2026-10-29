@@ -1,0 +1,35 @@
+{
+  // Inkling AI beta server. Deploy with: npx wrangler deploy (from beta-server/).
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "inkling-ai-beta",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  // Shares Inkling's request schema and tutor prompts with the app (src/shared, src/main/ai/prompts.ts).
+  "alias": { "@shared": "../src/shared" },
+  // No Cloudflare API token is needed at runtime: the Worker reaches Workers AI through this binding.
+  "ai": { "binding": "AI" },
+  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "LedgerObject" }] },
+  // SQLite-backed Durable Objects are the kind included in the Workers Free plan.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LedgerObject"] }],
+  // Keep the Worker's own console lines (error kinds, never content) but not per-request invocation logs.
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
+  "vars": {
+    "MODEL": "@cf/qwen/qwen3.8-27b",
+    // Set to "free" only for an account on the Workers Free plan, where Workers AI stops instead of billing.
+    "ACCOUNT_PLAN": "free",
+    // Cloudflare's free allowance is 10,000 Neurons a day per account (00:00 UTC reset). Leave headroom.
+    "GLOBAL_DAILY_NEURONS": "9000",
+    "TESTER_DAILY_NEURONS": "900",
+    "PER_MINUTE": "6",
+    "TYPICAL_NEURONS_PER_ANSWER": "150",
+    // Cloudflare's published price for @cf/qwen/qwen3.8-27b, in Neurons per million tokens.
+    "INPUT_NEURONS_PER_M": "40909",
+    "OUTPUT_NEURONS_PER_M": "290909",
+    "REASONING_EFFORT": "low",
+    "DISABLE_THINKING": "true",
+    "STRUCTURED": "prompt",
+    "IMAGE_PATCH": "28"
+  }
+}

@@ -6,13 +6,15 @@ import { cx } from '@/components/ui/primitives'
 import { useAi } from './aiStore'
 import { useTutor } from './tutorStore'
 
-const SETTINGS_CODES = new Set(['no_key', 'invalid_key', 'consent_required', 'not_free', 'model_unavailable', 'offline'])
-const NO_RETRY = new Set(['no_key', 'consent_required', 'duplicate', 'invalid_key'])
+const SETTINGS_CODES = new Set(['no_key', 'invalid_key', 'consent_required', 'not_free', 'model_unavailable', 'offline', 'beta_closed'])
+const NO_RETRY = new Set(['no_key', 'consent_required', 'duplicate', 'invalid_key', 'beta_closed'])
 
 export function ErrorCard({ error, messageId, onOpenSettings, onRetry }: { error: AiError; messageId?: string; onOpenSettings: () => void; onRetry?: () => void }) {
   const running = useTutor((s) => !!s.running)
   const retry = onRetry ?? (messageId ? () => void useTutor.getState().retry(messageId) : undefined)
   const quota = error.code === 'daily_quota' || error.code === 'rate_limited'
+  // When the beta's allowance runs out, the local tutor is the way to keep going (the user switches; Inkling never does).
+  const offerLocal = useAi((s) => s.status?.provider === 'cloud') && (error.code === 'daily_quota' || error.code === 'beta_closed')
   return (
     <div data-testid="tutor-error" data-code={error.code} className={cx('rounded-[12px] border px-3 py-2.5 text-[13px]', quota ? 'border-[#f3d39a] bg-[#fff8e8]' : 'border-[#f2c9ca] bg-[#fdf3f3]')}>
       <div className="flex items-start gap-2">
@@ -32,7 +34,18 @@ export function ErrorCard({ error, messageId, onOpenSettings, onRetry }: { error
             {error.suggestModel.startsWith('gemini') ? ' (free)' : ''}
           </Action>
         )}
-        {retry && !NO_RETRY.has(error.code) && (
+        {offerLocal && (
+          <Action
+            testId="tutor-use-local"
+            onClick={async () => {
+              useAi.getState().setStatus(await window.inkling.ai.setProvider('ollama'))
+              onOpenSettings()
+            }}
+          >
+            Use the tutor on this computer (Ollama)
+          </Action>
+        )}
+        {retry && !NO_RETRY.has(error.code) && !(offerLocal && error.code === 'daily_quota') && (
           <Action testId="tutor-retry" disabled={running} onClick={retry}>
             <RotateCcw size={12} /> Try again
           </Action>

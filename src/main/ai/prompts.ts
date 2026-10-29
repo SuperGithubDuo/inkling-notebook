@@ -130,25 +130,39 @@ export const TASKS: Record<AiTask, TaskSpec> = {
 }
 
 /**
- * The spec for a task on a provider. Local Qwen3-VL models ground boxes as
- * [x1, y1, x2, y2] on 0–1000 ("bbox_2d"); their answer is converted to the
- * shared Gemini-style box_2d [ymin, xmin, ymax, xmax] before validation, so
- * everything after this point (validation, placement on the page) is shared.
+ * The spec for a task on a provider. Qwen models (local Qwen3-VL in Ollama,
+ * and Qwen 3.8 on Inkling's cloud beta) ground boxes as [x1, y1, x2, y2] on
+ * 0–1000 ("bbox_2d"); their answer is converted to the shared Gemini-style
+ * box_2d [ymin, xmin, ymax, xmax] before validation, so everything after this
+ * point (validation, placement on the page) is shared.
  */
 /** Token caps for local models: generous for the task, but a runaway answer on a CPU stops in minutes, not a quarter of an hour. */
 const LOCAL_MAX_TOKENS: Record<AiTask, number> = { chat: 1200, practice: 2500, check: 700, annotate: 1500 }
+/**
+ * Token caps on the cloud beta. Output is the expensive part of the shared
+ * free allowance (about 7× the price of input), and the server reserves the
+ * cap before every request, so these are what an answer needs, not more.
+ */
+export const CLOUD_MAX_TOKENS: Record<AiTask, number> = { chat: 900, practice: 1800, check: 500, annotate: 1000 }
 
 export function taskSpec(task: AiTask, provider: AiProviderId): TaskSpec {
   const base = TASKS[task]
-  if (provider !== 'ollama') return base
-  const spec = { ...base, maxOutputTokens: Math.min(base.maxOutputTokens, LOCAL_MAX_TOKENS[task]) }
-  if (task !== 'annotate') return spec
-  const schema = structuredClone(spec.jsonSchema!) as { properties: { annotations: { items: { properties: Record<string, unknown>; required: string[] } } } }
-  const item = schema.properties.annotations.items
-  const { box_2d, ...rest } = item.properties
-  item.properties = { kind: rest.kind, bbox_2d: box_2d, text: rest.text }
-  item.required = ['kind', 'bbox_2d']
-  return { ...spec, system: ANNOTATE_TEMPLATE.replace('BOX_RULE', QWEN_BOX), jsonSchema: schema, normalize: qwenBoxesToBox2d }
+  if (provider === 'gemini') return base
+  const caps = provider === 'cloud' ? CLOUD_MAX_TOKENS : LOCAL_MAX_TOKENS
+  let spec: TaskSpec = { ...base, maxOutputTokens: Math.min(base.maxOutputTokens, caps[task]) }
+  if (task === 'annotate') {
+    const schema = structuredClone(spec.jsonSchema!) as { properties: { annotations: { items: { properties: Record<string, unknown>; required: string[] } } } }
+    const item = schema.properties.annotations.items
+    const { box_2d, ...rest } = item.properties
+    item.properties = { kind: rest.kind, bbox_2d: box_2d, text: rest.text }
+    item.required = ['kind', 'bbox_2d']
+    spec = { ...spec, system: ANNOTATE_TEMPLATE.replace('BOX_RULE', QWEN_BOX), jsonSchema: schema, normalize: qwenBoxesToBox2d }
+  }
+  // Workers AI doesn't list Qwen 3.8 for JSON mode, so the schema is also spelled out in the instructions.
+  if (provider === 'cloud' && spec.jsonSchema) {
+    spec = { ...spec, system: `${spec.system}\nReply with one JSON object and nothing else (no code fences, no text before or after it). It must match this JSON Schema:\n${JSON.stringify(spec.jsonSchema)}` }
+  }
+  return spec
 }
 
 /** Rewrites bbox_2d [x1, y1, x2, y2] as box_2d [ymin, xmin, ymax, xmax], clamped to 0–1000. */

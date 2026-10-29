@@ -10,18 +10,58 @@
 import { z } from 'zod'
 
 /**
- * Where answers come from. Local Ollama is the default: everything stays on
- * this computer and there is no account or age requirement. Gemini is
- * optional; Google's terms limit it to adults (see GEMINI_ELIGIBILITY).
+ * Where answers come from.
+ * - cloud: Inkling's free beta server (Cloudflare Workers AI, Qwen 3.8). No
+ *   download; each tester has an access code and a small daily allowance.
+ * - ollama: a vision model on this computer. Free, private, unlimited, but
+ *   needs a few GB of download and memory.
+ * - gemini: optional, with the user's own Google key; adults only.
+ * A build made with a beta server address (INKLING_BETA_URL) starts on the
+ * cloud beta; otherwise on Ollama. A saved choice is always kept.
  */
-export const providerIdSchema = z.enum(['ollama', 'gemini'])
+export const providerIdSchema = z.enum(['cloud', 'ollama', 'gemini'])
 export type AiProviderId = z.infer<typeof providerIdSchema>
 export const DEFAULT_PROVIDER: AiProviderId = 'ollama'
 
 export const PROVIDERS: Record<AiProviderId, { label: string; local: boolean; description: string }> = {
+  cloud: { label: 'Inkling beta (cloud)', local: false, description: 'Free for beta testers, nothing to download. Needs a beta access code; limited answers per day.' },
   ollama: { label: 'Ollama (on this computer)', local: true, description: 'Free and private: a vision model runs on this computer. No account or API key.' },
   gemini: { label: 'Google Gemini', local: false, description: 'Optional cloud models. Requires a Google API key, and Google only permits users who are 18 or older.' }
 }
+
+/** The model behind the cloud beta. The server decides; this is what it is configured with. */
+export const CLOUD_MODEL = '@cf/qwen/qwen3.8-27b'
+export const CLOUD_MODEL_LABEL = 'Qwen 3.8 27B (Cloudflare Workers AI)'
+/** What the cloud beta does with notebook content, shown wherever it can be chosen. */
+export const CLOUD_DATA_NOTE =
+  'Your question and an image of what you selected go to Inkling’s beta server and are answered by Cloudflare Workers AI. Cloudflare says it does not use this content to train models or keep it after answering. Inkling’s server keeps only usage counts, not your content.'
+export const CLOUD_TERMS_URL = 'https://developers.cloudflare.com/workers-ai/platform/privacy/'
+
+/** A beta access code: `ink_` and 32 URL-safe characters (format only; the server decides validity). */
+export const betaTokenSchema = z
+  .string()
+  .trim()
+  .regex(/^ink_[A-Za-z0-9_-]{32}$/, 'That does not look like an Inkling beta access code (it starts with ink_).')
+
+/** The beta server address: https, or http on this computer (for testing). */
+export const betaUrlSchema = z
+  .string()
+  .trim()
+  .max(300)
+  .url()
+  .refine((u) => {
+    // zod runs this even when .url() has already failed, so it must not throw.
+    let url: URL
+    try {
+      url = new URL(u)
+    } catch {
+      return false
+    }
+    if (url.username || url.password || url.search || url.hash) return false
+    if (url.protocol === 'https:') return true
+    return url.protocol === 'http:' && /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/.test(url.host.replace(/:\d+$/, ''))
+  }, 'Use the https:// address you were given.')
+  .transform((u) => u.replace(/\/+$/, ''))
 
 /** Why Gemini is optional, shown wherever it can be chosen. */
 export const GEMINI_ELIGIBILITY =
@@ -75,10 +115,13 @@ export const ollamaModelIdSchema = z
 export type AiModelId = string
 export const OLLAMA_DEFAULT_URL = 'http://127.0.0.1:11434'
 
-export const modelLabel = (id: string): string => [...GEMINI_MODELS, ...OLLAMA_MODELS].find((m) => m.id === id)?.label ?? id.replace(/^qwen3-vl:(\d+)b$/, 'Qwen3-VL $1B (thinking)')
+export const modelLabel = (id: string): string =>
+  id === CLOUD_MODEL ? 'Qwen 3.8 27B' : ([...GEMINI_MODELS, ...OLLAMA_MODELS].find((m) => m.id === id)?.label ?? id.replace(/^qwen3-vl:(\d+)b$/, 'Qwen3-VL $1B (thinking)'))
 
 /** Version of the data-use notice. Raising it asks the user to agree again. */
 export const CONSENT_VERSION = 2
+/** Version of the cloud beta's data notice (CLOUD_DATA_NOTE). */
+export const CLOUD_CONSENT_VERSION = 1
 
 // ---------------------------------------------------------------- requests
 
@@ -140,6 +183,7 @@ export type AiErrorCode =
   | 'canceled'
   | 'bad_response'
   | 'offline' // the local Ollama server is not running
+  | 'beta_closed' // the cloud beta is paused or this access code was revoked
   | 'unknown'
 
 export interface AiError {
@@ -180,6 +224,37 @@ export interface OllamaState {
   checkedAt: string | null
 }
 
+/**
+ * The cloud beta allowance, as the server last reported it. Neurons are
+ * Cloudflare's unit of Workers AI usage; the UI shows them as a share of the
+ * day and as an approximate number of answers.
+ */
+export interface CloudQuota {
+  testerUsed: number
+  testerLimit: number
+  /** The whole beta's use today, against its cap (kept below Cloudflare's free 10,000). */
+  globalUsed: number
+  globalLimit: number
+  /** Rough number of typical answers left today for this tester. */
+  approxAnswersLeft: number
+  /** When the allowance resets (00:00 UTC, like Cloudflare's own). */
+  resetAt: string
+}
+
+export interface CloudState {
+  url: string | null
+  /** Whether the server address came with this build. */
+  urlFromBuild: boolean
+  hasToken: boolean
+  tokenHint: string | null
+  tokenProtection: KeyProtection | null
+  consented: boolean
+  quota: CloudQuota | null
+  /** Tester name the server knows this code by. */
+  tester: string | null
+  checkedAt: string | null
+}
+
 export interface AiStatus {
   provider: AiProviderId
   /** True when the active provider processes everything on this computer. */
@@ -200,6 +275,7 @@ export interface AiStatus {
   /** Models of the active provider; for Ollama also other installed vision models. */
   models: ModelAvailability[]
   ollama: OllamaState
+  cloud: CloudState
   /** ISO time the model list was last fetched. */
   modelsCheckedAt: string | null
   /** Set while the app is waiting out a rate limit or exhausted quota. */
@@ -209,6 +285,7 @@ export interface AiStatus {
 /** Can the tutor be asked something right now (as far as the app knows)? */
 export function aiReady(s: AiStatus): boolean {
   if (s.provider === 'gemini') return s.hasKey && s.consented
+  if (s.provider === 'cloud') return !!s.cloud.url && s.cloud.hasToken
   return s.ollama.running !== false && s.models.find((m) => m.id === s.model)?.status !== 'missing'
 }
 
@@ -223,6 +300,8 @@ export interface AiUsage {
   firstTokenMs?: number
   /** Milliseconds from sending to the complete answer. */
   totalMs?: number
+  /** Cloud beta: Workers AI Neurons this answer used (from the model's token counts). */
+  neurons?: number
 }
 
 export type AiEvent =

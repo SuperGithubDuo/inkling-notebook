@@ -5,6 +5,11 @@ dist/
 release/
 *.tsbuildinfo
 
+# Cloudflare Wrangler local state and secrets for the beta server
+.wrangler/
+.dev.vars
+.dev.vars.*
+
 # Test output
 test-results/
 coverage/

@@ -26,7 +26,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # The cloud beta server (Cloudflare Worker): typecheck and a bundle dry run. Nothing is deployed.
+      - run: npm ci
+        working-directory: beta-server
+      - run: npm run typecheck
+        working-directory: beta-server
+      - run: npx wrangler deploy --dry-run --outdir /tmp/beta-bundle
+        working-directory: beta-server

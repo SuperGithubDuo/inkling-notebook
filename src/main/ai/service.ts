@@ -4,13 +4,17 @@
  * allows one request at a time (and no accidental repeats), streams the answer
  * to the renderer and validates structured answers before they are delivered.
  *
- * Local Ollama (the default) needs no key or consent, since nothing leaves the
- * computer. For Gemini it also checks the key and the user's consent and
- * guards the free quota (a per-minute budget, waiting out rate limits). It
- * never changes provider or model by itself; it may only suggest one.
+ * Local Ollama needs no key or consent, since nothing leaves the computer.
+ * For Gemini it also checks the key and the user's consent and guards the
+ * free quota (a per-minute budget, waiting out rate limits). For the cloud
+ * beta it checks the access code and consent, paces requests, and keeps the
+ * allowance the server reports with every answer; the server enforces the
+ * daily limits itself. It never changes provider or model by itself; it may
+ * only suggest one.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import {
+  CLOUD_MODEL,
   GEMINI_MODELS,
   LITE_MODEL,
   DEFAULT_MODEL,
@@ -25,6 +29,8 @@ import {
   type AiStartResult,
   type AiStatus,
   type AiTestResult,
+  type CloudQuota,
+  type CloudState,
   type ModelAvailability
 } from '@shared/ai'
 import { parseTaskResult } from '@shared/tutor'
@@ -32,6 +38,12 @@ import type { AiConfig } from './config'
 import { ProviderError, type AiProvider, type ProviderModel } from './provider'
 import { taskSpec } from './prompts'
 import { OllamaProvider } from './ollama'
+import { CloudProvider, type CloudStatus } from './cloud'
+
+/** What the service needs from the cloud beta provider beyond AiProvider. */
+export interface BetaProvider extends AiProvider {
+  status(signal?: AbortSignal): Promise<CloudStatus>
+}
 
 /** What the service needs from a local provider beyond AiProvider. */
 export interface LocalProvider extends AiProvider {
@@ -45,6 +57,8 @@ export interface AiServiceOptions {
   makeProvider: (apiKey: string) => AiProvider
   /** Creates the local Ollama provider (default: 127.0.0.1:11434). */
   makeLocalProvider?: () => LocalProvider
+  /** Creates the cloud beta provider for a server address and access code. */
+  makeCloudProvider?: (opts: { baseUrl: string; token: string; onQuota: (q: CloudQuota, tester?: string) => void }) => BetaProvider
   emit: (event: AiEvent) => void
   now?: () => number
   limits?: Partial<Limits>
@@ -59,6 +73,8 @@ interface Limits {
   duplicateWindowMs: number
 }
 const DEFAULT_LIMITS: Limits = { minIntervalMs: 1500, perMinute: 8, duplicateWindowMs: 10_000 }
+/** The beta server allows 6 a minute per tester; staying under it avoids needless refusals. */
+const CLOUD_PER_MINUTE = 6
 /** Re-check the local server when the status is asked for and the last check is older than this. */
 const OLLAMA_RECHECK_MS = 15_000
 
@@ -80,6 +96,9 @@ export class AiService {
   private readonly limits: Limits
   private provider: AiProvider | null = null
   private providerKey: string | null = null
+  private readonly makeCloud: NonNullable<AiServiceOptions['makeCloudProvider']>
+  private cloud: { provider: BetaProvider; key: string } | null = null
+  private cloudInfo: { quota: CloudQuota | null; tester: string | null; checkedAt: string | null } = { quota: null, tester: null, checkedAt: null }
   private models: ProviderModel[] | null = null
   private modelsCheckedAt: string | null = null
   private readonly cooldowns = new Map<AiModelId, Cooldown>()
@@ -91,6 +110,7 @@ export class AiService {
     this.config = options.config
     this.makeProvider = options.makeProvider
     this.local = options.makeLocalProvider?.() ?? new OllamaProvider()
+    this.makeCloud = options.makeCloudProvider ?? ((o) => new CloudProvider(o))
     this.ollama = { url: this.local.baseUrl, running: null, version: null, checkedAt: null }
     this.emit = options.emit
     this.now = options.now ?? Date.now
@@ -100,27 +120,83 @@ export class AiService {
   status(): AiStatus {
     const provider = this.config.provider
     const model = this.config.model
-    const cd = provider === 'gemini' ? this.cooldownFor(model) : null
+    const cd = provider !== 'ollama' ? this.cooldownFor(model) : null
     return {
       provider,
       local: PROVIDERS[provider].local,
       model,
-      needsKey: provider === 'gemini',
+      needsKey: provider !== 'ollama',
       hasKey: !!this.config.apiKey,
       keyHint: this.config.keyHint,
       keyProtection: this.config.keyProtection,
-      consented: provider === 'gemini' ? this.config.consented : true,
+      consented: provider === 'gemini' ? this.config.consented : provider === 'cloud' ? this.config.cloudConsented : true,
       geminiConsented: this.config.consented,
       models: this.availability(),
       ollama: { ...this.ollama },
-      modelsCheckedAt: provider === 'gemini' ? this.modelsCheckedAt : this.ollama.checkedAt,
+      cloud: this.cloudState(),
+      modelsCheckedAt: provider === 'gemini' ? this.modelsCheckedAt : provider === 'cloud' ? this.cloudInfo.checkedAt : this.ollama.checkedAt,
       cooldown: cd ? { until: new Date(cd.until).toISOString(), reason: cd.reason, model } : null
     }
+  }
+
+  private cloudState(): CloudState {
+    return {
+      url: this.config.cloudUrl,
+      urlFromBuild: this.config.cloudUrlFromBuild,
+      hasToken: !!this.config.betaToken,
+      tokenHint: this.config.betaTokenHint,
+      tokenProtection: this.config.betaTokenProtection,
+      consented: this.config.cloudConsented,
+      quota: this.cloudInfo.quota,
+      tester: this.cloudInfo.tester,
+      checkedAt: this.cloudInfo.checkedAt
+    }
+  }
+
+  private noteQuota = (quota: CloudQuota, tester?: string): void => {
+    this.cloudInfo = { quota, tester: tester ?? this.cloudInfo.tester, checkedAt: new Date(this.now()).toISOString() }
+  }
+
+  /**
+   * Checks an access code (and server address) with the server before saving
+   * it. Costs no model usage. Nothing is saved if the server refuses the code.
+   */
+  async setBetaAccess(token: string, url: string | null): Promise<AiStatus | { error: AiError }> {
+    const baseUrl = url ?? this.config.cloudUrl
+    if (!baseUrl) return { error: { code: 'no_key', message: 'Enter the beta server address you were given.' } }
+    const probe = this.makeCloud({ baseUrl, token, onQuota: () => undefined })
+    try {
+      const s = await probe.status()
+      this.cancelActive()
+      await this.config.setBetaAccess(token, url)
+      this.cloud = null
+      this.noteQuota(s.quota, s.tester)
+      this.cooldowns.delete(CLOUD_MODEL)
+      this.last = null
+      return this.status()
+    } catch (err) {
+      return { error: toAiError(err) }
+    }
+  }
+
+  async clearBetaAccess(): Promise<AiStatus> {
+    this.cancelActive()
+    await this.config.clearBetaAccess()
+    this.cloud = null
+    this.cloudInfo = { quota: null, tester: null, checkedAt: null }
+    this.cooldowns.delete(CLOUD_MODEL)
+    return this.status()
   }
 
   /** The status, re-checking the local server first if that is due. */
   async freshStatus(): Promise<AiStatus> {
     if (this.config.provider === 'ollama' && this.now() - this.ollamaCheckedAt > OLLAMA_RECHECK_MS) await this.checkOllama()
+    if (this.config.provider === 'cloud') {
+      // Today's allowance, at most once a minute (the status call costs no model usage).
+      const at = this.cloudInfo.checkedAt ? Date.parse(this.cloudInfo.checkedAt) : 0
+      const beta = this.getCloud()
+      if (beta && !this.active && this.now() - at > 60_000) await beta.status().then((st) => this.noteQuota(st.quota, st.tester), () => undefined)
+    }
     return this.status()
   }
 
@@ -172,9 +248,11 @@ export class AiService {
     return this.status()
   }
 
+  /** Consent for the active cloud provider (Gemini or the beta). */
   async setConsent(accepted: boolean): Promise<AiStatus> {
     if (!accepted) this.cancelActive()
-    await this.config.setConsent(accepted)
+    if (this.config.provider === 'cloud') await this.config.setCloudConsent(accepted)
+    else await this.config.setConsent(accepted)
     return this.status()
   }
 
@@ -184,6 +262,17 @@ export class AiService {
       await this.checkOllama()
       if (this.ollama.running === false) return { ok: false, error: offline() }
       return { ok: true, models: this.availability() }
+    }
+    if (this.config.provider === 'cloud') {
+      const beta = this.getCloud()
+      if (!beta) return { ok: false, error: noBetaAccess(this.config.cloudUrl) }
+      try {
+        const s = await beta.status()
+        this.noteQuota(s.quota, s.tester)
+        return { ok: true, models: this.availability() }
+      } catch (err) {
+        return { ok: false, error: toAiError(err) }
+      }
     }
     const provider = this.getProvider()
     if (!provider) return { ok: false, error: noKey() }
@@ -203,6 +292,21 @@ export class AiService {
    */
   async test(): Promise<AiTestResult> {
     const providerId = this.config.provider
+    if (providerId === 'cloud') {
+      // The server's status check proves the address and the access code; a model call would spend the allowance.
+      const beta = this.getCloud()
+      if (!beta) return { ok: false, error: noBetaAccess(this.config.cloudUrl) }
+      const startedAt = this.now()
+      try {
+        const s = await beta.status()
+        this.noteQuota(s.quota, s.tester)
+        if (s.paused) return { ok: false, error: { code: 'beta_closed', message: 'The Inkling AI beta is paused right now. Try again later, or use the local Ollama tutor.' } }
+        if (s.quota.approxAnswersLeft > 0) this.cooldowns.delete(CLOUD_MODEL)
+        return { ok: true, model: CLOUD_MODEL, latencyMs: this.now() - startedAt, models: this.availability() }
+      } catch (err) {
+        return { ok: false, error: toAiError(err) }
+      }
+    }
     const provider = this.getProvider()
     if (!provider) return { ok: false, error: noKey() }
     const blocked = this.admit(null, { explicit: true })
@@ -242,8 +346,11 @@ export class AiService {
     if (this.config.provider === 'gemini' && !this.config.consented) {
       return { error: { code: 'consent_required', message: 'Allow Inkling to send notebook content to Google Gemini first (AI settings).' } }
     }
-    const provider = this.getProvider()
-    if (!provider) return { error: noKey() }
+    if (this.config.provider === 'cloud' && !this.config.cloudConsented) {
+      return { error: { code: 'consent_required', message: 'Allow Inkling to send notebook content to its beta server first (AI settings).' } }
+    }
+    const provider = this.config.provider === 'cloud' ? this.getCloud() : this.getProvider()
+    if (!provider) return { error: this.config.provider === 'cloud' ? noBetaAccess(this.config.cloudUrl) : noKey() }
     const model = this.config.model
     const hash = createHash('sha256').update(this.config.provider).update(model).update(JSON.stringify(request)).digest('hex')
     const blocked = this.admit(hash)
@@ -264,14 +371,14 @@ export class AiService {
 
   private async run(id: string, provider: AiProvider, model: AiModelId, request: AiRequest, controller: AbortController, startedAt: number): Promise<void> {
     const spec = taskSpec(request.task, provider.id)
-    const name = provider.id === 'ollama' ? 'The local model' : 'Gemini'
+    const name = provider.id === 'ollama' ? 'The local model' : provider.id === 'cloud' ? 'The beta tutor' : 'Gemini'
     let firstTokenMs: number | undefined
     let text = ''
     try {
       let usage = {}
       let finishReason: string | undefined
       for await (const chunk of provider.stream(
-        { model, system: spec.system, turns: request.turns, jsonSchema: spec.jsonSchema, maxOutputTokens: spec.maxOutputTokens, temperature: spec.temperature },
+        { model, task: request.task, system: spec.system, turns: request.turns, jsonSchema: spec.jsonSchema, maxOutputTokens: spec.maxOutputTokens, temperature: spec.temperature },
         controller.signal
       )) {
         if (chunk.type === 'text') {
@@ -319,10 +426,12 @@ export class AiService {
       return null
     }
     const model = this.config.model
+    const cloud = this.config.provider === 'cloud'
     const cd = this.cooldownFor(model)
     if (cd && !opts.explicit) {
       const wait = Math.ceil((cd.until - now) / 1000)
-      return this.withSuggestion(model, { code: cd.reason, message: cd.reason === 'rate_limited' ? `Gemini's free tier needs a short pause. Try again in ${wait} seconds.` : cd.message, retryAfter: wait })
+      const pause = cloud ? `The beta needs a short pause. Try again in ${wait} seconds.` : `Gemini's free tier needs a short pause. Try again in ${wait} seconds.`
+      return this.withSuggestion(model, { code: cd.reason, message: cd.reason === 'rate_limited' ? pause : cd.message, retryAfter: wait })
     }
     if (hash && this.last && this.last.hash === hash && !this.last.failed && now - this.last.at < this.limits.duplicateWindowMs) {
       return { code: 'duplicate', message: 'You just sent this exact request, and its answer is already shown. Change something and try again.' }
@@ -332,9 +441,11 @@ export class AiService {
     if (!opts.explicit && lastStart !== undefined && now - lastStart < this.limits.minIntervalMs) {
       return { code: 'rate_limited', message: 'One moment — sending requests too quickly.', retryAfter: Math.ceil((this.limits.minIntervalMs - (now - lastStart)) / 1000) }
     }
-    if (this.started.length >= this.limits.perMinute) {
+    const perMinute = cloud ? Math.min(this.limits.perMinute, CLOUD_PER_MINUTE) : this.limits.perMinute
+    if (this.started.length >= perMinute) {
       const wait = Math.ceil((60_000 - (now - this.started[0]!)) / 1000)
-      return { code: 'rate_limited', message: `To stay within Gemini's free limits, Inkling sends at most ${this.limits.perMinute} requests a minute. Try again in ${wait} seconds.`, retryAfter: wait }
+      const why = cloud ? 'The beta allows' : "To stay within Gemini's free limits, Inkling sends at most"
+      return { code: 'rate_limited', message: cloud ? `${why} ${perMinute} requests a minute. Try again in ${wait} seconds.` : `${why} ${perMinute} requests a minute. Try again in ${wait} seconds.`, retryAfter: wait }
     }
     return null
   }
@@ -346,6 +457,7 @@ export class AiService {
   }
 
   private withSuggestion(model: AiModelId, error: AiError): AiError {
+    if (this.config.provider === 'cloud') return error
     if (this.config.provider === 'ollama') {
       // Memory or speed trouble with a bigger model: the smaller one is installed, so offer it.
       const small = 'qwen3-vl:2b-instruct'
@@ -368,6 +480,7 @@ export class AiService {
 
   private availability(): ModelAvailability[] {
     if (this.config.provider === 'ollama') return this.ollamaAvailability()
+    if (this.config.provider === 'cloud') return [{ id: CLOUD_MODEL, status: this.cloudInfo.checkedAt ? 'available' : 'unknown', vision: true }]
     return GEMINI_MODELS.map((m) => {
       const id = m.id as AiModelId
       if (!this.models) return { id, status: 'unknown' as const }
@@ -397,7 +510,17 @@ export class AiService {
     return [...recommended, ...extra, ...orphan]
   }
 
+  private getCloud(): BetaProvider | null {
+    const url = this.config.cloudUrl
+    const token = this.config.betaToken
+    if (!url || !token) return null
+    const key = `${url}\n${token}`
+    if (this.cloud?.key !== key) this.cloud = { provider: this.makeCloud({ baseUrl: url, token, onQuota: this.noteQuota }), key }
+    return this.cloud.provider
+  }
+
   private getProvider(): AiProvider | null {
+    if (this.config.provider === 'cloud') return this.getCloud()
     if (this.config.provider === 'ollama') return this.local
     const key = this.config.apiKey
     if (!key) return null
@@ -424,6 +547,10 @@ export class AiService {
 
 const other = (model: AiModelId): AiModelId => (model === LITE_MODEL ? DEFAULT_MODEL : LITE_MODEL)
 const noKey = (): AiError => ({ code: 'no_key', message: 'Add a free Gemini API key in AI settings to use the tutor.' })
+const noBetaAccess = (url: string | null): AiError => ({
+  code: 'no_key',
+  message: url ? 'Enter your beta access code in AI settings to use the tutor.' : 'Enter the beta server address and your access code in AI settings to use the tutor.'
+})
 const offline = (): AiError => ({ code: 'offline', message: 'Ollama isn’t running. Start the Ollama app (or run “ollama serve” in a terminal), then try again.' })
 const notInstalled = (model: string): string => `${model} isn't installed in Ollama yet. To install it (a one-time download), run: ollama pull ${model}`
 

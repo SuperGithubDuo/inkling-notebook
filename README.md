@@ -1,6 +1,6 @@
 # Inkling
 
-An AI-native handwriting notebook for the desktop, built with Electron, React and TypeScript. Think GoodNotes-style ink, plus notebook organisation, plus an AI tutor that reads your handwriting and writes corrections directly on your pages. The tutor runs free and privately on your own computer with [Ollama](https://ollama.com) and a Qwen3-VL vision model; Google Gemini is an optional alternative for adults.
+An AI-native handwriting notebook for the desktop, built with Electron, React and TypeScript. Think GoodNotes-style ink, plus notebook organisation, plus an AI tutor that reads your handwriting and writes corrections directly on your pages. For the beta, the tutor runs free in the cloud on Inkling's own small server ([`beta-server/`](beta-server/README.md), Cloudflare Workers AI with the Qwen 3.8 vision model): nothing to download, a personal access code, and a limited number of answers per day. It can also run free and privately on your own computer with [Ollama](https://ollama.com) and a Qwen3-VL vision model, and Google Gemini is an optional alternative for adults.
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -9,6 +9,7 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 | 3 | Rich-text notes, search, links/backlinks, knowledge graph, PDF import/annotation/export | ✅ done |
 | 4 | AI Tutor on Google Gemini (free tier): streaming chat about handwriting, practice mode, previewed corrections on the page | ✅ done |
 | 4.6 | Local AI tutor on Ollama (default; Qwen3-VL), Gemini optional and 18+ only, narrow-window layout | ✅ done (live-model results: see *Local model results*) |
+| 4.7 | Free cloud beta: Inkling beta server on Cloudflare Workers AI (Qwen 3.8 27B), per-tester daily allowances inside the free tier, Ollama and Gemini kept | ✅ built and tested against a fake model; live-model run pending (see *Cloud beta*) |
 | 5 | Advanced AI editing on the canvas, more providers (OpenRouter, Anthropic Claude), handwriting search | planned |
 | 6 | Packaging, installers, theming, accessibility pass | planned |
 
@@ -16,7 +17,7 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 
 - Node.js **22.13 or later in the 22.x line, 24.x, or 26+** (Node 22 LTS or 24 LTS recommended), with the npm that ships with it. This is the strictest range among the toolchain: Electron 45 and `@electron/get` need ≥ 22.12, pdf.js needs ≥ 22.13, and Vitest 5 doesn't support the odd-numbered 23.x/25.x lines. `package.json` declares it under `engines`. Node 20 is not supported.
 - Windows 10/11, macOS or Linux, with internet access during install (the Electron runtime is about 100 MB).
-- For the AI Tutor: [Ollama](https://ollama.com/download) 0.12.7 or later and a vision model, e.g. `ollama pull qwen3-vl:4b-instruct` (3.3 GB download, ~5.5 GB of memory while answering). Inkling never installs or downloads these itself. A Gemini API key is the optional alternative (adults only).
+- For the AI Tutor, one of: a **beta access code** (cloud beta; nothing to install), or [Ollama](https://ollama.com/download) 0.12.7 or later and a vision model, e.g. `ollama pull qwen3-vl:4b-instruct` (3.3 GB download, ~5.5 GB of memory while answering). Inkling never installs or downloads these itself. A Gemini API key is the optional alternative (adults only).
 
 ## Install and run
 
@@ -43,13 +44,14 @@ Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Window
 npm run typecheck   # strict TypeScript, no emit
 npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets, notes/Markdown, search/links/graph, PDF export, assistant context
 npm run build
-npm run test:e2e    # drives the real Electron app with mouse input: Phase 1–4, regressions, local AI (Ollama), layout
+npm run test:e2e    # drives the real Electron app with mouse input: Phase 1–4, regressions, local AI (Ollama), cloud beta, layout
 npm run test:smoke:fake   # the real-Gemini smoke test, run against the local fake (no key needed)
 npm run test:live         # optional: handwriting scenarios against a REAL local model in Ollama
 npm run test:live:app     # optional: the full on-page correction workflow in the app with a REAL local model
+npm run test:live:cloud   # optional: the handwriting scenarios against the REAL cloud model (spends free allowance)
 ```
 
-Automated tests never call a model. The local-AI suite (`tests/e2e/ollama.e2e.mjs`) runs against a fake of the Ollama API (`tests/support/fakeOllama.mjs`: version, tags, show/capabilities, NDJSON chat streaming, its error bodies). The Gemini suites run the official `@google/genai` SDK against a local fake of the Gemini REST API (`tests/support/fakeGemini.mjs`), which speaks the same wire format (SSE streaming, `x-goog-api-key`, Google's error bodies). Both fakes record every request, including images and structured-output schemas.
+Automated tests never call a model. The local-AI suite (`tests/e2e/ollama.e2e.mjs`) runs against a fake of the Ollama API (`tests/support/fakeOllama.mjs`: version, tags, show/capabilities, NDJSON chat streaming, its error bodies). The Gemini suites run the official `@google/genai` SDK against a local fake of the Gemini REST API (`tests/support/fakeGemini.mjs`), which speaks the same wire format (SSE streaming, `x-goog-api-key`, Google's error bodies). Both fakes record every request, including images and structured-output schemas. The cloud-beta suites (`tests/unit/beta.test.ts`, `tests/e2e/cloud.e2e.mjs`) run the real beta server code (`beta-server/src/`, bundled on the fly by `tests/support/fakeBeta.mjs`) on a local port in front of a fake Workers AI model that speaks its OpenAI-style streaming format and reports token usage.
 
 ### Live local-model tests (optional)
 
@@ -162,9 +164,26 @@ The data comes from the link index (`graph()`), and the layout is a d3-force sim
 
 ## AI Tutor
 
-The tutor answers through one of two providers, chosen in Settings → AI Tutor. Both use the same instructions, structured-output schemas, validation and canvas commands; only the transport differs (`src/main/ai/ollama.ts`, `src/main/ai/gemini.ts`).
+The tutor answers through one of three providers, chosen in Settings → AI Tutor. All use the same instructions, structured-output schemas, validation and canvas commands; only the transport differs (`src/main/ai/cloud.ts`, `src/main/ai/ollama.ts`, `src/main/ai/gemini.ts`).
 
-### Local: Ollama (default)
+### Cloud beta (default in beta builds)
+
+For beta testers: free, nothing to download, no account. Answers come from **Qwen 3.8 27B** (`@cf/qwen/qwen3.8-27b`, Apache-2.0, with vision) on Cloudflare Workers AI, through Inkling's own small server (a Cloudflare Worker in [`beta-server/`](beta-server/README.md)).
+
+**Set up (testers).** The Inkling team sends you an access code (`ink_…`). Open Settings → AI Tutor → **Inkling beta**, paste it and press Save. Inkling checks it with the server before saving, and shows your name and today's allowance. A beta build has the server address built in; otherwise you also paste the address you were given. The first time you ask, Inkling asks permission to send notebook content to the beta server.
+
+**It's free, and limited.** Cloudflare gives each account 10,000 *Neurons* a day of Workers AI, reset at midnight UTC. On its Workers Free plan, usage beyond that is refused, never billed. The beta server divides that allowance:
+- Each tester has a daily allowance, 900 Neurons by default, about 6 typical answers. The panel shows roughly how many answers are left.
+- The whole beta stops at 9,000 Neurons a day, before Cloudflare's own limit.
+- When either runs out, the tutor says so plainly and offers a one-click switch to the local Ollama tutor. Inkling never switches by itself and never moves to paid usage.
+
+See *Cloud beta results* for what a typical interaction costs.
+
+**What is sent and kept.** The same as for any provider: your question, and an image of your selection or the page's typed/PDF text plus an image of its handwriting. The app sends only the task and the conversation; the server adds Inkling's instructions and limits, so an access code can't be used for anything but the tutor. Cloudflare says it [does not use Workers AI content to train models and does not keep it after answering](https://developers.cloudflare.com/workers-ai/platform/privacy/). The beta server keeps only usage counts per access code, never content. The access code is stored encrypted with the OS keychain (`beta-access.bin`), like a Gemini key. There is no Cloudflare API token in the app or the server: the server reaches Workers AI through its built-in binding.
+
+Running the server (deploying, adding testers, limits) is described in [`beta-server/README.md`](beta-server/README.md).
+
+### Local: Ollama (default in regular builds)
 
 A vision model runs on your own computer through [Ollama](https://ollama.com). It's free, needs no account or key, has no usage limits, and nothing leaves the computer: Inkling only talks to Ollama on `127.0.0.1:11434` and refuses any other address.
 
@@ -216,7 +235,7 @@ Google's Gemini API terms require users to be 18 or older and don't allow it in 
 
 **Key storage (Gemini).** The key lives only in the main process, encrypted with the operating system's keychain (Electron `safeStorage`) in the app's config folder (`gemini-key.bin`, next to `ai-settings.json`), never in your notebooks. The interface only ever sees its last four characters. On Linux without a keyring the key is saved with weak protection, and Settings says so. Where nothing can encrypt, it is kept in memory for the session only.
 
-**Providers.** `src/main/ai/provider.ts` defines the small interface the tutor needs (`listModels`, `stream` with text and image parts and optional JSON-schema output). `src/main/ai/ollama.ts` and `src/main/ai/gemini.ts` implement it; `src/main/ai/service.ts` applies consent, pacing and validation per provider. OpenRouter or Anthropic Claude can be added the same way without changing the tutor or the UI.
+**Providers.** `src/main/ai/provider.ts` defines the small interface the tutor needs (`listModels`, `stream` with text and image parts and optional JSON-schema output). `src/main/ai/cloud.ts`, `src/main/ai/ollama.ts` and `src/main/ai/gemini.ts` implement it; `src/main/ai/service.ts` applies consent, pacing and validation per provider. OpenRouter or Anthropic Claude can be added the same way without changing the tutor or the UI.
 
 ### Local model results
 
@@ -228,6 +247,24 @@ Measured with real models in Ollama 0.40.13 on a slow machine (2 CPU cores, 8 GB
 - All structured answers validated. On this machine the first words of an answer about an image took 75–145 s; text-only questions 3–7 s.
 - **Memory:** 4B peaks at about 5.5 GB and was killed by the OS four times in testing (out of about 30 requests) when other programs, or the app itself, also needed memory; the app explained it and left the page unchanged. Use 2B on 8 GB computers.
 <!-- /local-model-results -->
+
+### Cloud beta results
+
+<!-- cloud-beta-results -->
+**Not yet measured against the real model.** The cloud-beta code is tested end to end against the real server code with a fake model (unit and Electron acceptance tests), but this development environment cannot reach Cloudflare. `npm run test:live:cloud` runs the same handwriting scenarios against the real model and writes a report with each answer's correctness, latency, tokens and Neurons. It can run against the deployed server, or run the server code locally against the Workers AI REST API.
+
+Until then, the expected cost per interaction is estimated from Cloudflare's published rates for the model (40,909 Neurons per million input tokens and 290,909 per million output tokens) and the token counts measured for the same scenarios with Qwen3-VL 4B, which uses the same tokenizer family:
+
+| Interaction | Tokens in / out | Neurons |
+|---|---|---|
+| Question about a handwriting selection | ~1,300 / ~250 | ~125 |
+| Question about a note or PDF text | ~350 / ~200 | ~70 |
+| On-page markup (with schema in the instructions) | ~1,700 / ~270 | ~150 |
+| Answer check | ~500 / ~120 | ~55 |
+| Practice set (3 problems) | ~600 / ~900 | ~285 |
+
+A typical mix (60% questions, 25% markups, 10% checks, 5% practice sets) costs about **120 Neurons an interaction**. That makes about **75 interactions a day for the whole beta** under the 9,000 cap: for example 10 testers × 7, or 25 testers × 3. This assumes the model's hidden reasoning stays short with `reasoning_effort: low` and thinking off. If it doesn't, output tokens and costs rise, which is what the live run will show.
+<!-- /cloud-beta-results -->
 
 ## Notebook context API
 
@@ -250,7 +287,7 @@ The acceptance tests exercise this API in the real app (`INKLING_TEST_HOOKS=1` e
 ```
 src/
   main/         Electron main process: window, validated IPC, storage, image asset protocol
-    ai/         Provider interface, Gemini provider, AI service (consent, limits, streaming), key storage, task prompts
+    ai/         Provider interface, cloud beta, Ollama and Gemini providers, AI service (consent, limits, streaming), key storage, task prompts
   preload/      Narrow window.inkling bridge (contextIsolation + sandbox)
   shared/       Data schemas (zod), factories, migrations, IPC contract, AI request/result schemas
   renderer/src/
@@ -259,11 +296,13 @@ src/
     ai/         Tutor chat, practice, markup (annotation planning + preview), context building, Markdown/KaTeX rendering
     store/      Zustand store: library, pages, history, selection, tools
     services/   Debounced save queue
+beta-server/    Cloudflare Worker for the free cloud beta: access codes, daily allowance ledger (Durable Object), Workers AI streaming
 tests/
   unit/         vitest
   e2e/          Playwright-driven Electron acceptance tests
   smoke/        Optional real-Gemini smoke test
-  support/      Fake Gemini API server, test handwriting strokes
+  live/         Optional real-model tests (Ollama, cloud beta), shared handwriting scenarios
+  support/      Fake Gemini, Ollama and Workers AI servers, the beta server harness, test handwriting strokes
 ```
 
 **Source of truth.** Each page is versioned JSON (`schemaVersion` 3): an ordered list of vector objects — strokes (every point, with real pressure only when a stylus supplied it), text boxes, shapes and images — in page coordinates. Nothing is flattened to a bitmap. Paper is a page setting, never baked into content. Older files are migrated in memory on load (`shared/migrate.ts`).
@@ -302,6 +341,10 @@ useStore.getState().run(
 **Security.** Context isolation, sandboxed renderer, strict CSP, navigation blocked, every IPC call checks the sender and validates arguments, ids are validated before any path is built, and no filesystem or shell access is exposed to the renderer.
 
 ## Known limitations
+
+- The cloud beta's free allowance is small: about 75 typical interactions a day for all testers together (estimated; see *Cloud beta results*). It is shared through one Cloudflare account and resets at midnight UTC, which is the afternoon or evening in the Americas. The live-model run that measures real costs, quality and speed is still to be done.
+- The cloud beta's model has no JSON mode on Workers AI, so practice sets, answer checks and markups rely on the instructions plus Inkling's validation: an answer in the wrong format is rejected with "Try again" and still costs allowance.
+- The beta server can only declare, not verify, that its Cloudflare account is on the Workers Free plan (`ACCOUNT_PLAN`). On a Workers Paid account, usage beyond the free allowance would be billed, though the server's own cap still stops at 9,000 Neurons a day.
 
 - The local tutor's quality and speed depend on the model and the computer. Small models (2B) misread handwriting more often; see *Local model results* for what has actually been measured.
 - Gemini is for adults only (Google's terms). Inkling can't tell whether your Google Cloud project has billing enabled. Use a key from a project without billing to be sure of no charges.

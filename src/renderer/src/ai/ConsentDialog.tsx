@@ -1,16 +1,19 @@
 /**
- * Asked once before any notebook content is sent to Gemini. Explains what is
- * sent, that Google may use free-tier content (including human review), the
- * age requirement, and how to stay on the free tier.
+ * Asked once before any notebook content is sent to a cloud provider.
+ * Gemini: what is sent, that Google may use free-tier content (including
+ * human review), the age requirement, and how to stay on the free tier.
+ * Cloud beta: what is sent, where it goes, what Cloudflare and Inkling keep,
+ * and that the free allowance is limited.
  */
 import { useEffect, useRef } from 'react'
 import { ShieldCheck } from 'lucide-react'
 import { GEMINI_TERMS_URL, useAi } from './aiStore'
-import { GEMINI_ELIGIBILITY } from '@shared/ai'
+import { CLOUD_DATA_NOTE, CLOUD_TERMS_URL, GEMINI_ELIGIBILITY } from '@shared/ai'
 
 export function ConsentDialog() {
   const open = useAi((s) => s.consentOpen)
   const answer = useAi((s) => s.answerConsent)
+  const cloud = useAi((s) => s.status?.provider === 'cloud')
   const allow = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (!open) return
@@ -25,6 +28,7 @@ export function ConsentDialog() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [open, answer])
   if (!open) return null
+  if (cloud) return <CloudConsent answer={answer} allow={allow} />
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#1f2430]/30">
@@ -74,6 +78,49 @@ export function ConsentDialog() {
             className="rounded-xl bg-accent px-4 py-2 text-[13.5px] font-medium text-white hover:bg-accent-strong"
           >
             I'm 18 or older — allow
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CloudConsent({ answer, allow }: { answer: (ok: boolean) => Promise<void>; allow: React.RefObject<HTMLButtonElement | null> }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#1f2430]/30">
+      <div role="dialog" aria-modal aria-labelledby="consent-title" data-testid="ai-consent" data-provider="cloud" className="animate-pop w-[540px] max-w-[calc(100vw-32px)] rounded-2xl bg-white p-6 shadow-pop">
+        <div className="mb-3 flex items-center gap-2.5">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-lav-soft text-lav">
+            <ShieldCheck size={18} />
+          </span>
+          <h2 id="consent-title" className="text-[17px] font-semibold">
+            Send notebook content to Inkling’s beta tutor?
+          </h2>
+        </div>
+        <div className="space-y-2.5 text-[13.5px] leading-relaxed text-ink-2 select-text">
+          <p>
+            When you ask the tutor something, Inkling sends your question and the context you include — an image of your lasso selection, or text from the
+            current page — over an encrypted connection. Nothing is sent until you ask.
+          </p>
+          <p className="rounded-xl border border-line px-3 py-2 text-ink">{CLOUD_DATA_NOTE}</p>
+          <p>
+            The beta is free, with a limited number of answers per tester per day. It never switches to paid usage: when the day’s allowance is used up, the
+            tutor stops until midnight UTC. Don’t include sensitive personal information.
+          </p>
+          <p>
+            Read{' '}
+            <a href={CLOUD_TERMS_URL} target="_blank" rel="noreferrer" className="text-accent underline">
+              Cloudflare’s Workers AI data policy
+            </a>
+            . You can withdraw this permission any time in Settings.
+          </p>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={() => void answer(false)} className="rounded-xl px-4 py-2 text-[13.5px] font-medium text-ink-2 hover:bg-[#f1f2f4]">
+            Not now
+          </button>
+          <button ref={allow} type="button" data-testid="ai-consent-allow" onClick={() => void answer(true)} className="rounded-xl bg-accent px-4 py-2 text-[13.5px] font-medium text-white hover:bg-accent-strong">
+            Allow
           </button>
         </div>
       </div>
