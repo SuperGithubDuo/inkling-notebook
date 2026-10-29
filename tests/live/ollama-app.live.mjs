@@ -46,7 +46,7 @@ const configDir = await mkdtemp(join(tmpdir(), 'inkling-live-app-config-'))
 await writeFile(join(configDir, 'ai-settings.json'), JSON.stringify({ version: 2, provider: 'ollama', models: { gemini: 'gemini-3.8-flash', ollama: model }, consent: null }))
 // Test hooks expose the notebook context for reading the page; no AI endpoint is overridden,
 // so the app talks to the real Ollama on 127.0.0.1:11434.
-const env = { ...process.env, INKLING_DATA_DIR: dataDir, INKLING_CONFIG_DIR: configDir, INKLING_TEST_HOOKS: '1' }
+const env = { ...process.env, INKLING_SKIP_WELCOME: '1', INKLING_DATA_DIR: dataDir, INKLING_CONFIG_DIR: configDir, INKLING_TEST_HOOKS: '1' }
 delete env.NODE_OPTIONS
 delete env.ELECTRON_RUN_AS_NODE
 delete env.INKLING_OLLAMA_URL

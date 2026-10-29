@@ -42,9 +42,35 @@ const api: InklingApi = {
       return () => ipcRenderer.removeListener(IPC.aiEvent, listener)
     }
   },
+  appInfo: () => ipcRenderer.invoke(IPC.appInfo),
+  openFeedback: () => ipcRenderer.invoke(IPC.openFeedback),
+  backups: {
+    list: () => ipcRenderer.invoke(IPC.backupList),
+    backupNow: () => ipcRenderer.invoke(IPC.backupNow),
+    restore: (path) => ipcRenderer.invoke(IPC.backupRestore, path),
+    showFolder: () => ipcRenderer.invoke(IPC.backupShowFolder)
+  },
+  updates: {
+    state: () => ipcRenderer.invoke(IPC.updateState),
+    check: () => ipcRenderer.invoke(IPC.updateCheck),
+    install: () => ipcRenderer.invoke(IPC.updateInstall),
+    onState: (handler) => {
+      const listener = (_e: unknown, state: Parameters<typeof handler>[0]): void => handler(state)
+      ipcRenderer.on(IPC.updateChanged, listener)
+      return () => ipcRenderer.removeListener(IPC.updateChanged, listener)
+    }
+  },
+  onCommand: (handler) => {
+    const listener = (_e: unknown, command: Parameters<typeof handler>[0]): void => handler(command)
+    ipcRenderer.on(IPC.appCommand, listener)
+    return () => ipcRenderer.removeListener(IPC.appCommand, listener)
+  },
   onFlushRequest: (handler) => {
     ipcRenderer.on(IPC.flushRequest, () => {
-      void handler().finally(() => ipcRenderer.send(IPC.flushDone))
+      handler().then(
+        (result) => ipcRenderer.send(IPC.flushDone, result),
+        (err: Error) => ipcRenderer.send(IPC.flushDone, { ok: false, message: err?.message ?? String(err) })
+      )
     })
   }
 }

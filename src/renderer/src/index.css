@@ -61,6 +61,11 @@ textarea {
   outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
   outline-offset: 2px;
 }
+/* A dialog takes focus so keyboard users start inside it; the panel itself needs no ring. */
+[role='dialog']:focus-visible {
+  outline: none;
+}
+
 
 .thin-scroll {
   scrollbar-width: thin;

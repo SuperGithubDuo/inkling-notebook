@@ -14,6 +14,7 @@ import type { CanvasObject, Library, NoteDoc, NoteNode, NotebookIcon, NotebookMe
 import { HISTORY_LIMIT, applyTransaction, invertTransaction, type PageHistory, type Transaction } from '@/canvas/history'
 import { buildTransaction, pasteCommands, CommandError, type CanvasCommand, type CommandContext } from '@/canvas/commands'
 import { SaveQueue, type SaveStatus } from '@/services/saveQueue'
+import type { FlushResult } from '@shared/ipc'
 
 export type Section = 'notebooks' | 'all' | 'favorites' | 'graph' | 'shared' | 'trash'
 export type View = { kind: 'library'; section: Section } | { kind: 'notebook' }
@@ -48,6 +49,8 @@ interface State {
   noteRevision: Record<string, number>
   history: Record<string, PageHistory>
   conflicts: Conflict[]
+  /** Pages saved by a newer version of Inkling: shown empty, never saved over. */
+  lockedPages: Record<string, true>
   saveStatus: SaveStatus
 
   tool: Tool
@@ -75,7 +78,7 @@ interface State {
 
 interface Actions {
   init(): Promise<void>
-  flush(): Promise<void>
+  flush(): Promise<FlushResult>
   showSection(section: Section): void
   openNotebook(notebookId: string, pageId?: string): Promise<void>
   selectPage(pageId: string): void
@@ -145,7 +148,7 @@ export const useStore = create<Store>()((set, get) => {
     getPage: (id) => get().pages[id],
     getNote: (id) => get().notes[id],
     getLibrary: () => get().library,
-    isBlocked: (id) => get().conflicts.some((c) => c.pageId === id),
+    isBlocked: (id) => get().conflicts.some((c) => c.pageId === id) || !!get().lockedPages[id],
     onStatus: (saveStatus) => set({ saveStatus }),
     onConflict: (pageId, conflictPath) =>
       set((s) => ({ conflicts: [...s.conflicts.filter((c) => c.pageId !== pageId), { pageId, conflictPath }] }))
@@ -187,7 +190,11 @@ export const useStore = create<Store>()((set, get) => {
     try {
       const result = await window.inkling.loadNote(notebookId, pageId)
       note = result.note
-      if (result.recovered) set((s) => ({ recovered: [...s.recovered, `note ${pageId.slice(0, 8)}`] }))
+      if (result.newer) {
+        set((s) => ({ lockedPages: { ...s.lockedPages, [pageId]: true }, notes: { ...s.notes, [pageId]: createNoteDoc(notebookId, pageId) } }))
+        return
+      }
+      if (result.recovered) set((s) => ({ recovered: [...s.recovered, note ? `note ${pageId.slice(0, 8)} (from its backup)` : `note ${pageId.slice(0, 8)} (unreadable; the damaged file was kept next to it)`] }))
     } catch (err) {
       set({ saveStatus: { state: 'error', message: `Could not open note: ${(err as Error).message}` } })
       return
@@ -206,7 +213,11 @@ export const useStore = create<Store>()((set, get) => {
     try {
       const result = await window.inkling.loadPage(notebookId, pageId)
       page = result.page
-      if (result.recovered) set((s) => ({ recovered: [...s.recovered, `page ${pageId.slice(0, 8)}`] }))
+      if (result.newer) {
+        set((s) => ({ lockedPages: { ...s.lockedPages, [pageId]: true }, pages: { ...s.pages, [pageId]: createPageDoc(notebookId, pageId) } }))
+        return
+      }
+      if (result.recovered) set((s) => ({ recovered: [...s.recovered, page ? `page ${pageId.slice(0, 8)} (from its backup)` : `page ${pageId.slice(0, 8)} (unreadable; the damaged file was kept next to it)`] }))
     } catch (err) {
       set({ saveStatus: { state: 'error', message: `Could not open page: ${(err as Error).message}` } })
       return
@@ -236,6 +247,7 @@ export const useStore = create<Store>()((set, get) => {
     noteRevision: {},
     history: {},
     conflicts: [],
+    lockedPages: {},
     saveStatus: { state: 'saved' },
 
     tool: 'pen',
@@ -424,7 +436,7 @@ export const useStore = create<Store>()((set, get) => {
 
     updateNote(pageId, doc) {
       const note = get().notes[pageId]
-      if (!note) return
+      if (!note || get().lockedPages[pageId]) return
       set((s) => ({ notes: { ...s.notes, [pageId]: { ...note, doc, updatedAt: Date.now() } } }))
       saver.markNote(pageId)
       touchPage(note.notebookId, pageId)
@@ -586,6 +598,10 @@ export const useStore = create<Store>()((set, get) => {
     commit(pageId, tx) {
       const page = get().pages[pageId]
       if (!page || tx.ops.length === 0) return
+      if (get().lockedPages[pageId]) {
+        set({ notice: 'This page was saved by a newer version of Inkling. Update Inkling to view and edit it; it is left unchanged.' })
+        return
+      }
       const prev = get().history[pageId] ?? { undo: [], redo: [] }
       set((s) => ({
         pages: { ...s.pages, [pageId]: applyTransaction(page, tx) },

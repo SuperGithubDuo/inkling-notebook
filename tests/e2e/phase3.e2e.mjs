@@ -21,7 +21,7 @@ const shots = process.env.SHOTS ?? join(root, 'test-results')
 await mkdir(shots, { recursive: true })
 const dataDir = await mkdtemp(join(tmpdir(), 'inkling-e2e3-'))
 const scratch = await mkdtemp(join(tmpdir(), 'inkling-e2e3-files-'))
-const env = { ...process.env, INKLING_DATA_DIR: dataDir, INKLING_TEST_HOOKS: '1' }
+const env = { ...process.env, INKLING_SKIP_WELCOME: '1', INKLING_DATA_DIR: dataDir, INKLING_TEST_HOOKS: '1' }
 delete env.NODE_OPTIONS
 delete env.ELECTRON_RUN_AS_NODE
 const step = (msg) => console.log(`  ✓ ${msg}`)

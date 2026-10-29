@@ -29,7 +29,7 @@ const ollama = await startFakeOllama()
 const { accessCode } = await server.addTester('Ada (beta)', 600)
 const env = {
   ...process.env,
-  INKLING_DATA_DIR: dataDir,
+  INKLING_SKIP_WELCOME: '1', INKLING_DATA_DIR: dataDir,
   INKLING_CONFIG_DIR: configDir,
   INKLING_TEST_HOOKS: '1',
   // What a beta build has built in (MAIN_VITE_INKLING_BETA_URL).

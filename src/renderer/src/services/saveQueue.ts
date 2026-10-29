@@ -4,7 +4,7 @@
  * immediately (Ctrl+S, window close). Failed saves stay dirty and are retried.
  */
 import type { Library, NoteDoc, PageDoc } from '@shared/schema'
-import type { SaveResult } from '@shared/ipc'
+import type { FlushResult, SaveResult } from '@shared/ipc'
 
 export type SaveStatus = { state: 'saved' | 'saving' | 'error'; message?: string }
 
@@ -28,6 +28,8 @@ export class SaveQueue {
   private libraryDirty = false
   private timer: ReturnType<typeof setTimeout> | null = null
   private running: Promise<void> | null = null
+  /** The first error of the last write, if it had any. */
+  private lastError: string | null = null
 
   constructor(private readonly deps: Deps) {}
 
@@ -55,12 +57,18 @@ export class SaveQueue {
     this.dirtyNotes.delete(pageId)
   }
 
-  async flush(): Promise<void> {
+  /** Writes everything now. Resolves with whether it all reached the disk (quitting depends on it). */
+  async flush(): Promise<FlushResult> {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     // Wait for an in-flight run, then write whatever became dirty meanwhile.
     while (this.running) await this.running
     if (this.hasPending) await this.run()
+    if (this.timer && !this.hasPending) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+    return this.hasPending || this.lastError ? { ok: false, message: this.lastError ?? 'Some changes are not saved yet.' } : { ok: true }
   }
 
   private schedule(delay: number): void {
@@ -138,6 +146,7 @@ export class SaveQueue {
       }
     }
 
+    this.lastError = errors[0] ?? null
     if (errors.length) {
       this.deps.onStatus({ state: 'error', message: errors[0] })
       if (this.hasPending) {

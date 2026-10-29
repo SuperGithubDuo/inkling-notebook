@@ -26,7 +26,7 @@ const configDir = await mkdtemp(join(tmpdir(), 'inkling-e2e4-config-'))
 const fake = await startFakeGemini()
 const env = {
   ...process.env,
-  INKLING_DATA_DIR: dataDir,
+  INKLING_SKIP_WELCOME: '1', INKLING_DATA_DIR: dataDir,
   INKLING_CONFIG_DIR: configDir,
   INKLING_TEST_HOOKS: '1',
   INKLING_GEMINI_BASE_URL: fake.url,

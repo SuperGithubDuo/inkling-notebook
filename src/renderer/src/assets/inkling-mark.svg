@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0.12" y1="0.05" x2="0.9" y2="0.98">
+      <stop offset="0" stop-color="#3b7bf0"/>
+      <stop offset="1" stop-color="#6a5cef"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square on Apple's icon grid: 824 px body with ~100 px margin. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  <!-- A handwritten stroke: the stem of an "i" flowing into an underline. -->
+  <path d="M500 462 C 494 560, 484 642, 490 694 C 497 752, 560 760, 628 708" fill="none" stroke="#ffffff" stroke-width="70" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- The dot of the "i" is a spark: the AI tutor. -->
+  <path d="M508 236 C 518 292, 532 306, 588 316 C 532 326, 518 340, 508 396 C 498 340, 484 326, 428 316 C 484 306, 498 292, 508 236 Z" fill="#ffffff"/>
+</svg>

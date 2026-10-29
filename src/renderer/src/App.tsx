@@ -15,6 +15,7 @@ import { useAi } from './ai/aiStore'
 import { TUTOR_INPUT_ID, openTutorChat } from './ai/tutorStore'
 import { ConsentDialog } from './ai/ConsentDialog'
 import { NoteEditor } from './notes/NoteEditor'
+import { AppDialogs } from './app/AppDialogs'
 
 
 export function App() {
@@ -79,6 +80,7 @@ export function App() {
       </div>
       {settings && <SettingsDialog onClose={() => useAi.getState().openSettings(false)} />}
       <ConsentDialog />
+      <AppDialogs />
       {searchOpen && <SearchPalette onClose={() => useStore.getState().setSearchOpen(false)} />}
     </div>
   )
@@ -106,7 +108,16 @@ function Notices() {
   const resolve = useStore((s) => s.resolveConflictWithDisk)
   const notice = useStore((s) => s.notice)
   const setNotice = useStore((s) => s.setNotice)
+  const locked = useStore((s) => !!s.activePageId && !!s.lockedPages[s.activePageId])
   const [dismissed, setDismissed] = useState(false)
+  if (locked) {
+    return (
+      <div role="alert" data-testid="page-locked" className="absolute top-3 right-3 left-3 z-20 flex items-center gap-3 rounded-xl border border-[#f3d39a] bg-[#fff8e8] px-4 py-2.5 text-[13px] shadow-float">
+        <TriangleAlert size={16} className="shrink-0 text-[#c27c0e]" />
+        <span className="flex-1">This page was saved by a newer version of Inkling, so it can’t be shown here. It is left unchanged. Update Inkling to open it.</span>
+      </div>
+    )
+  }
   if (notice) {
     return (
       <div role="alert" className="absolute top-3 right-3 left-3 z-20 flex items-center gap-3 rounded-xl border border-line bg-white px-4 py-2.5 text-[13px] shadow-float">
@@ -136,7 +147,7 @@ function Notices() {
     return (
       <div role="status" className="absolute top-3 right-3 left-3 z-20 flex items-center gap-3 rounded-xl border border-line bg-white px-4 py-2.5 text-[13px] shadow-float">
         <TriangleAlert size={16} className="shrink-0 text-[#c27c0e]" />
-        <span className="flex-1">Recovered from backup after a damaged file was found: {recovered.join(', ')}.</span>
+        <span className="flex-1" data-testid="recovered-notice">Inkling found a damaged file and repaired it: {recovered.join('; ')}.</span>
         <button type="button" onClick={() => setDismissed(true)} className="text-ink-3 hover:text-ink">
           Dismiss
         </button>

@@ -17,7 +17,7 @@ const shots = process.env.SHOTS ?? join(root, 'test-results')
 await mkdir(shots, { recursive: true })
 const dataDir = await mkdtemp(join(tmpdir(), 'inkling-e2e-'))
 
-const env = { ...process.env, INKLING_DATA_DIR: dataDir }
+const env = { ...process.env, INKLING_SKIP_WELCOME: '1', INKLING_DATA_DIR: dataDir }
 delete env.NODE_OPTIONS
 delete env.ELECTRON_RUN_AS_NODE
 

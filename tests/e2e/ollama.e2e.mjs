@@ -31,7 +31,7 @@ const fake = await startFakeOllama()
 fake.setDown(true)
 const env = {
   ...process.env,
-  INKLING_DATA_DIR: dataDir,
+  INKLING_SKIP_WELCOME: '1', INKLING_DATA_DIR: dataDir,
   INKLING_CONFIG_DIR: configDir,
   INKLING_TEST_HOOKS: '1',
   INKLING_OLLAMA_URL: fake.url,

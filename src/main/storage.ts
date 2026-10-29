@@ -11,6 +11,9 @@
  *    the main file is unreadable or fails schema validation.
  *  - If a file was modified by another program since we last read or wrote it,
  *    we do not overwrite it; our version goes to a `.conflict-<time>.json` copy.
+ *  - A file written by a newer version of Inkling (a higher schemaVersion) is
+ *    never treated as damaged: it is left exactly as it is, and reported as
+ *    `newer` so the app can say "update Inkling" instead of replacing it.
  */
 import { promises as fs } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -20,6 +23,8 @@ import { migrateLibrary, migratePage } from '@shared/migrate'
 import {
   assetNameSchema,
   LIBRARY_SCHEMA_VERSION,
+  NOTE_SCHEMA_VERSION,
+  PAGE_SCHEMA_VERSION,
   idSchema,
   librarySchema,
   noteDocSchema,
@@ -32,6 +37,16 @@ import type { SaveResult } from '@shared/ipc'
 
 const pageFileSchema = z.preprocess(migratePage, pageDocSchema) as unknown as ZodType<PageDoc>
 const libraryFileSchema = z.preprocess(migrateLibrary, librarySchema) as unknown as ZodType<Library>
+
+/** Parses library.json text (any supported version) without touching any file; null if it isn't valid. */
+export function parseLibraryJson(raw: string): Library | null {
+  try {
+    const parsed = libraryFileSchema.safeParse(JSON.parse(raw))
+    return parsed.success ? parsed.data : null
+  } catch {
+    return null
+  }
+}
 
 export const MAX_IMAGE_BYTES = 30 * 1024 * 1024
 export const MAX_PDF_BYTES = 200 * 1024 * 1024
@@ -63,6 +78,14 @@ export const IMAGE_MIME: Record<string, string> = {
   pdf: 'application/pdf'
 }
 
+export interface LoadResult<T> {
+  data: T | null
+  /** A damaged file was found: data came from the backup, or (data null) nothing could be read. */
+  recovered: boolean
+  /** The file was written by a newer version of Inkling and was left untouched. */
+  newer?: boolean
+}
+
 export class Storage {
   /** mtime of each file as of our last read or write, for conflict detection. */
   private readonly stamps = new Map<string, number>()
@@ -83,18 +106,31 @@ export class Storage {
     return join(this.notebookDir(notebookId), 'pages', `${idSchema.parse(pageId)}.json`)
   }
 
-  async loadLibrary(): Promise<{ library: Library | null; recovered: boolean }> {
-    const { data, recovered } = await this.readValidated(this.libraryPath(), libraryFileSchema)
-    return { library: data, recovered }
+  async loadLibrary(): Promise<{ library: Library | null; recovered: boolean; newer?: boolean }> {
+    const { data, recovered, newer } = await this.readValidated(this.libraryPath(), libraryFileSchema, LIBRARY_SCHEMA_VERSION)
+    return { library: data, recovered, ...(newer ? { newer } : {}) }
+  }
+
+  /** True if library.json (or its backup) was saved by a newer Inkling. Reads only; changes nothing. */
+  async libraryIsNewer(): Promise<boolean> {
+    for (const file of [this.libraryPath(), `${this.libraryPath()}.bak`]) {
+      try {
+        const v = (JSON.parse(await fs.readFile(file, 'utf8')) as { schemaVersion?: unknown }).schemaVersion
+        if (typeof v === 'number') return v > LIBRARY_SCHEMA_VERSION
+      } catch {
+        /* missing or unreadable: not newer */
+      }
+    }
+    return false
   }
 
   saveLibrary(library: Library): Promise<SaveResult> {
     return this.writeValidated(this.libraryPath(), librarySchema, library)
   }
 
-  async loadPage(notebookId: string, pageId: string): Promise<{ page: PageDoc | null; recovered: boolean }> {
-    const { data, recovered } = await this.readValidated(this.pagePath(notebookId, pageId), pageFileSchema)
-    return { page: data, recovered }
+  async loadPage(notebookId: string, pageId: string): Promise<{ page: PageDoc | null; recovered: boolean; newer?: boolean }> {
+    const { data, recovered, newer } = await this.readValidated(this.pagePath(notebookId, pageId), pageFileSchema, PAGE_SCHEMA_VERSION)
+    return { page: data, recovered, ...(newer ? { newer } : {}) }
   }
 
   savePage(page: PageDoc): Promise<SaveResult> {
@@ -105,9 +141,9 @@ export class Storage {
     return join(this.notebookDir(notebookId), 'notes', `${idSchema.parse(pageId)}.json`)
   }
 
-  async loadNote(notebookId: string, pageId: string): Promise<{ note: NoteDoc | null; recovered: boolean }> {
-    const { data, recovered } = await this.readValidated(this.notePath(notebookId, pageId), noteDocSchema)
-    return { note: data, recovered }
+  async loadNote(notebookId: string, pageId: string): Promise<{ note: NoteDoc | null; recovered: boolean; newer?: boolean }> {
+    const { data, recovered, newer } = await this.readValidated(this.notePath(notebookId, pageId), noteDocSchema, NOTE_SCHEMA_VERSION)
+    return { note: data, recovered, ...(newer ? { newer } : {}) }
   }
 
   saveNote(note: NoteDoc): Promise<SaveResult> {
@@ -178,19 +214,22 @@ export class Storage {
     return { schemaVersion: LIBRARY_SCHEMA_VERSION, notebooks: [], folders: [] }
   }
 
-  private async readValidated<T>(file: string, schema: ZodType<T>): Promise<{ data: T | null; recovered: boolean }> {
-    const primary = await this.tryRead(file, schema)
+  private async readValidated<T>(file: string, schema: ZodType<T>, supported: number): Promise<LoadResult<T>> {
+    const primary = await this.tryRead(file, schema, supported)
     if (primary.ok) {
       this.stamps.set(file, primary.mtime)
       return { data: primary.data, recovered: false }
     }
+    // Written by a newer Inkling: not damaged. Leave it (and its backup) alone.
+    if (primary.reason === 'newer') return { data: null, recovered: false, newer: true }
     if (primary.reason === 'missing') {
       // A missing main file with a surviving backup means an interrupted
       // first-time rename; fall through to the backup in that case too.
-      const backup = await this.tryRead(`${file}.bak`, schema)
+      const backup = await this.tryRead(`${file}.bak`, schema, supported)
+      if (!backup.ok && backup.reason === 'newer') return { data: null, recovered: false, newer: true }
       return backup.ok ? this.restoreFromBackup(file, backup.data) : { data: null, recovered: false }
     }
-    const backup = await this.tryRead(`${file}.bak`, schema)
+    const backup = await this.tryRead(`${file}.bak`, schema, supported)
     // Keep the damaged file for inspection rather than destroying it.
     await fs.rename(file, `${file}.corrupt-${Date.now()}`).catch(() => undefined)
     if (!backup.ok) return { data: null, recovered: true }
@@ -208,8 +247,9 @@ export class Storage {
 
   private async tryRead<T>(
     file: string,
-    schema: ZodType<T>
-  ): Promise<{ ok: true; data: T; mtime: number } | { ok: false; reason: 'missing' | 'invalid' }> {
+    schema: ZodType<T>,
+    supported: number
+  ): Promise<{ ok: true; data: T; mtime: number } | { ok: false; reason: 'missing' | 'invalid' | 'newer' }> {
     let raw: string
     let mtime: number
     try {
@@ -220,7 +260,9 @@ export class Storage {
       return { ok: false, reason: 'invalid' }
     }
     try {
-      const parsed = schema.safeParse(JSON.parse(raw))
+      const json = JSON.parse(raw) as { schemaVersion?: unknown }
+      if (typeof json?.schemaVersion === 'number' && json.schemaVersion > supported) return { ok: false, reason: 'newer' }
+      const parsed = schema.safeParse(json)
       return parsed.success ? { ok: true, data: parsed.data, mtime } : { ok: false, reason: 'invalid' }
     } catch {
       return { ok: false, reason: 'invalid' }

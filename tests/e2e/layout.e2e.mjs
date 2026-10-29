@@ -19,7 +19,7 @@ const shots = process.env.SHOTS ?? join(root, 'test-results')
 await mkdir(shots, { recursive: true })
 const env = {
   ...process.env,
-  INKLING_DATA_DIR: await mkdtemp(join(tmpdir(), 'inkling-layout-')),
+  INKLING_SKIP_WELCOME: '1', INKLING_DATA_DIR: await mkdtemp(join(tmpdir(), 'inkling-layout-')),
   INKLING_CONFIG_DIR: await mkdtemp(join(tmpdir(), 'inkling-layout-config-')),
   INKLING_TEST_HOOKS: '1',
   INKLING_OLLAMA_URL: 'http://127.0.0.1:9'

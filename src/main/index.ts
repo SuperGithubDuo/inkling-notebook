@@ -1,8 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
-import { promises as fs } from 'node:fs'
+import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
+import { existsSync, promises as fs, realpathSync, renameSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
 import { z } from 'zod'
-import { ASSET_SCHEME, IPC, type ImportImageResult, type LoadLibraryResult } from '@shared/ipc'
+import { ASSET_SCHEME, IPC, type AppCommand, type AppInfo, type FlushResult, type ImportImageResult, type LoadLibraryResult } from '@shared/ipc'
 import { assetNameSchema, idSchema } from '@shared/schema'
 import { createStarterLibrary } from '@shared/factory'
 import { IMAGE_MIME, MAX_IMAGE_BYTES, MAX_PDF_BYTES, Storage } from './storage'
@@ -14,10 +14,51 @@ import { AiConfig } from './ai/config'
 import { AiService } from './ai/service'
 import { GeminiProvider } from './ai/gemini'
 import { OllamaProvider } from './ai/ollama'
+import { adoptOrphans, hasNotebookFolders, recoverLibrary } from './recovery'
+import { autoBackupIfDue, backupsDirFor, createBackup, listBackups, readBackup, restoreBackup } from './backup'
+import { buildMenu } from './menu'
+import { Updater } from './updater'
+import { FEEDBACK_URL, RELEASES_URL, feedbackLink } from '@shared/product'
+
+/**
+ * One fixed data folder, whatever the build: `npm run dev` used to run as
+ * "inkling" and an installed app runs as "Inkling", which on Linux are two
+ * different folders. Pinning it (and moving an older lowercase folder over
+ * once) means an update never opens an empty library.
+ */
+function pinUserData(): void {
+  const appData = app.getPath('appData')
+  const target = join(appData, 'Inkling')
+  const legacy = join(appData, 'inkling')
+  try {
+    if (existsSync(legacy) && !existsSync(target)) renameSync(legacy, target)
+    else if (existsSync(legacy) && existsSync(target) && realpathSync(legacy) !== realpathSync(target)) {
+      console.warn(`Both ${legacy} and ${target} exist; using ${target}. The other folder is left untouched.`)
+    }
+  } catch (err) {
+    console.warn('Could not move the old data folder:', (err as Error).message)
+  }
+  app.setPath('userData', target)
+}
+app.setName('Inkling')
+pinUserData()
+
+// Two copies of Inkling on the same notebooks would overwrite each other's saves.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+  process.exit(0)
+}
+app.on('second-instance', () => {
+  if (!mainWindow) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.focus()
+})
 
 const MAX_MARKDOWN_BYTES = 10 * 1024 * 1024
 
 const dataDir = process.env.INKLING_DATA_DIR ?? join(app.getPath('userData'), 'Library')
+// Next to the library, never inside it. A custom data folder gets its own backups folder.
+const backupsDir = process.env.INKLING_BACKUP_DIR ?? (process.env.INKLING_DATA_DIR ? `${dataDir}-backups` : backupsDirFor(dataDir))
 const storage = new Storage(dataDir)
 const index = new SearchIndex()
 let indexReady: Promise<void> = Promise.resolve()
@@ -161,25 +202,112 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // Ask the renderer to flush unsaved edits before the window goes away.
-  let flushed = false
+  // Save unsaved edits before the window goes away. If saving fails, say so
+  // and let the user choose, instead of closing over unsaved work.
+  let closing = false
   win.on('close', (event) => {
-    if (flushed || win.webContents.isDestroyed()) return
+    if (closing || win.webContents.isDestroyed()) return
     event.preventDefault()
-    const finish = (): void => {
-      flushed = true
+    void (async () => {
+      const result = await flushRenderer(win)
+      if (!result.ok) {
+        const { response } = await dialog.showMessageBox(win, {
+          type: 'warning',
+          title: 'Some changes are not saved',
+          message: 'Inkling couldn’t save your latest changes.',
+          detail: `${result.message}\n\nIf you quit now, the changes since the last save will be lost.`,
+          buttons: ['Try Again', 'Quit Without Saving', 'Cancel'],
+          defaultId: 0,
+          cancelId: 2
+        })
+        if (response === 0) return win.close()
+        if (response === 2) return
+      }
+      closing = true
       if (!win.isDestroyed()) win.close()
-    }
-    const timer = setTimeout(finish, 4000)
-    ipcMain.once(IPC.flushDone, () => {
-      clearTimeout(timer)
-      finish()
-    })
-    win.webContents.send(IPC.flushRequest)
+    })()
+  })
+
+  // A crashed or frozen page: offer to reopen it. Saves happen half a second after
+  // each edit, so at most the very latest strokes can be missing.
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit' || closing) return
+    void dialog
+      .showMessageBox(win, {
+        type: 'error',
+        title: 'Inkling stopped unexpectedly',
+        message: 'Inkling’s window stopped working and needs to reopen.',
+        detail: 'Your notebooks are saved automatically half a second after each change, so at most your very latest edit may be missing. Automatic backups are in Settings → Storage.',
+        buttons: ['Reopen', 'Quit'],
+        defaultId: 0
+      })
+      .then(({ response }) => {
+        if (response === 0 && !win.isDestroyed()) win.webContents.reload()
+        else app.quit()
+      })
+  })
+  win.on('unresponsive', () => {
+    void dialog
+      .showMessageBox(win, { type: 'warning', title: 'Inkling isn’t responding', message: 'Inkling isn’t responding.', detail: 'You can wait for it, or reopen the window (unsaved changes from the last moment may be lost).', buttons: ['Wait', 'Reopen'], defaultId: 0 })
+      .then(({ response }) => {
+        if (response === 1 && !win.isDestroyed()) win.webContents.forcefullyCrashRenderer()
+      })
   })
 
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
+}
+
+/** Asks the renderer to write every pending edit; resolves with whether it all reached the disk. */
+function flushRenderer(win: BrowserWindow, timeoutMs = 10_000): Promise<FlushResult> {
+  return new Promise((resolve) => {
+    if (win.isDestroyed() || win.webContents.isDestroyed() || win.webContents.isCrashed()) return resolve({ ok: true })
+    const timer = setTimeout(() => {
+      ipcMain.removeListener(IPC.flushDone, onDone)
+      resolve({ ok: false, message: 'Saving took too long.' })
+    }, timeoutMs)
+    const onDone = (event: Electron.IpcMainEvent, result?: FlushResult): void => {
+      if (event.sender !== win.webContents) return
+      clearTimeout(timer)
+      ipcMain.removeListener(IPC.flushDone, onDone)
+      resolve(result && typeof result === 'object' && 'ok' in result ? result : { ok: true })
+    }
+    ipcMain.on(IPC.flushDone, onDone)
+    win.webContents.send(IPC.flushRequest)
+  })
+}
+
+const sendCommand = (command: AppCommand): void => {
+  if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.webContents.send(IPC.appCommand, command)
+  }
+}
+
+const updater = new Updater({
+  onState: (state) => {
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.updateChanged, state)
+  },
+  beforeInstall: async () => {
+    if (!mainWindow) return true
+    const saved = await flushRenderer(mainWindow)
+    if (!saved.ok) {
+      await dialog.showMessageBox(mainWindow, { type: 'warning', message: 'Inkling couldn’t save your latest changes, so the update was not installed yet.', detail: saved.message })
+      return false
+    }
+    // A snapshot of the library from just before the update, in case anything about it goes wrong.
+    await createBackup(dataDir, backupsDir, { kind: 'before-update', appVersion: app.getVersion(), link: true }).catch((err) => console.warn('before-update backup failed', err))
+    return true
+  }
+})
+
+/** Takes the daily snapshot when due. Never throws. */
+async function autoBackup(): Promise<void> {
+  try {
+    await autoBackupIfDue(dataDir, backupsDir, app.getVersion())
+  } catch (err) {
+    console.warn('automatic backup failed:', (err as Error).message)
+  }
 }
 
 /** Only accept IPC from our own top-level window. */
@@ -198,16 +326,34 @@ function handle<A extends unknown[], R>(channel: string, args: z.ZodType<A>, fn:
 
 function registerIpc(): void {
   handle(IPC.loadLibrary, z.tuple([]), async (): Promise<LoadLibraryResult> => {
-    const { library, recovered } = await storage.loadLibrary()
-    if (library) {
+    const { library, recovered, newer } = await storage.loadLibrary()
+    // Checked at startup too; never replace a newer library.
+    if (newer) throw new Error('This library was saved by a newer version of Inkling. Update Inkling to open it.')
+    if (library && !recovered) {
       indexReady = buildIndex(library)
-      return { library, recovered: recovered ? ['library.json'] : [], dataDir }
+      return { library, recovered: [], dataDir }
     }
-    // First run (or unrecoverable library): start fresh and persist immediately.
+    if (library) {
+      // Restored from library.json.bak, which may be a save behind: add back any pages it doesn't list.
+      const adopted = await adoptOrphans(dataDir, library)
+      await storage.saveLibrary(library)
+      indexReady = buildIndex(library)
+      return { library, recovered: [`the notebook list (from its backup${adopted ? `, plus ${adopted} page${adopted === 1 ? '' : 's'} it didn’t list` : ''})`], dataDir }
+    }
+    if (recovered || (await hasNotebookFolders(dataDir))) {
+      // The index is gone but notebooks are on disk: rebuild it rather than start over.
+      const snapshots = (await listBackups(backupsDir)).map((b) => b.path)
+      const r = await recoverLibrary(dataDir, snapshots)
+      await storage.saveLibrary(r.library)
+      indexReady = buildIndex(r.library)
+      const from = r.source === 'snapshot' ? `the backup of ${new Date((await readBackup(r.snapshot!)).createdAt).toLocaleString()}` : 'the notebook folders'
+      return { library: r.library, recovered: [`the notebook list, rebuilt from ${from}${r.adopted ? ` (${r.adopted} page${r.adopted === 1 ? '' : 's'} added back as “Recovered”)` : ''}`], dataDir }
+    }
+    // First run: start with the starter shelf and persist it immediately.
     const fresh = createStarterLibrary()
     await storage.saveLibrary(fresh)
     index.setLibrary(fresh)
-    return { library: fresh, recovered: recovered ? ['library.json (reset: no valid backup)'] : [], dataDir }
+    return { library: fresh, recovered: [], dataDir }
   })
   // Payloads are validated inside Storage against the full schemas.
   // The index follows whatever is actually on disk: saved data, or loaded data.
@@ -406,12 +552,111 @@ function registerIpc(): void {
     await fs.mkdir(dataDir, { recursive: true })
     await shell.openPath(dataDir)
   })
+  handle(IPC.appInfo, z.tuple([]), async (): Promise<AppInfo> => ({
+    name: 'Inkling',
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    packaged: app.isPackaged,
+    dataDir,
+    backupsDir,
+    releasesUrl: RELEASES_URL,
+    skipWelcome: process.env.INKLING_SKIP_WELCOME === '1'
+  }))
+  handle(IPC.openFeedback, z.tuple([]), async () => {
+    const base = import.meta.env.MAIN_VITE_INKLING_FEEDBACK_URL || FEEDBACK_URL
+    if (!/^(https:|mailto:)/.test(base)) return
+    await shell.openExternal(feedbackLink(base, { version: app.getVersion(), platform: process.platform, arch: process.arch }))
+  })
+  handle(IPC.backupList, z.tuple([]), async () => ({ dir: backupsDir, backups: await listBackups(backupsDir) }))
+  handle(IPC.backupShowFolder, z.tuple([]), async () => {
+    await fs.mkdir(backupsDir, { recursive: true })
+    await shell.openPath(backupsDir)
+  })
+  handle(IPC.backupNow, z.tuple([]), async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Choose where to save the backup',
+      buttonLabel: 'Back Up Here',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    const parent = result.filePaths[0]
+    if (result.canceled || !parent) return { saved: false as const }
+    if (parent === dataDir || parent.startsWith(dataDir + '/') || parent.startsWith(dataDir + '\\')) return { saved: false as const, error: 'Choose a folder outside Inkling’s own library folder.' }
+    try {
+      const saved = await flushRenderer(mainWindow!)
+      if (!saved.ok) return { saved: false as const, error: `Your latest changes couldn’t be saved first: ${saved.message}` }
+      const info = await createBackup(dataDir, parent, { kind: 'manual', appVersion: app.getVersion() })
+      return { saved: true as const, path: info.path }
+    } catch (err) {
+      return { saved: false as const, error: (err as Error).message }
+    }
+  })
+  handle(IPC.backupRestore, z.tuple([z.string().max(4096).nullable()]), async (chosen) => {
+    let dir = chosen
+    if (dir) {
+      // Only an automatic backup can be named directly; anything else goes through the folder picker.
+      const known = (await listBackups(backupsDir)).some((b) => b.path === dir)
+      if (!known) return { restored: false as const, error: 'That backup is not in Inkling’s backups folder.' }
+    } else {
+      const result = await dialog.showOpenDialog(mainWindow!, { title: 'Choose an Inkling backup folder', buttonLabel: 'Restore', defaultPath: backupsDir, properties: ['openDirectory'] })
+      if (result.canceled || !result.filePaths[0]) return { restored: false as const }
+      dir = result.filePaths[0]
+    }
+    try {
+      const info = await readBackup(dir)
+      const { response } = await dialog.showMessageBox(mainWindow!, {
+        type: 'question',
+        title: 'Restore from backup',
+        message: `Replace your library with the backup from ${new Date(info.createdAt).toLocaleString()}?`,
+        detail: `The backup has ${info.notebooks} notebook${info.notebooks === 1 ? '' : 's'} and ${info.pages} page${info.pages === 1 ? '' : 's'}. Your current library is saved as a “before restore” backup first, so you can go back. Inkling restarts afterwards.`,
+        buttons: ['Restore and Restart', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1
+      })
+      if (response !== 0) return { restored: false as const }
+      const saved = await flushRenderer(mainWindow!)
+      if (!saved.ok) return { restored: false as const, error: `Your latest changes couldn’t be saved first, so nothing was restored: ${saved.message}` }
+      await restoreBackup(dataDir, dir, backupsDir, app.getVersion())
+    } catch (err) {
+      return { restored: false as const, error: (err as Error).message }
+    }
+    // Restart so every page is read fresh from the restored files.
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy()
+      // Tests relaunch the app themselves, so that no copy runs outside their control.
+      if (!(testHooks && process.env.INKLING_NO_RELAUNCH === '1')) app.relaunch()
+      app.exit(0)
+    }, 100)
+    return { restored: true as const }
+  })
+  handle(IPC.updateState, z.tuple([]), async () => updater.current)
+  handle(IPC.updateCheck, z.tuple([]), async () => updater.check())
+  handle(IPC.updateInstall, z.tuple([]), async () => updater.install())
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // A library saved by a newer Inkling must not be opened (and saved over) by this one.
+  if (await storage.libraryIsNewer()) {
+    dialog.showMessageBoxSync({
+      type: 'warning',
+      title: 'Update Inkling',
+      message: 'Your notebooks were last opened with a newer version of Inkling.',
+      detail: `This version (${app.getVersion()}) can’t open them safely, so it will close without changing anything. Install the latest version from ${RELEASES_URL}.`,
+      buttons: ['Close']
+    })
+    app.exit(0)
+    return
+  }
+  Menu.setApplicationMenu(buildMenu({ send: sendCommand, dev: !app.isPackaged || testHooks, checkForUpdates: updater.current.enabled ? () => void updater.check().then(() => sendCommand('about')) : undefined }))
   registerAssetProtocol()
   registerIpc()
   createWindow()
+  void updater.start()
+  // The daily snapshot, shortly after startup and then every few hours while Inkling is open.
+  setTimeout(() => void autoBackup(), Number(process.env.INKLING_AUTO_BACKUP_DELAY_MS) || 20_000)
+  setInterval(() => void autoBackup(), 3 * 60 * 60 * 1000)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

@@ -19,8 +19,52 @@ export const assetUrl = (notebookId: string, asset: string): string => `${ASSET_
 /** Base URL of pdf.js runtime resources (fonts, CMaps, decoders) served by the main process. */
 export const PDFJS_RESOURCE_URL = `${ASSET_SCHEME}://pdfjs/`
 
-export type LoadPageResult = { page: PageDoc | null; recovered: boolean }
-export type LoadNoteResult = { note: NoteDoc | null; recovered: boolean }
+/** `newer`: the file was saved by a newer version of Inkling; it was left untouched and must not be overwritten. */
+export type LoadPageResult = { page: PageDoc | null; recovered: boolean; newer?: boolean }
+export type LoadNoteResult = { note: NoteDoc | null; recovered: boolean; newer?: boolean }
+
+/** Commands from the application menu (and the system) that the renderer carries out. */
+export type AppCommand = 'about' | 'settings' | 'backup' | 'restore' | 'welcome' | 'feedback' | 'privacy'
+
+export interface BackupSummary {
+  path: string
+  kind: 'auto' | 'manual' | 'before-restore' | 'before-update'
+  createdAt: string
+  appVersion: string
+  notebooks: number
+  pages: number
+}
+
+export interface UpdateState {
+  /** False in development and unpackaged builds, or where updates are switched off. */
+  enabled: boolean
+  /** Why updates aren't enabled, or what the last check found. */
+  status: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'none' | 'error'
+  version?: string
+  message?: string
+  /** macOS builds without a Developer ID signature can't install updates themselves: download from the release page instead. */
+  manualDownloadUrl?: string
+}
+
+export interface AppInfo {
+  name: string
+  version: string
+  platform: string
+  arch: string
+  electron: string
+  chrome: string
+  /** An installed build, not `npm run dev` / `npm start`. */
+  packaged: boolean
+  dataDir: string
+  backupsDir: string
+  /** Release notes / downloads page. */
+  releasesUrl: string
+  /** Set by acceptance tests of other features (INKLING_SKIP_WELCOME=1). */
+  skipWelcome: boolean
+}
+
+/** Result of flushing unsaved edits (Ctrl+S, quitting). */
+export type FlushResult = { ok: true } | { ok: false; message: string }
 export type ImportMarkdownResult = { name: string; markdown: string } | { canceled: true } | { error: string }
 
 /** The complete, deliberately narrow API exposed to the renderer. */
@@ -57,6 +101,27 @@ export interface InklingApi {
   /** Pages and links for the knowledge graph. */
   graph(options?: { notebookId?: string }): Promise<GraphData>
   showDataFolder(): Promise<void>
+  appInfo(): Promise<AppInfo>
+  /** Opens the feedback page or email with the app version and system filled in. Never includes notebook content. */
+  openFeedback(): Promise<void>
+  backups: {
+    /** Automatic snapshots (newest first) and where they are kept. */
+    list(): Promise<{ dir: string; backups: BackupSummary[] }>
+    /** Saves a full copy of the library into a folder the user picks. */
+    backupNow(): Promise<{ saved: true; path: string } | { saved: false; error?: string }>
+    /** Restores a backup (an automatic one by path, or one the user picks when null), then restarts Inkling. */
+    restore(path: string | null): Promise<{ restored: false; error?: string } | { restored: true }>
+    showFolder(): Promise<void>
+  }
+  updates: {
+    state(): Promise<UpdateState>
+    check(): Promise<UpdateState>
+    /** Restarts into a downloaded update, after saving. */
+    install(): Promise<void>
+    onState(handler: (state: UpdateState) => void): () => void
+  }
+  /** Menu commands for the renderer; returns an unsubscribe function. */
+  onCommand(handler: (command: AppCommand) => void): () => void
   /** AI tutor (cloud beta, local Ollama or Gemini). Keys and access codes stay in the main process; only their last 4 characters come back. */
   ai: {
     status(): Promise<AiStatus>
@@ -78,7 +143,7 @@ export interface InklingApi {
     onEvent(handler: (event: AiEvent) => void): () => void
   }
   /** Main asks the renderer to flush pending saves before the window closes. */
-  onFlushRequest(handler: () => Promise<void>): void
+  onFlushRequest(handler: () => Promise<FlushResult>): void
 }
 
 export const IPC = {
@@ -115,6 +180,17 @@ export const IPC = {
   aiStart: 'ai:start',
   aiCancel: 'ai:cancel',
   aiEvent: 'ai:event',
+  appInfo: 'app:info',
+  openFeedback: 'app:feedback',
+  appCommand: 'app:command',
+  backupList: 'backup:list',
+  backupNow: 'backup:now',
+  backupRestore: 'backup:restore',
+  backupShowFolder: 'backup:show-folder',
+  updateState: 'update:state',
+  updateCheck: 'update:check',
+  updateInstall: 'update:install',
+  updateChanged: 'update:changed',
   flushRequest: 'app:flush-request',
   flushDone: 'app:flush-done'
 } as const

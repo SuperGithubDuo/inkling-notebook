@@ -32,6 +32,8 @@ import { HIGHLIGHT_COLORS, INK_COLORS, PEN_SIZES, selectActiveKind, selectActive
 import { renderPagePng } from '@/canvas/stageRef'
 import { IconButton, InlineEdit, Menu, Popover, Tip, cx } from './ui/primitives'
 import { NotebookIcon } from './NotebookIcon'
+import { useApp } from '@/app/appStore'
+import { BookOpen, Info, MessageSquare } from 'lucide-react'
 import { ImageButton, ShapePicker } from './ToolControls'
 import { NoteToolbar } from '@/notes/NoteToolbar'
 import { exportActiveNoteMarkdown, importMarkdownNote } from '@/notes/noteActions'
@@ -286,7 +288,11 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           { label: 'Export notebook as PDF…', icon: <Share size={15} />, onSelect: () => void exportActiveNotebookPdf() },
           'separator',
           { label: 'Save now', hint: 'Ctrl+S', icon: <CloudCheck size={15} />, onSelect: () => void st.flush() },
-          { label: 'Show data folder', icon: <Settings size={15} />, onSelect: () => void window.inkling.showDataFolder() }
+          { label: 'Show data folder', icon: <Settings size={15} />, onSelect: () => void window.inkling.showDataFolder() },
+          'separator',
+          { label: 'Getting started', icon: <BookOpen size={15} />, onSelect: () => useApp.getState().open('welcome') },
+          { label: 'Send feedback…', icon: <MessageSquare size={15} />, onSelect: () => void window.inkling.openFeedback() },
+          { label: 'About Inkling', icon: <Info size={15} />, onSelect: () => useApp.getState().open('about') }
         ]}
       />
     </header>
