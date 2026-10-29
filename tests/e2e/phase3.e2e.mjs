@@ -107,6 +107,13 @@ await win.keyboard.press('Enter')
 // Table
 await win.click('[data-testid="fmt-table"]')
 await win.getByRole('menuitem', { name: /Insert 3 × 3 table/ }).click()
+// The editor takes focus on the next animation frame; type only once the caret is in the first cell.
+await win.waitForFunction(() => {
+  const a = document.activeElement
+  const n = window.getSelection()?.anchorNode
+  const el = n && (n.nodeType === 1 ? n : n.parentElement)
+  return !!a?.classList.contains('ProseMirror') && !!el?.closest('th, td')
+})
 await win.keyboard.type('x')
 await win.keyboard.press('Tab')
 await win.keyboard.type('f(x)')
