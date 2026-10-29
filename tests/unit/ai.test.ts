@@ -150,6 +150,7 @@ describe('AI config and key storage', () => {
     await config.load()
     expect(await config.setKey(VALID_KEY)).toBe('encrypted')
     await config.setConsent(true)
+    await config.setProvider('gemini')
     await config.setModel('gemini-3.5-flash-lite')
     const files = await readdir(dir)
     expect(files.sort()).toEqual(['ai-settings.json', 'gemini-key.bin'])
@@ -175,14 +176,30 @@ describe('AI config and key storage', () => {
     expect(await readdir(dir)).toEqual([])
   })
 
-  it('falls back to the default free model when settings name an unknown model', async () => {
+  it('migrates Phase 4 settings to the local default, falling back to the free Gemini model and asking consent again', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'inkling-ai-'))
     const { writeFile } = await import('node:fs/promises')
     await writeFile(join(dir, 'ai-settings.json'), JSON.stringify({ version: 1, provider: 'gemini', model: 'gemini-9-ultra-paid', consent: { version: 1, acceptedAt: 'x' } }))
     const config = new AiConfig(dir, fakeCipher())
     await config.load()
-    expect(config.model).toBe('gemini-3.8-flash')
-    expect(config.consented).toBe(true)
+    expect(config.provider).toBe('ollama')
+    expect(config.model).toBe('qwen3-vl:4b')
+    expect(config.geminiModel).toBe('gemini-3.8-flash')
+    // The old consent had no age confirmation.
+    expect(config.consented).toBe(false)
+  })
+
+  it('keeps a model per provider and rejects a model of the wrong provider', async () => {
+    const config = new AiConfig(await mkdtemp(join(tmpdir(), 'inkling-ai-')), fakeCipher())
+    await config.load()
+    await config.setModel('qwen3-vl:2b')
+    await expect(config.setModel('gemini-3.8-flash; rm -rf')).rejects.toThrow()
+    await config.setProvider('gemini')
+    await expect(config.setModel('qwen3-vl:2b')).rejects.toThrow()
+    await config.setModel('gemini-3.5-flash-lite')
+    expect(config.model).toBe('gemini-3.5-flash-lite')
+    await config.setProvider('ollama')
+    expect(config.model).toBe('qwen3-vl:2b')
   })
 })
 
@@ -192,6 +209,7 @@ async function makeService(opts: { consent?: boolean; key?: string | null; clock
   const dir = await mkdtemp(join(tmpdir(), 'inkling-ai-'))
   const config = new AiConfig(dir, fakeCipher())
   await config.load()
+  await config.setProvider('gemini')
   if (opts.key !== null) await config.setKey(opts.key ?? VALID_KEY)
   if (opts.consent !== false) await config.setConsent(true)
   const events: AiEvent[] = []

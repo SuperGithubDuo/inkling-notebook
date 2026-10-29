@@ -2,13 +2,15 @@
  * Instructions and output formats for each tutor task. They live in the main
  * process so the renderer can only ask for a task, not rewrite the rules.
  */
-import type { AiTask } from '@shared/ai'
+import type { AiProviderId, AiTask } from '@shared/ai'
 
 export interface TaskSpec {
   system: string
   jsonSchema?: Record<string, unknown>
   maxOutputTokens: number
   temperature?: number
+  /** Turns the provider's raw answer into the shared result format before it is validated. */
+  normalize?(text: string): string
 }
 
 const TUTOR = `You are Inkling's AI tutor, helping a student who works by hand in a digital notebook.
@@ -37,16 +39,21 @@ verdict: "correct" if mathematically equivalent to the expected answer, "partial
 transcription: what you read of the student's answer. feedback: one or two encouraging sentences explaining the verdict; for wrong answers point at the mistake without revealing the full solution.
 Write math in LaTeX with $...$. Answer only with JSON matching the schema.`
 
-const ANNOTATE = `${TUTOR}
+const ANNOTATE_TEMPLATE = `${TUTOR}
 The image is a crop of the student's handwritten work. Mark it up the way a teacher would with a pen, so the student can see the feedback on their own page.
 Return:
 - transcription: your reading of the work, line by line, in plain text.
 - summary: one or two sentences about the work (in Markdown with $...$ math).
-- annotations: at most 6 marks. Each has a kind, a box_2d around the part of the work it refers to, as [ymin, xmin, ymax, xmax] normalised to 0–1000 over the image, and text when needed.
+- annotations: at most 6 marks. Each has a kind, BOX_RULE, and text when needed.
 Kinds: "check" for a correct step; "cross" for a wrong step; "circle" or "underline" to point at a specific term; "correction" with the corrected expression as text (written next to the mistake); "note" with a short remark; "arrow" pointing at the box with a short text label.
 Annotation text is drawn on paper, so it must be plain text with Unicode math (x², √, ±, ×, ÷, ≠, ≤, π, fractions as a/b), never LaTeX, at most 12 words.
 If the work is entirely correct, use a single "check" and a short encouraging note. If you cannot read the work, return no annotations and say so in the summary.
 Answer only with JSON matching the schema.`
+
+// Each model family has a native box convention; asking for it is more reliable.
+const GEMINI_BOX = 'a box_2d around the part of the work it refers to, as [ymin, xmin, ymax, xmax] normalised to 0–1000 over the image'
+const QWEN_BOX = 'a bbox_2d around the part of the work it refers to, as [x1, y1, x2, y2] relative to the image on a 0–1000 scale'
+const ANNOTATE = ANNOTATE_TEMPLATE.replace('BOX_RULE', GEMINI_BOX)
 
 const box = { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4 }
 
@@ -120,4 +127,43 @@ export const TASKS: Record<AiTask, TaskSpec> = {
       required: ['transcription', 'summary', 'annotations']
     }
   }
+}
+
+/**
+ * The spec for a task on a provider. Local Qwen3-VL models ground boxes as
+ * [x1, y1, x2, y2] on 0–1000 ("bbox_2d"); their answer is converted to the
+ * shared Gemini-style box_2d [ymin, xmin, ymax, xmax] before validation, so
+ * everything after this point (validation, placement on the page) is shared.
+ */
+export function taskSpec(task: AiTask, provider: AiProviderId): TaskSpec {
+  const spec = TASKS[task]
+  if (provider !== 'ollama' || task !== 'annotate') return spec
+  const schema = structuredClone(spec.jsonSchema!) as { properties: { annotations: { items: { properties: Record<string, unknown>; required: string[] } } } }
+  const item = schema.properties.annotations.items
+  const { box_2d, ...rest } = item.properties
+  item.properties = { kind: rest.kind, bbox_2d: box_2d, text: rest.text }
+  item.required = ['kind', 'bbox_2d']
+  return { ...spec, system: ANNOTATE_TEMPLATE.replace('BOX_RULE', QWEN_BOX), jsonSchema: schema, normalize: qwenBoxesToBox2d }
+}
+
+/** Rewrites bbox_2d [x1, y1, x2, y2] as box_2d [ymin, xmin, ymax, xmax], clamped to 0–1000. */
+export function qwenBoxesToBox2d(text: string): string {
+  let json: { annotations?: Array<Record<string, unknown>> }
+  try {
+    json = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ''))
+  } catch {
+    return text
+  }
+  if (!json || !Array.isArray(json.annotations)) return text
+  const c = (v: unknown): number => Math.min(1000, Math.max(0, Number(v)))
+  json.annotations = json.annotations.flatMap((a) => {
+    if (!a || typeof a !== 'object') return []
+    const { bbox_2d: b, ...rest } = a
+    if (b === undefined) return [rest] // already in box_2d form
+    // A mark without a usable box can't be placed; drop it rather than the whole answer.
+    if (!Array.isArray(b) || b.length !== 4 || b.some((v) => !Number.isFinite(Number(v)))) return []
+    const [x1, y1, x2, y2] = b.map(c) as [number, number, number, number]
+    return [{ ...rest, box_2d: [Math.min(y1, y2), Math.min(x1, x2), Math.max(y1, y2), Math.max(x1, x2)] }]
+  })
+  return JSON.stringify(json)
 }

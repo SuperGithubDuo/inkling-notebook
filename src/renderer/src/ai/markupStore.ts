@@ -100,7 +100,7 @@ export const useMarkup = create<MarkupState>((set, get) => ({
         onDone: (e) => {
           const parsed = parseTaskResult('annotate', e.text)
           const page = useStore.getState().pages[target.pageId]
-          if (!parsed || !page) return fail({ code: 'bad_response', message: 'Gemini’s markup was not in the expected format. Try again.' })
+          if (!parsed || !page) return fail({ code: 'bad_response', message: 'The tutor’s markup was not in the expected format. Try again.' })
           // Keep only annotations whose commands pass the canvas validation on their own.
           const placed = planAnnotations(parsed.annotations, { region: target.rect, page }).filter((p) => {
             try {

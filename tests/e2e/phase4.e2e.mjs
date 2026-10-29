@@ -30,6 +30,8 @@ const env = {
   INKLING_CONFIG_DIR: configDir,
   INKLING_TEST_HOOKS: '1',
   INKLING_GEMINI_BASE_URL: fake.url,
+  // Nothing listens here: these Gemini tests must not reach a real local Ollama.
+  INKLING_OLLAMA_URL: 'http://127.0.0.1:9',
   // Pacing is unit-tested; here requests follow each other within milliseconds.
   INKLING_AI_LIMITS: JSON.stringify({ minIntervalMs: 0, perMinute: 1000, duplicateWindowMs: 0 })
 }
@@ -115,6 +117,12 @@ try {
   await launch()
   assert.equal(await win.getAttribute('[data-testid="ai-status"]', 'data-state'), 'setup')
   await openSettings()
+  // Local Ollama is the default provider; this suite covers the optional Gemini provider.
+  assert.equal(await win.getAttribute('[data-testid="ai-settings"]', 'data-provider'), 'ollama')
+  await win.click('[data-testid="ai-provider-gemini"]')
+  await win.waitForSelector('[data-testid="ai-settings"][data-provider="gemini"]')
+  await win.waitForSelector('[data-testid="ai-gemini-eligibility"]')
+  step('Gemini chosen explicitly; its 18+ eligibility notice is shown')
 
   // A malformed key is rejected before anything is sent.
   await win.fill('[data-testid="ai-key-input"]', 'not a key')

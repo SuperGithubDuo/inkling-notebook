@@ -27,6 +27,7 @@ const api: InklingApi = {
     status: () => ipcRenderer.invoke(IPC.aiStatus),
     setKey: (key) => ipcRenderer.invoke(IPC.aiSetKey, key),
     clearKey: () => ipcRenderer.invoke(IPC.aiClearKey),
+    setProvider: (provider) => ipcRenderer.invoke(IPC.aiSetProvider, provider),
     setModel: (model) => ipcRenderer.invoke(IPC.aiSetModel, model),
     setConsent: (accepted) => ipcRenderer.invoke(IPC.aiSetConsent, accepted),
     test: () => ipcRenderer.invoke(IPC.aiTest),

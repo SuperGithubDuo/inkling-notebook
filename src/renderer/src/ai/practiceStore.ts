@@ -1,8 +1,8 @@
 /**
- * Practice mode: Gemini writes problems (with progressive hints, the answer
+ * Practice mode: the tutor's model writes problems (with progressive hints, the answer
  * and a worked solution) from the page or selection; the student works them
  * by hand. Hints and solutions are revealed locally, one at a time, without
- * further requests; only checking an answer asks Gemini again.
+ * further requests; only checking an answer asks the model again.
  */
 import { create } from 'zustand'
 import type { AiError, AiPart } from '@shared/ai'
@@ -91,7 +91,7 @@ export const usePractice = create<PracticeState>((set, get) => {
         {
           onDone: (e) => {
             const parsed = parseTaskResult('practice', e.text)
-            if (!parsed) return finish({ error: { code: 'bad_response', message: 'Gemini’s problems were not in the expected format. Try again.' } })
+            if (!parsed) return finish({ error: { code: 'bad_response', message: 'The tutor’s problems were not in the expected format. Try again.' } })
             finish({ set: parsed, source: ctx?.label ?? (topic.trim() || null), index: 0, progress: parsed.problems.map(emptyProgress), error: null })
           },
           onError: (error) => finish(error.code === 'canceled' ? {} : { error })
@@ -156,7 +156,7 @@ export const usePractice = create<PracticeState>((set, get) => {
         {
           onDone: (e) => {
             const parsed = parseTaskResult('check', e.text)
-            done(parsed ? { status: 'done', result: parsed, via } : { status: 'error', error: { code: 'bad_response', message: 'Gemini’s answer was not in the expected format. Try again.' } })
+            done(parsed ? { status: 'done', result: parsed, via } : { status: 'error', error: { code: 'bad_response', message: 'The tutor’s answer was not in the expected format. Try again.' } })
           },
           onError: (error) => done(error.code === 'canceled' ? undefined : { status: 'error', error })
         }

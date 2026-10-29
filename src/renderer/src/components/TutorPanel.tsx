@@ -1,6 +1,6 @@
 /**
  * AI Tutor panel: chat about the page or a lasso selection, practice problems
- * and on-page feedback, all running on Google Gemini through the main process.
+ * and on-page feedback, answered by a local Ollama model (default) or Google Gemini through the main process.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
@@ -20,7 +20,7 @@ import {
   SquarePen,
   X
 } from 'lucide-react'
-import { modelLabel } from '@shared/ai'
+import { aiReady, modelLabel } from '@shared/ai'
 import { useStore } from '@/store/store'
 import { useAi } from '@/ai/aiStore'
 import { Markdown } from '@/ai/Markdown'
@@ -99,7 +99,7 @@ export function TutorPanel({ onOpenSettings, inputId }: { onOpenSettings: () => 
 
       <p className="flex items-center gap-1.5 px-5 pb-3.5 text-[12px] text-ink-3">
         <Sparkles size={12} className="text-lav" />
-        Sent to Google Gemini only when you ask.
+        <ProviderNote />
       </p>
     </aside>
   )
@@ -117,29 +117,49 @@ function Intro({ icon: Icon, title, body }: { icon: typeof Sparkles; title: stri
   )
 }
 
-/** Shown until a key is set and sending is allowed; a one-line badge afterwards. */
+/** Where questions go, in one line under the tutor. */
+function ProviderNote() {
+  const status = useAi((s) => s.status)
+  if (status?.provider === 'gemini') return <span data-testid="ai-provider-note">Sent to Google Gemini only when you ask.</span>
+  return <span data-testid="ai-provider-note">Answered on this computer by Ollama. Nothing leaves your device.</span>
+}
+
+/** Shown until the tutor can answer (a model installed and running, or a key and consent); a one-line badge afterwards. */
 export function AiStatusCard({ onOpenSettings, compact }: { onOpenSettings: () => void; compact?: boolean }) {
   const status = useAi((s) => s.status)
-  const ready = !!status?.hasKey && status.consented
+  const ready = !!status && aiReady(status)
+  const local = status?.provider !== 'gemini'
   if (compact && ready) {
     return (
       <p data-testid="ai-status" data-state="ready" className="mt-4 flex items-center justify-center gap-1.5 text-[12px] text-ink-3">
         <span className="h-1.5 w-1.5 rounded-full bg-[#2fae66]" />
-        Connected · {modelLabel(status!.model)} · free tier
+        {local ? `On this computer · ${modelLabel(status!.model)}` : `Connected · ${modelLabel(status!.model)} · free tier`}
       </p>
     )
+  }
+  let title: string
+  let body: string
+  if (local) {
+    const missing = status?.models.find((m) => m.id === status.model)?.status === 'missing'
+    title = ready ? `On this computer · ${modelLabel(status!.model)}` : status?.ollama.running === false ? 'Start Ollama to use the tutor' : missing ? `Install ${modelLabel(status!.model)}` : 'Set up the AI Tutor'
+    body = ready
+      ? 'A local vision model reads your handwriting. Nothing leaves this computer.'
+      : status?.ollama.running === false
+        ? 'The tutor runs free on this computer with Ollama. Install and open Ollama, then check again in AI settings.'
+        : `The tutor needs the ${status?.model ?? 'qwen3-vl:4b'} model in Ollama. AI settings shows how to install it.`
+  } else {
+    title = ready ? `Connected · ${modelLabel(status!.model)}` : status?.hasKey ? 'Allow sending to Gemini' : 'Set up the AI Tutor'
+    body = ready
+      ? 'Runs on Google Gemini’s free tier. Only what you ask about is sent.'
+      : 'Add a free Google Gemini API key in Settings (18+ only). Nothing from your notebook is sent until you allow it and ask.'
   }
   return (
     <div data-testid="ai-status" data-state={ready ? 'ready' : 'setup'} className="mt-5 rounded-[14px] border border-[#e4e2fb] bg-lav-softer p-4">
       <div className="flex items-center gap-2 text-[13px] font-semibold text-ink">
         <span className={ready ? 'h-2 w-2 rounded-full bg-[#2fae66]' : 'h-2 w-2 rounded-full bg-[#c4c7d0]'} />
-        {ready ? `Connected · ${modelLabel(status!.model)}` : status?.hasKey ? 'Allow sending to Gemini' : 'Set up the AI Tutor'}
+        {title}
       </div>
-      <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-2">
-        {ready
-          ? 'Runs on Google Gemini’s free tier. Only what you ask about is sent.'
-          : 'Add a free Google Gemini API key in Settings. Nothing from your notebook is sent until you allow it and ask.'}
-      </p>
+      <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-2">{body}</p>
       {!ready && (
         <button type="button" onClick={onOpenSettings} className="mt-2.5 rounded-lg bg-white px-3 py-1.5 text-[12.5px] font-medium text-accent shadow-[0_0_0_1px_#e4e2fb] hover:bg-accent-softer">
           Open AI settings

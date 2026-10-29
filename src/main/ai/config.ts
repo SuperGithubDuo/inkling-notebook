@@ -1,5 +1,5 @@
 /**
- * AI settings and the API key, stored in the app's private config folder —
+ * AI settings (provider, model per provider, Gemini consent) and the Gemini API key, stored in the app's private config folder —
  * never in the notebook library, so keys can't end up in synced or shared
  * notebooks. The key is encrypted with the operating system's keychain
  * (Electron safeStorage). Where no keychain is available it is kept in memory
@@ -8,7 +8,19 @@
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { CONSENT_VERSION, DEFAULT_MODEL, modelIdSchema, type AiModelId, type KeyProtection } from '@shared/ai'
+import {
+  CONSENT_VERSION,
+  DEFAULT_MODEL,
+  DEFAULT_PROVIDER,
+  OLLAMA_DEFAULT_MODEL,
+  geminiModelIdSchema,
+  ollamaModelIdSchema,
+  providerIdSchema,
+  type AiModelId,
+  type AiProviderId,
+  type GeminiModelId,
+  type KeyProtection
+} from '@shared/ai'
 
 /** The parts of Electron's safeStorage this module uses. */
 export interface SecretCipher {
@@ -18,15 +30,39 @@ export interface SecretCipher {
   getSelectedStorageBackend?(): string
 }
 
+const consentSchema = z.object({ version: z.number().int(), acceptedAt: z.string() }).nullable()
+
 const settingsSchema = z.object({
-  version: z.literal(1),
-  provider: z.literal('gemini'),
-  model: modelIdSchema,
-  consent: z.object({ version: z.number().int(), acceptedAt: z.string() }).nullable()
+  version: z.literal(2),
+  provider: providerIdSchema,
+  models: z.object({ gemini: geminiModelIdSchema, ollama: ollamaModelIdSchema }),
+  /** Agreement to send notebook content to Google (Gemini only). */
+  consent: consentSchema
 })
 export type AiSettings = z.infer<typeof settingsSchema>
 
-const DEFAULTS: AiSettings = { version: 1, provider: 'gemini', model: DEFAULT_MODEL, consent: null }
+const DEFAULTS: AiSettings = { version: 2, provider: DEFAULT_PROVIDER, models: { gemini: DEFAULT_MODEL, ollama: OLLAMA_DEFAULT_MODEL }, consent: null }
+
+/**
+ * Reads any earlier settings file. Version 1 (Phase 4) only knew Gemini; it is
+ * moved to the local default provider, keeping the Gemini model choice. Its
+ * consent predates the age confirmation, so it is asked again (CONSENT_VERSION).
+ */
+export function migrateSettings(raw: unknown): AiSettings {
+  const v2 = settingsSchema.safeParse(raw)
+  if (v2.success) return v2.data
+  const r = (raw ?? {}) as Record<string, unknown>
+  const models = (r.models ?? {}) as Record<string, unknown>
+  return {
+    version: 2,
+    provider: r.version === 2 ? (providerIdSchema.safeParse(r.provider).data ?? DEFAULT_PROVIDER) : DEFAULT_PROVIDER,
+    models: {
+      gemini: geminiModelIdSchema.safeParse(models.gemini ?? r.model).data ?? DEFAULT_MODEL,
+      ollama: ollamaModelIdSchema.safeParse(models.ollama).data ?? OLLAMA_DEFAULT_MODEL
+    },
+    consent: consentSchema.safeParse(r.consent).data ?? null
+  }
+}
 
 export class AiConfig {
   private settings: AiSettings = { ...DEFAULTS }
@@ -48,10 +84,8 @@ export class AiConfig {
 
   async load(): Promise<void> {
     try {
-      const raw = JSON.parse(await fs.readFile(this.settingsPath, 'utf8'))
-      const parsed = settingsSchema.safeParse(raw)
       // A model that is no longer offered falls back to the default (also free).
-      this.settings = parsed.success ? parsed.data : { ...DEFAULTS, consent: settingsSchema.shape.consent.safeParse(raw?.consent).data ?? null }
+      this.settings = migrateSettings(JSON.parse(await fs.readFile(this.settingsPath, 'utf8')))
     } catch {
       this.settings = { ...DEFAULTS }
     }
@@ -69,9 +103,20 @@ export class AiConfig {
     }
   }
 
-  get model(): AiModelId {
-    return this.settings.model
+  get provider(): AiProviderId {
+    return this.settings.provider
   }
+  /** The model chosen for the active provider. */
+  get model(): AiModelId {
+    return this.settings.models[this.settings.provider]
+  }
+  get geminiModel(): GeminiModelId {
+    return this.settings.models.gemini
+  }
+  get ollamaModel(): string {
+    return this.settings.models.ollama
+  }
+  /** Gemini data-use consent (local providers need none). */
   get consented(): boolean {
     return this.settings.consent?.version === CONSENT_VERSION
   }
@@ -85,8 +130,16 @@ export class AiConfig {
     return this.key ? this.key.slice(-4) : null
   }
 
+  async setProvider(provider: AiProviderId): Promise<void> {
+    this.settings = { ...this.settings, provider }
+    await this.saveSettings()
+  }
+
+  /** Sets the model of the active provider; throws if it isn't valid for it. */
   async setModel(model: AiModelId): Promise<void> {
-    this.settings = { ...this.settings, model }
+    const provider = this.settings.provider
+    const id = provider === 'gemini' ? geminiModelIdSchema.parse(model) : ollamaModelIdSchema.parse(model)
+    this.settings = { ...this.settings, models: { ...this.settings.models, [provider]: id } }
     await this.saveSettings()
   }
 

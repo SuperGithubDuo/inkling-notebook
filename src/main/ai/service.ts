@@ -1,18 +1,23 @@
 /**
  * The AI service in the main process. Every model request passes through
- * here: it checks consent and the key, picks the task's instructions, guards
- * the free quota (one request at a time, a per-minute budget, no accidental
- * repeats, and waiting out rate limits instead of hammering the API), streams
- * the answer to the renderer and validates structured answers.
+ * here, whichever provider answers it: it picks the task's instructions,
+ * allows one request at a time (and no accidental repeats), streams the answer
+ * to the renderer and validates structured answers before they are delivered.
  *
- * It never changes the model by itself; when a free quota runs out it only
- * suggests the other free model, which the user can pick in Settings.
+ * Local Ollama (the default) needs no key or consent, since nothing leaves the
+ * computer. For Gemini it also checks the key and the user's consent and
+ * guards the free quota (a per-minute budget, waiting out rate limits). It
+ * never changes provider or model by itself; it may only suggest one.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import {
   GEMINI_MODELS,
   LITE_MODEL,
   DEFAULT_MODEL,
+  OLLAMA_MODELS,
+  PROVIDERS,
+  type AiProviderId,
+  type OllamaState,
   type AiError,
   type AiEvent,
   type AiModelId,
@@ -25,11 +30,21 @@ import {
 import { parseTaskResult } from '@shared/tutor'
 import type { AiConfig } from './config'
 import { ProviderError, type AiProvider, type ProviderModel } from './provider'
-import { TASKS } from './prompts'
+import { taskSpec } from './prompts'
+import { OllamaProvider } from './ollama'
+
+/** What the service needs from a local provider beyond AiProvider. */
+export interface LocalProvider extends AiProvider {
+  readonly baseUrl: string
+  version(signal?: AbortSignal): Promise<string>
+}
 
 export interface AiServiceOptions {
   config: AiConfig
+  /** Creates the Gemini provider for a key. */
   makeProvider: (apiKey: string) => AiProvider
+  /** Creates the local Ollama provider (default: 127.0.0.1:11434). */
+  makeLocalProvider?: () => LocalProvider
   emit: (event: AiEvent) => void
   now?: () => number
   limits?: Partial<Limits>
@@ -44,6 +59,8 @@ interface Limits {
   duplicateWindowMs: number
 }
 const DEFAULT_LIMITS: Limits = { minIntervalMs: 1500, perMinute: 8, duplicateWindowMs: 10_000 }
+/** Re-check the local server when the status is asked for and the last check is older than this. */
+const OLLAMA_RECHECK_MS = 15_000
 
 interface Cooldown {
   until: number
@@ -54,6 +71,10 @@ interface Cooldown {
 export class AiService {
   private readonly config: AiConfig
   private readonly makeProvider: (apiKey: string) => AiProvider
+  private readonly local: LocalProvider
+  private ollama: OllamaState
+  private ollamaModels: ProviderModel[] | null = null
+  private ollamaCheckedAt = 0
   private readonly emit: (event: AiEvent) => void
   private readonly now: () => number
   private readonly limits: Limits
@@ -69,24 +90,61 @@ export class AiService {
   constructor(options: AiServiceOptions) {
     this.config = options.config
     this.makeProvider = options.makeProvider
+    this.local = options.makeLocalProvider?.() ?? new OllamaProvider()
+    this.ollama = { url: this.local.baseUrl, running: null, version: null, checkedAt: null }
     this.emit = options.emit
     this.now = options.now ?? Date.now
     this.limits = { ...DEFAULT_LIMITS, ...options.limits }
   }
 
   status(): AiStatus {
+    const provider = this.config.provider
     const model = this.config.model
-    const cd = this.cooldownFor(model)
+    const cd = provider === 'gemini' ? this.cooldownFor(model) : null
     return {
-      provider: 'gemini',
+      provider,
+      local: PROVIDERS[provider].local,
       model,
+      needsKey: provider === 'gemini',
       hasKey: !!this.config.apiKey,
       keyHint: this.config.keyHint,
       keyProtection: this.config.keyProtection,
-      consented: this.config.consented,
+      consented: provider === 'gemini' ? this.config.consented : true,
+      geminiConsented: this.config.consented,
       models: this.availability(),
-      modelsCheckedAt: this.modelsCheckedAt,
+      ollama: { ...this.ollama },
+      modelsCheckedAt: provider === 'gemini' ? this.modelsCheckedAt : this.ollama.checkedAt,
       cooldown: cd ? { until: new Date(cd.until).toISOString(), reason: cd.reason, model } : null
+    }
+  }
+
+  /** The status, re-checking the local server first if that is due. */
+  async freshStatus(): Promise<AiStatus> {
+    if (this.config.provider === 'ollama' && this.now() - this.ollamaCheckedAt > OLLAMA_RECHECK_MS) await this.checkOllama()
+    return this.status()
+  }
+
+  async setProvider(provider: AiProviderId): Promise<AiStatus> {
+    if (provider === this.config.provider) return this.status()
+    this.cancelActive()
+    await this.config.setProvider(provider)
+    this.last = null
+    if (provider === 'ollama') await this.checkOllama()
+    return this.status()
+  }
+
+  /** Whether Ollama runs and which models it has. Never throws. */
+  private async checkOllama(): Promise<void> {
+    this.ollamaCheckedAt = this.now()
+    const checkedAt = new Date(this.now()).toISOString()
+    try {
+      const version = await this.local.version()
+      this.ollamaModels = await this.local.listModels()
+      this.ollama = { url: this.local.baseUrl, running: true, version, checkedAt }
+    } catch (err) {
+      const offline = err instanceof ProviderError && err.code === 'offline'
+      this.ollama = { url: this.local.baseUrl, running: offline ? false : this.ollama.running, version: offline ? null : this.ollama.version, checkedAt }
+      if (offline) this.ollamaModels = null
     }
   }
 
@@ -103,8 +161,14 @@ export class AiService {
     return this.status()
   }
 
+  /** Chooses a model of the active provider. A name that isn't valid for it is ignored. */
   async setModel(model: AiModelId): Promise<AiStatus> {
-    await this.config.setModel(model)
+    try {
+      await this.config.setModel(model)
+      this.last = null
+    } catch {
+      /* not a model of this provider */
+    }
     return this.status()
   }
 
@@ -114,8 +178,13 @@ export class AiService {
     return this.status()
   }
 
-  /** Fetches the models this key can use and marks which supported ones exist. */
+  /** Fetches the models the active provider offers and marks which supported ones exist. */
   async refreshModels(): Promise<{ ok: true; models: ModelAvailability[] } | { ok: false; error: AiError }> {
+    if (this.config.provider === 'ollama') {
+      await this.checkOllama()
+      if (this.ollama.running === false) return { ok: false, error: offline() }
+      return { ok: true, models: this.availability() }
+    }
     const provider = this.getProvider()
     if (!provider) return { ok: false, error: noKey() }
     try {
@@ -128,10 +197,12 @@ export class AiService {
   }
 
   /**
-   * Checks the key and model with the smallest useful request: lists models,
-   * then asks the selected model for a one-word reply. Sends no notebook content.
+   * Checks the provider and model with the smallest useful request: lists
+   * models, then asks the selected model for a one-word reply. Sends no
+   * notebook content. For Ollama this also loads the model into memory.
    */
   async test(): Promise<AiTestResult> {
+    const providerId = this.config.provider
     const provider = this.getProvider()
     if (!provider) return { ok: false, error: noKey() }
     const blocked = this.admit(null, { explicit: true })
@@ -140,11 +211,19 @@ export class AiService {
     const startedAt = this.now()
     this.started.push(startedAt)
     try {
-      this.models = await provider.listModels()
-      this.modelsCheckedAt = new Date(this.now()).toISOString()
-      const listed = this.availability().find((m) => m.id === model)
-      if (listed?.status === 'missing') {
-        return { ok: false, error: { code: 'model_unavailable', message: `Your key works, but ${model} is not offered to it. Choose another model.`, suggestModel: other(model) } }
+      if (providerId === 'ollama') {
+        await this.checkOllama()
+        if (this.ollama.running === false) return { ok: false, error: offline() }
+        const listed = this.ollamaModels?.find((m) => m.id === model)
+        if (!listed) return { ok: false, error: { code: 'model_unavailable', message: notInstalled(model) } }
+        if (listed.vision === false) return { ok: false, error: { code: 'model_unavailable', message: `${model} can't read images, so it can't see handwriting. Choose a vision model such as qwen3-vl:4b.` } }
+      } else {
+        this.models = await provider.listModels()
+        this.modelsCheckedAt = new Date(this.now()).toISOString()
+        const listed = this.availability().find((m) => m.id === model)
+        if (listed?.status === 'missing') {
+          return { ok: false, error: { code: 'model_unavailable', message: `Your key works, but ${model} is not offered to it. Choose another model.`, suggestModel: other(model) } }
+        }
       }
       const stream = provider.stream({ model, system: 'Reply with exactly: OK', turns: [{ role: 'user', parts: [{ text: 'Connection test' }] }], maxOutputTokens: 64, temperature: 0 })
       for await (const chunk of stream) void chunk
@@ -152,6 +231,7 @@ export class AiService {
       return { ok: true, model, latencyMs: this.now() - startedAt, models: this.availability() }
     } catch (err) {
       const error = toAiError(err)
+      if (providerId === 'ollama' && error.code === 'offline') this.ollama = { ...this.ollama, running: false }
       this.noteFailure(model, error)
       return { ok: false, error: this.withSuggestion(model, error) }
     }
@@ -159,13 +239,13 @@ export class AiService {
 
   /** Starts a streamed request. Results arrive as AiEvents with the returned id. */
   start(request: AiRequest): AiStartResult {
-    if (!this.config.consented) {
+    if (this.config.provider === 'gemini' && !this.config.consented) {
       return { error: { code: 'consent_required', message: 'Allow Inkling to send notebook content to Google Gemini first (AI settings).' } }
     }
     const provider = this.getProvider()
     if (!provider) return { error: noKey() }
     const model = this.config.model
-    const hash = createHash('sha256').update(model).update(JSON.stringify(request)).digest('hex')
+    const hash = createHash('sha256').update(this.config.provider).update(model).update(JSON.stringify(request)).digest('hex')
     const blocked = this.admit(hash)
     if (blocked) return { error: blocked }
 
@@ -174,7 +254,7 @@ export class AiService {
     this.active = { id, controller }
     this.started.push(this.now())
     this.last = { hash, at: this.now(), failed: false }
-    void this.run(id, provider, model, request, controller)
+    void this.run(id, provider, model, request, controller, this.now())
     return { requestId: id }
   }
 
@@ -182,8 +262,10 @@ export class AiService {
     if (this.active?.id === requestId) this.cancelActive()
   }
 
-  private async run(id: string, provider: AiProvider, model: AiModelId, request: AiRequest, controller: AbortController): Promise<void> {
-    const spec = TASKS[request.task]
+  private async run(id: string, provider: AiProvider, model: AiModelId, request: AiRequest, controller: AbortController, startedAt: number): Promise<void> {
+    const spec = taskSpec(request.task, provider.id)
+    const name = provider.id === 'ollama' ? 'The local model' : 'Gemini'
+    let firstTokenMs: number | undefined
     let text = ''
     try {
       let usage = {}
@@ -193,6 +275,7 @@ export class AiService {
         controller.signal
       )) {
         if (chunk.type === 'text') {
+          firstTokenMs ??= this.now() - startedAt
           text += chunk.text
           // Structured answers are only useful once complete.
           if (!spec.jsonSchema) this.emit({ requestId: id, type: 'delta', text: chunk.text })
@@ -201,15 +284,17 @@ export class AiService {
           finishReason = chunk.finishReason
         }
       }
+      if (spec.normalize) text = spec.normalize(text)
       if (request.task !== 'chat' && !parseTaskResult(request.task, text)) {
         const cut = finishReason === 'MAX_TOKENS'
-        throw new ProviderError('bad_response', cut ? 'Gemini’s answer was cut off before it was complete. Try again, perhaps with a smaller selection.' : 'Gemini’s answer was not in the expected format. Try again.')
+        throw new ProviderError('bad_response', cut ? `${name}’s answer was cut off before it was complete. Try again, perhaps with a smaller selection.` : `${name}’s answer was not in the expected format. Try again.`)
       }
-      if (!text.trim()) throw new ProviderError('bad_response', 'Gemini returned an empty answer. Try again.')
+      if (!text.trim()) throw new ProviderError('bad_response', `${name} returned an empty answer. Try again.`)
       this.cooldowns.delete(model)
-      this.emit({ requestId: id, type: 'done', text, usage, model })
+      this.emit({ requestId: id, type: 'done', text, usage: { ...usage, firstTokenMs, totalMs: this.now() - startedAt }, model })
     } catch (err) {
       const error = this.withSuggestion(model, toAiError(err))
+      if (provider.id === 'ollama' && error.code === 'offline') this.ollama = { ...this.ollama, running: false }
       if (this.last) this.last.failed = true
       this.noteFailure(model, error)
       this.emit({ requestId: id, type: 'error', error })
@@ -226,6 +311,13 @@ export class AiService {
   private admit(hash: string | null, opts: { explicit?: boolean } = {}): AiError | null {
     const now = this.now()
     if (this.active) return { code: 'busy', message: 'The tutor is still answering. Wait for it to finish or press Stop.' }
+    if (this.config.provider === 'ollama') {
+      // Local: no quota to protect, only accidental double-sends.
+      if (hash && this.last && this.last.hash === hash && !this.last.failed && now - this.last.at < this.limits.duplicateWindowMs) {
+        return { code: 'duplicate', message: 'You just sent this exact request, and its answer is already shown. Change something and try again.' }
+      }
+      return null
+    }
     const model = this.config.model
     const cd = this.cooldownFor(model)
     if (cd && !opts.explicit) {
@@ -254,6 +346,13 @@ export class AiService {
   }
 
   private withSuggestion(model: AiModelId, error: AiError): AiError {
+    if (this.config.provider === 'ollama') {
+      // Memory or speed trouble with a bigger model: the smaller one is installed, so offer it.
+      const small = 'qwen3-vl:2b'
+      const hasSmall = this.ollamaModels?.some((m) => m.id === small)
+      if (model !== small && hasSmall && (error.code === 'server' || (error.code === 'network' && /took too long/.test(error.message)))) return { ...error, suggestModel: small }
+      return error
+    }
     const alt = other(model)
     const altFree = !this.cooldownFor(alt) && this.availability().find((m) => m.id === alt)?.status !== 'missing'
     if (altFree && (error.code === 'daily_quota' || error.code === 'not_free' || error.code === 'model_unavailable')) return { ...error, suggestModel: alt }
@@ -268,6 +367,7 @@ export class AiService {
   }
 
   private availability(): ModelAvailability[] {
+    if (this.config.provider === 'ollama') return this.ollamaAvailability()
     return GEMINI_MODELS.map((m) => {
       const id = m.id as AiModelId
       if (!this.models) return { id, status: 'unknown' as const }
@@ -276,7 +376,29 @@ export class AiService {
     })
   }
 
+  /** The recommended models (installed or not), then any other installed vision models. */
+  private ollamaAvailability(): ModelAvailability[] {
+    const installed = this.ollamaModels
+    const find = (id: string): ProviderModel | undefined => installed?.find((m) => m.id === id || m.id === `${id}:latest`)
+    const recommended = OLLAMA_MODELS.map((m): ModelAvailability => {
+      const found = find(m.id)
+      if (!installed) return { id: m.id, status: 'unknown' }
+      return found ? { id: m.id, status: 'available', sizeBytes: found.sizeBytes, vision: found.vision } : { id: m.id, status: 'missing' }
+    })
+    const extra = (installed ?? [])
+      .filter((m) => m.canGenerate && m.vision && !OLLAMA_MODELS.some((r) => r.id === m.id))
+      .map((m): ModelAvailability => ({ id: m.id, status: 'available', label: m.id, sizeBytes: m.sizeBytes, vision: true }))
+    const chosen = this.config.ollamaModel
+    // A chosen model that is neither recommended nor an installed vision model still shows up, as missing or non-vision.
+    const orphan: ModelAvailability[] =
+      recommended.some((m) => m.id === chosen) || extra.some((m) => m.id === chosen)
+        ? []
+        : [{ id: chosen, label: chosen, ...(find(chosen) ? { status: 'available' as const, vision: find(chosen)!.vision } : { status: installed ? ('missing' as const) : ('unknown' as const) }) }]
+    return [...recommended, ...extra, ...orphan]
+  }
+
   private getProvider(): AiProvider | null {
+    if (this.config.provider === 'ollama') return this.local
     const key = this.config.apiKey
     if (!key) return null
     if (!this.provider || this.providerKey !== key) {
@@ -302,6 +424,8 @@ export class AiService {
 
 const other = (model: AiModelId): AiModelId => (model === LITE_MODEL ? DEFAULT_MODEL : LITE_MODEL)
 const noKey = (): AiError => ({ code: 'no_key', message: 'Add a free Gemini API key in AI settings to use the tutor.' })
+const offline = (): AiError => ({ code: 'offline', message: 'Ollama isn’t running. Start the Ollama app (or run “ollama serve” in a terminal), then try again.' })
+const notInstalled = (model: string): string => `${model} isn't installed in Ollama yet. To install it (a one-time download), run: ollama pull ${model}`
 
 function toAiError(err: unknown): AiError {
   if (err instanceof ProviderError) return err.toJSON()

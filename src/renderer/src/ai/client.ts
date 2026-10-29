@@ -21,8 +21,8 @@ function dispatch(h: AiHandlers, e: AiEvent): void {
   handlers.delete(e.requestId)
   if (e.type === 'done') h.onDone(e)
   else {
-    // Rate limits change the status (cooldown) shown in Settings.
-    if (e.error.code === 'rate_limited' || e.error.code === 'daily_quota') void useAi.getState().load()
+    // Rate limits (cooldown) and a stopped or missing local model change the status shown in Settings.
+    if (['rate_limited', 'daily_quota', 'offline', 'model_unavailable'].includes(e.error.code)) void useAi.getState().load()
     h.onError(e.error)
   }
 }
@@ -41,13 +41,15 @@ function subscribe(): void {
 }
 
 /**
- * Checks, before anything is built or sent, that a key is set and the user
- * has agreed to send content to Gemini (asking now if they have not).
+ * Checks, before anything is built or sent, that the tutor may answer: for
+ * Gemini a key and the user's agreement (asked now if missing). A local
+ * Ollama model needs neither; if it isn't running, the request says so.
  */
 export async function preflight(): Promise<AiError | null> {
   subscribe()
   const ai = useAi.getState()
   const status = ai.status ?? (await ai.load())
+  if (status.provider !== 'gemini') return null
   if (!status.hasKey) return { code: 'no_key', message: 'Add a free Gemini API key in AI settings to use the tutor.' }
   if (!(await ai.ensureConsent())) return { code: 'consent_required', message: 'Nothing was sent. The tutor needs your permission to send this to Google Gemini.' }
   return null

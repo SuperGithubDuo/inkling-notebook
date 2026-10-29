@@ -9,10 +9,11 @@ import { IMAGE_MIME, MAX_IMAGE_BYTES, MAX_PDF_BYTES, Storage } from './storage'
 import { exportMarkdownWithImages, importMarkdownImages } from './markdownFiles'
 import { SearchIndex } from './searchIndex'
 import type { Library } from '@shared/schema'
-import { aiRequestSchema, apiKeySchema, modelIdSchema } from '@shared/ai'
+import { aiRequestSchema, apiKeySchema, providerIdSchema } from '@shared/ai'
 import { AiConfig } from './ai/config'
 import { AiService } from './ai/service'
 import { GeminiProvider } from './ai/gemini'
+import { OllamaProvider } from './ai/ollama'
 
 const MAX_MARKDOWN_BYTES = 10 * 1024 * 1024
 
@@ -53,6 +54,8 @@ const configDir = process.env.INKLING_CONFIG_DIR ?? app.getPath('userData')
 const testHooks = process.env.INKLING_TEST_HOOKS === '1'
 // Tests point the SDK at a local fake Gemini server; ignored in normal runs.
 const geminiBaseUrl = testHooks ? process.env.INKLING_GEMINI_BASE_URL : undefined
+// ...and Ollama at a fake on another loopback port. Always loopback: OllamaProvider refuses anything else.
+const ollamaBaseUrl = testHooks ? process.env.INKLING_OLLAMA_URL : undefined
 const aiConfig = new AiConfig(configDir, safeStorage)
 // Acceptance tests send many requests in a few seconds; they may relax the
 // free-tier pacing (which unit tests cover). Ignored in normal runs.
@@ -61,6 +64,7 @@ const ai = new AiService({
   limits: testLimits,
   config: aiConfig,
   makeProvider: (apiKey) => new GeminiProvider({ apiKey, baseUrl: geminiBaseUrl }),
+  makeLocalProvider: () => new OllamaProvider({ baseUrl: ollamaBaseUrl }),
   emit: (event) => {
     if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.aiEvent, event)
   }
@@ -350,7 +354,11 @@ function registerIpc(): void {
   )
   handle(IPC.aiStatus, z.tuple([]), async () => {
     await aiReady
-    return ai.status()
+    return ai.freshStatus()
+  })
+  handle(IPC.aiSetProvider, z.tuple([providerIdSchema]), async (provider) => {
+    await aiReady
+    return ai.setProvider(provider)
   })
   handle(IPC.aiSetKey, z.tuple([z.string().max(300)]), async (raw) => {
     await aiReady
@@ -359,7 +367,11 @@ function registerIpc(): void {
     return ai.setKey(key.data)
   })
   handle(IPC.aiClearKey, z.tuple([]), async () => ai.clearKey())
-  handle(IPC.aiSetModel, z.tuple([modelIdSchema]), async (model) => ai.setModel(model))
+  // The model name is validated against the active provider (Gemini's two free models, or an Ollama name).
+  handle(IPC.aiSetModel, z.tuple([z.string().min(1).max(120)]), async (model) => {
+    await aiReady
+    return ai.setModel(model)
+  })
   handle(IPC.aiSetConsent, z.tuple([z.boolean()]), async (accepted) => ai.setConsent(accepted))
   handle(IPC.aiTest, z.tuple([]), async () => {
     await aiReady

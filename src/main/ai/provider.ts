@@ -1,7 +1,7 @@
 /**
- * What Inkling needs from a model provider. Gemini implements it today; a
- * local Ollama model (e.g. Qwen3-VL), OpenRouter or Anthropic Claude can be
- * added as further implementations without touching the tutor or the UI.
+ * What Inkling needs from a model provider. Local Ollama (ollama.ts, the
+ * default) and Google Gemini (gemini.ts) implement it; OpenRouter or Anthropic
+ * Claude could be added the same way without touching the tutor or the UI.
  */
 import type { AiError, AiErrorCode, AiTurn, AiUsage } from '@shared/ai'
 
@@ -11,6 +11,11 @@ export interface ProviderModel {
   displayName?: string
   inputTokenLimit?: number
   canGenerate: boolean
+  /** Local models: can read images (undefined when the provider doesn't say). */
+  vision?: boolean
+  /** Local models: a reasoning ("thinking") model. */
+  thinking?: boolean
+  sizeBytes?: number
 }
 
 export interface ProviderRequest {
@@ -26,7 +31,7 @@ export interface ProviderRequest {
 export type ProviderChunk = { type: 'text'; text: string } | { type: 'end'; usage: AiUsage; finishReason?: string }
 
 export interface AiProvider {
-  readonly id: string
+  readonly id: 'gemini' | 'ollama'
   listModels(signal?: AbortSignal): Promise<ProviderModel[]>
   stream(request: ProviderRequest, signal?: AbortSignal): AsyncIterable<ProviderChunk>
 }

@@ -9,12 +9,30 @@
  */
 import { z } from 'zod'
 
-export type AiProviderId = 'gemini'
+/**
+ * Where answers come from. Local Ollama is the default: everything stays on
+ * this computer and there is no account or age requirement. Gemini is
+ * optional; Google's terms limit it to adults (see GEMINI_ELIGIBILITY).
+ */
+export const providerIdSchema = z.enum(['ollama', 'gemini'])
+export type AiProviderId = z.infer<typeof providerIdSchema>
+export const DEFAULT_PROVIDER: AiProviderId = 'ollama'
+
+export const PROVIDERS: Record<AiProviderId, { label: string; local: boolean; description: string }> = {
+  ollama: { label: 'Ollama (on this computer)', local: true, description: 'Free and private: a vision model runs on this computer. No account or API key.' },
+  gemini: { label: 'Google Gemini', local: false, description: 'Optional cloud models. Requires a Google API key, and Google only permits users who are 18 or older.' }
+}
+
+/** Why Gemini is optional, shown wherever it can be chosen. */
+export const GEMINI_ELIGIBILITY =
+  'Google’s Gemini API terms require users to be 18 or older and do not allow it in apps likely to be used by people under 18. Students under 18 should use the local Ollama tutor.'
 
 export interface AiModelInfo {
   id: string
   label: string
   description: string
+  /** Download size, for local models. */
+  size?: string
 }
 
 /**
@@ -27,12 +45,31 @@ export const GEMINI_MODELS: readonly AiModelInfo[] = [
 ] as const
 export const DEFAULT_MODEL = 'gemini-3.8-flash'
 export const LITE_MODEL = 'gemini-3.5-flash-lite'
-export const modelIdSchema = z.enum(['gemini-3.8-flash', 'gemini-3.5-flash-lite'])
-export type AiModelId = z.infer<typeof modelIdSchema>
-export const modelLabel = (id: string): string => GEMINI_MODELS.find((m) => m.id === id)?.label ?? id
+export const geminiModelIdSchema = z.enum(['gemini-3.8-flash', 'gemini-3.5-flash-lite'])
+export type GeminiModelId = z.infer<typeof geminiModelIdSchema>
+/** @deprecated name kept for older imports; use geminiModelIdSchema. */
+export const modelIdSchema = geminiModelIdSchema
+
+/** Local vision models Inkling recommends; any other installed vision model can be chosen too. */
+export const OLLAMA_MODELS: readonly AiModelInfo[] = [
+  { id: 'qwen3-vl:4b', label: 'Qwen3-VL 4B', size: '3.3 GB', description: 'Recommended. Good handwriting reading on most laptops (8 GB RAM or more).' },
+  { id: 'qwen3-vl:2b', label: 'Qwen3-VL 2B', size: '1.9 GB', description: 'Lighter and faster, for older or low-memory computers. Less accurate.' },
+  { id: 'qwen3-vl:8b', label: 'Qwen3-VL 8B', size: '6.1 GB', description: 'Most capable. Needs about 16 GB RAM or a GPU with 8 GB.' }
+] as const
+export const OLLAMA_DEFAULT_MODEL = 'qwen3-vl:4b'
+/** An Ollama model name such as `qwen3-vl:4b` or `user/model:tag`. */
+export const ollamaModelIdSchema = z
+  .string()
+  .max(120)
+  .regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){0,2}(:[A-Za-z0-9][A-Za-z0-9._-]*)?$/, 'Not an Ollama model name')
+/** Model ids are provider-specific strings, validated by the schema of the active provider. */
+export type AiModelId = string
+export const OLLAMA_DEFAULT_URL = 'http://127.0.0.1:11434'
+
+export const modelLabel = (id: string): string => [...GEMINI_MODELS, ...OLLAMA_MODELS].find((m) => m.id === id)?.label ?? id
 
 /** Version of the data-use notice. Raising it asks the user to agree again. */
-export const CONSENT_VERSION = 1
+export const CONSENT_VERSION = 2
 
 // ---------------------------------------------------------------- requests
 
@@ -93,6 +130,7 @@ export type AiErrorCode =
   | 'duplicate' // the same request was just sent
   | 'canceled'
   | 'bad_response'
+  | 'offline' // the local Ollama server is not running
   | 'unknown'
 
 export interface AiError {
@@ -114,22 +152,53 @@ export interface ModelAvailability {
   /** `unknown` until the model list has been fetched with the current key. */
   status: 'available' | 'missing' | 'unknown'
   inputTokenLimit?: number
+  /** Local models: shown with this label (installed models Inkling doesn't list itself). */
+  label?: string
+  /** Local models: installed size in bytes. */
+  sizeBytes?: number
+  /** Local models: false when the installed model cannot read images. */
+  vision?: boolean
+}
+
+/** State of the local Ollama server, as of the last check. */
+export interface OllamaState {
+  url: string
+  /** null until checked. */
+  running: boolean | null
+  version: string | null
+  checkedAt: string | null
 }
 
 export interface AiStatus {
   provider: AiProviderId
+  /** True when the active provider processes everything on this computer. */
+  local: boolean
   model: AiModelId
+  /** The active provider needs an API key (Gemini). */
+  needsKey: boolean
+  /** A Gemini key is saved. */
   hasKey: boolean
   /** Last four characters, so the user can tell keys apart. */
   keyHint: string | null
   /** encrypted: OS keychain; weak: OS storage without a keyring; session: not saved. */
   keyProtection: KeyProtection | null
+  /** May notebook content go to the active provider? Always true for a local one. */
   consented: boolean
+  /** The user has agreed to Gemini's data use (and its age requirement). */
+  geminiConsented: boolean
+  /** Models of the active provider; for Ollama also other installed vision models. */
   models: ModelAvailability[]
+  ollama: OllamaState
   /** ISO time the model list was last fetched. */
   modelsCheckedAt: string | null
   /** Set while the app is waiting out a rate limit or exhausted quota. */
   cooldown: { until: string; reason: 'rate_limited' | 'daily_quota'; model: AiModelId } | null
+}
+
+/** Can the tutor be asked something right now (as far as the app knows)? */
+export function aiReady(s: AiStatus): boolean {
+  if (s.provider === 'gemini') return s.hasKey && s.consented
+  return s.ollama.running !== false && s.models.find((m) => m.id === s.model)?.status !== 'missing'
 }
 
 export type AiTestResult = { ok: true; model: AiModelId; latencyMs: number; models: ModelAvailability[] } | { ok: false; error: AiError }
@@ -139,6 +208,10 @@ export type AiStartResult = { requestId: string } | { error: AiError }
 export interface AiUsage {
   inputTokens?: number
   outputTokens?: number
+  /** Milliseconds from sending to the first streamed text (includes loading a local model). */
+  firstTokenMs?: number
+  /** Milliseconds from sending to the complete answer. */
+  totalMs?: number
 }
 
 export type AiEvent =

@@ -6,6 +6,7 @@
 import { useEffect, useRef } from 'react'
 import { ShieldCheck } from 'lucide-react'
 import { GEMINI_TERMS_URL, useAi } from './aiStore'
+import { GEMINI_ELIGIBILITY } from '@shared/ai'
 
 export function ConsentDialog() {
   const open = useAi((s) => s.consentOpen)
@@ -46,7 +47,9 @@ export function ConsentDialog() {
             <strong>On the free tier, Google may use what you send, and its answers, to improve its products, and human
             reviewers may read them.</strong> Don't include sensitive, confidential or personal information.
           </p>
-          <p>Google requires Gemini API users to be 18 or older.</p>
+          <p className="rounded-xl border border-line px-3 py-2 text-ink" data-testid="ai-consent-age">
+            <strong>Adults only.</strong> {GEMINI_ELIGIBILITY} By allowing, you confirm you are 18 or older.
+          </p>
           <p>
             Inkling only offers free-tier models and never switches to a paid one. It can't see whether billing is turned
             on for your key's Google Cloud project — to stay free, use a key from a project without billing.
@@ -70,7 +73,7 @@ export function ConsentDialog() {
             onClick={() => void answer(true)}
             className="rounded-xl bg-accent px-4 py-2 text-[13.5px] font-medium text-white hover:bg-accent-strong"
           >
-            I understand — allow
+            I'm 18 or older — allow
           </button>
         </div>
       </div>

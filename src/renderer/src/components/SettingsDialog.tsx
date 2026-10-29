@@ -45,7 +45,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </section>
 
         <section>
-          <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-ink-3 uppercase">AI Tutor · Google Gemini</h3>
+          <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-ink-3 uppercase">AI Tutor</h3>
           <AiSettings />
         </section>
       </div>

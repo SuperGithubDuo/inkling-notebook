@@ -52,3 +52,4 @@ export const useAi = create<AiState>((set, get) => ({
 export const GEMINI_TERMS_URL = 'https://ai.google.dev/gemini-api/terms'
 export const GET_KEY_URL = 'https://aistudio.google.com/apikey'
 export const RATE_LIMITS_URL = 'https://ai.google.dev/gemini-api/docs/rate-limits'
+export const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download'
