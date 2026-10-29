@@ -13,8 +13,13 @@ import type { AiTurn } from '@shared/ai'
 import { OLLAMA_DEFAULT_URL } from '@shared/ai'
 import { ProviderError, type AiProvider, type ProviderChunk, type ProviderModel, type ProviderRequest } from './provider'
 
-/** Waiting for the first token includes loading the model from disk, which can take a while on a CPU. */
-const FIRST_TOKEN_TIMEOUT_MS = 240_000
+/**
+ * Waiting for the first token includes loading the model from disk and
+ * reading the image. In testing, a cold load alone took 194 s on a busy
+ * 2-core machine, then ~90 s of image and prompt processing. The user can
+ * press Stop at any time, so be generous.
+ */
+const FIRST_TOKEN_TIMEOUT_MS = 600_000
 /** Once it streams, a long silence means something is stuck. */
 const IDLE_TIMEOUT_MS = 90_000
 const LIST_TIMEOUT_MS = 8_000
@@ -315,7 +320,8 @@ export function classifyOllamaError(err: unknown, ctx: { aborted: boolean; timed
   if (err instanceof ProviderError) return err
   if (ctx.aborted) return new ProviderError('canceled', 'Stopped.')
   if (ctx.timedOut) {
-    return new ProviderError('network', 'The local model took too long to answer. A smaller model (qwen3-vl:2b-instruct) or a smaller selection is faster on this computer.')
+    const small = /2b/.test(ctx.model ?? '') ? '' : ' A smaller model (qwen3-vl:2b-instruct) is faster.'
+    return new ProviderError('network', `The local model took too long to answer on this computer. Try a smaller selection, or close other apps.${small}`)
   }
   const e = err as { name?: string; message?: string; cause?: { code?: string } }
   if (e?.name === 'AbortError') return new ProviderError('canceled', 'Stopped.')

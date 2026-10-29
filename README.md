@@ -16,7 +16,7 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 
 - Node.js **22.13 or later in the 22.x line, 24.x, or 26+** (Node 22 LTS or 24 LTS recommended), with the npm that ships with it. This is the strictest range among the toolchain: Electron 45 and `@electron/get` need ≥ 22.12, pdf.js needs ≥ 22.13, and Vitest 5 doesn't support the odd-numbered 23.x/25.x lines. `package.json` declares it under `engines`. Node 20 is not supported.
 - Windows 10/11, macOS or Linux, with internet access during install (the Electron runtime is about 100 MB).
-- For the AI Tutor: [Ollama](https://ollama.com/download) 0.12.7 or later and a vision model, e.g. `ollama pull qwen3-vl:4b-instruct` (3.3 GB, about 8 GB of RAM). Inkling never installs or downloads these itself. A Gemini API key is the optional alternative (adults only).
+- For the AI Tutor: [Ollama](https://ollama.com/download) 0.12.7 or later and a vision model, e.g. `ollama pull qwen3-vl:4b-instruct` (3.3 GB download, ~5.5 GB of memory while answering). Inkling never installs or downloads these itself. A Gemini API key is the optional alternative (adults only).
 
 ## Install and run
 
@@ -174,8 +174,8 @@ A vision model runs on your own computer through [Ollama](https://ollama.com). I
 
    | Model | Command | Download | Use |
    |---|---|---|---|
-   | Qwen3-VL 4B (recommended) | `ollama pull qwen3-vl:4b-instruct` | 3.3 GB | most laptops, 8 GB RAM or more |
-   | Qwen3-VL 2B | `ollama pull qwen3-vl:2b-instruct` | 1.9 GB | older or low-memory computers; less accurate |
+   | Qwen3-VL 4B (recommended) | `ollama pull qwen3-vl:4b-instruct` | 3.3 GB | needs ~5.5 GB free memory: 16 GB computers, or 8 GB with little else open |
+   | Qwen3-VL 2B | `ollama pull qwen3-vl:2b-instruct` | 1.9 GB | 8 GB computers; faster, less reliable markups |
    | Qwen3-VL 8B | `ollama pull qwen3-vl:8b-instruct` | 6.2 GB | most capable; ~16 GB RAM or a GPU with 8 GB |
 
    Use the `-instruct` builds. The plain tags (`qwen3-vl:4b`, `:2b`, `:8b`) are Qwen3-VL's *thinking* builds: they write a long chain of reasoning before every answer, and Ollama (0.40) doesn't let Inkling switch that off. On a 2-core CPU test machine, with the same image and question, the 2B thinking build took 338 s to reach a correct answer (about 900 reasoning tokens first); the 2B instruct build gave a correct answer in 104 s. They still work if installed (listed as "thinking", with extra token budget for the reasoning), just slowly.
@@ -221,7 +221,12 @@ Google's Gemini API terms require users to be 18 or older and don't allow it in 
 ### Local model results
 
 <!-- local-model-results -->
-Not yet measured with a real model: the development sandbox for this milestone could not download model weights. Run `npm run test:live` and `npm run test:live:app` on a machine with Ollama (see `docs/windows-validation.md`) and record the reports here.
+Measured with real models in Ollama 0.40.13 on a slow machine (2 CPU cores, 8 GB RAM, no GPU); full answers, timings and screenshots in [`docs/live-results/`](docs/live-results/README.md).
+
+- **Qwen3-VL 4B instruct** read every handwriting scenario correctly: it found the sign mistake in x² + 5x + 6 = 0 (roots −2, −3) and put a ✗ and the correction on the right line, recognised correct work, named all four forces in a free-body diagram, and answered from a note and a PDF. In the app, the whole workflow worked: streamed answer, previewed proposal, approval, editable AI objects, undo/redo.
+- **Qwen3-VL 2B instruct** was right in every chat answer except missing the weight in the diagram, and completed the app workflow, but its own markups were less reliable: once it marked the wrong work as correct.
+- All structured answers validated. On this machine the first words of an answer about an image took 75–145 s; text-only questions 3–7 s.
+- **Memory:** 4B peaks at about 5.5 GB and was killed by the OS four times in testing (out of about 30 requests) when other programs, or the app itself, also needed memory; the app explained it and left the page unchanged. Use 2B on 8 GB computers.
 <!-- /local-model-results -->
 
 ## Notebook context API

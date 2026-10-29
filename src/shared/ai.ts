@@ -59,8 +59,8 @@ export const modelIdSchema = geminiModelIdSchema
  * only when installed, marked as slower.
  */
 export const OLLAMA_MODELS: readonly AiModelInfo[] = [
-  { id: 'qwen3-vl:4b-instruct', label: 'Qwen3-VL 4B', size: '3.3 GB', description: 'Recommended. Good handwriting reading on most laptops (8 GB RAM or more).' },
-  { id: 'qwen3-vl:2b-instruct', label: 'Qwen3-VL 2B', size: '1.9 GB', description: 'Lighter and faster, for older or low-memory computers. Less accurate.' },
+  { id: 'qwen3-vl:4b-instruct', label: 'Qwen3-VL 4B', size: '3.3 GB', description: 'Recommended. Most accurate markups in testing. Needs about 5.5 GB of free memory (16 GB computers, or 8 GB with little else open).' },
+  { id: 'qwen3-vl:2b-instruct', label: 'Qwen3-VL 2B', size: '1.9 GB', description: 'For 8 GB computers. Faster, reads well, but its markups are less reliable.' },
   { id: 'qwen3-vl:8b-instruct', label: 'Qwen3-VL 8B', size: '6.2 GB', description: 'Most capable. Needs about 16 GB RAM or a GPU with 8 GB.' }
 ] as const
 export const OLLAMA_DEFAULT_MODEL = 'qwen3-vl:4b-instruct'
