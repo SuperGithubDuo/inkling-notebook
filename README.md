@@ -1,6 +1,6 @@
 # Inkling
 
-An AI-native handwriting notebook for the desktop, built with Electron, React and TypeScript. Think GoodNotes-style ink, plus notebook organisation, plus an AI tutor, running on Google Gemini's free tier, that reads your handwriting and writes corrections directly on your pages.
+An AI-native handwriting notebook for the desktop, built with Electron, React and TypeScript. Think GoodNotes-style ink, plus notebook organisation, plus an AI tutor that reads your handwriting and writes corrections directly on your pages. The tutor runs free and privately on your own computer with [Ollama](https://ollama.com) and a Qwen3-VL vision model; Google Gemini is an optional alternative for adults.
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -8,13 +8,15 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 | 2 | Lasso selection, shapes, images, zoom/pan, precise eraser, page sizes, typed command layer | ✅ done |
 | 3 | Rich-text notes, search, links/backlinks, knowledge graph, PDF import/annotation/export | ✅ done |
 | 4 | AI Tutor on Google Gemini (free tier): streaming chat about handwriting, practice mode, previewed corrections on the page | ✅ done |
-| 5 | More providers (local Ollama vision models, OpenRouter, Anthropic Claude), handwriting search | planned |
+| 4.6 | Local AI tutor on Ollama (default; Qwen3-VL), Gemini optional and 18+ only, narrow-window layout | ✅ done (live-model results: see *Local model results*) |
+| 5 | Advanced AI editing on the canvas, more providers (OpenRouter, Anthropic Claude), handwriting search | planned |
 | 6 | Packaging, installers, theming, accessibility pass | planned |
 
 ## Requirements
 
 - Node.js **22.13 or later in the 22.x line, 24.x, or 26+** (Node 22 LTS or 24 LTS recommended), with the npm that ships with it. This is the strictest range among the toolchain: Electron 45 and `@electron/get` need ≥ 22.12, pdf.js needs ≥ 22.13, and Vitest 5 doesn't support the odd-numbered 23.x/25.x lines. `package.json` declares it under `engines`. Node 20 is not supported.
 - Windows 10/11, macOS or Linux, with internet access during install (the Electron runtime is about 100 MB).
+- For the AI Tutor: [Ollama](https://ollama.com/download) 0.12.7 or later and a vision model, e.g. `ollama pull qwen3-vl:4b` (3.3 GB, about 8 GB of RAM). Inkling never installs or downloads these itself. A Gemini API key is the optional alternative (adults only).
 
 ## Install and run
 
@@ -41,11 +43,22 @@ Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Window
 npm run typecheck   # strict TypeScript, no emit
 npm test            # unit tests (vitest): storage, history, commands, geometry, eraser, viewport, migration, assets, notes/Markdown, search/links/graph, PDF export, assistant context
 npm run build
-npm run test:e2e    # drives the real Electron app with mouse input (Phase 1–4 and regression suites)
+npm run test:e2e    # drives the real Electron app with mouse input: Phase 1–4, regressions, local AI (Ollama), layout
 npm run test:smoke:fake   # the real-Gemini smoke test, run against the local fake (no key needed)
+npm run test:live         # optional: handwriting scenarios against a REAL local model in Ollama
+npm run test:live:app     # optional: the full on-page correction workflow in the app with a REAL local model
 ```
 
-Automated tests never call Google. They run the official `@google/genai` SDK against a local fake of the Gemini REST API (`tests/support/fakeGemini.mjs`), which speaks the same wire format (SSE streaming, `x-goog-api-key`, Google's error bodies) and records every request, including images and structured-output schemas. ### Real Gemini smoke test (optional)
+Automated tests never call a model. The local-AI suite (`tests/e2e/ollama.e2e.mjs`) runs against a fake of the Ollama API (`tests/support/fakeOllama.mjs`: version, tags, show/capabilities, NDJSON chat streaming, its error bodies). The Gemini suites run the official `@google/genai` SDK against a local fake of the Gemini REST API (`tests/support/fakeGemini.mjs`), which speaks the same wire format (SSE streaming, `x-goog-api-key`, Google's error bodies). Both fakes record every request, including images and structured-output schemas.
+
+### Live local-model tests (optional)
+
+With Ollama running and a model installed (`ollama pull qwen3-vl:4b`):
+
+- `npm run test:live` sends the handwriting scenarios through Inkling's own AI service with the exact images the app sends (`tests/fixtures/handwriting/`): **A** x² + 5x + 6 = 0 factorised correctly but solved as x = 2, 3 (should be −2, −3); **B** a correct linear equation; **C** a free-body diagram; **D** a question about a note; **E** a question about PDF text; and practice problems with answer checking. Each check (reading, correctness, streaming, schema validation) is recorded with its timing in `test-results/live-ollama-<model>.md`; a wrong answer is reported, not hidden.
+- `npm run build && npm run test:live:app` does the whole on-page workflow in the app: write scenario A, ask, *Show this on my page*, preview, approve, undo, redo and edit, writing `test-results/live-app-<model>.md` and screenshots.
+
+Set `INKLING_LIVE_MODEL=qwen3-vl:2b` (or `:8b`) to test another model. Both skip when Ollama or the model isn't there. The fixture images are drawn with the test suite's pen-stroke font, so they are clean; real student handwriting should also be tried by hand (see `docs/windows-validation.md`). ### Real Gemini smoke test (optional)
 
 `tests/smoke/gemini.smoke.test.ts` checks a real key end to end through Inkling's own AI service: which of Inkling's models the key can use, a streamed chat answer and a follow-up that depends on it, cancelling an answer, a rejected key, reading and explaining the handwriting in `tests/fixtures/handwriting-linear.png` and turning Gemini's markup into valid canvas objects, and a practice set whose right and wrong answers Gemini checks. It sends about 11 small requests, paced to stay under the free tier's per-minute limits, so it takes a minute or two. It is skipped when no key is set.
 
@@ -147,36 +160,67 @@ The data comes from the link index (`graph()`), and the layout is a d3-force sim
   - Handwritten pages get their paper as fine lines.
   - Rich-text notes are not included (export them as Markdown).
 
-## AI Tutor (Google Gemini)
+## AI Tutor
 
-The tutor runs on Google's Gemini API through the official Gen AI SDK (`@google/genai`). It is designed to cost nothing within Gemini's free tier.
+The tutor answers through one of two providers, chosen in Settings → AI Tutor. Both use the same instructions, structured-output schemas, validation and canvas commands; only the transport differs (`src/main/ai/ollama.ts`, `src/main/ai/gemini.ts`).
+
+### Local: Ollama (default)
+
+A vision model runs on your own computer through [Ollama](https://ollama.com). It's free, needs no account or key, has no usage limits, and nothing leaves the computer: Inkling only talks to Ollama on `127.0.0.1:11434` and refuses any other address.
+
+**Set up.**
+1. Install Ollama from [ollama.com/download](https://ollama.com/download) and open it.
+2. Install a vision model in a terminal (a one-time download):
+
+   | Model | Command | Download | Use |
+   |---|---|---|---|
+   | Qwen3-VL 4B (recommended) | `ollama pull qwen3-vl:4b` | 3.3 GB | most laptops, 8 GB RAM or more |
+   | Qwen3-VL 2B | `ollama pull qwen3-vl:2b` | 1.9 GB | older or low-memory computers; less accurate |
+   | Qwen3-VL 8B | `ollama pull qwen3-vl:8b` | 6.1 GB | most capable; ~16 GB RAM or a GPU with 8 GB |
+
+3. Settings → AI Tutor shows whether Ollama is running, which models are installed (other installed vision models are listed too; text-only models are not), the command for a model you picked but haven't installed, and a connection test that loads the model. Inkling never downloads models or installs software itself.
+
+Answers take longer than with a cloud model, especially the first one while the model loads into memory, and depend on your hardware. Inkling turns off Qwen3-VL's long "thinking" mode, gives a stopped model up to 4 minutes to load, and suggests the 2B model if a larger one runs out of memory or is too slow. Qwen3-VL marks up work with boxes in its own format (`[x1, y1, x2, y2]` on 0–1000), which Inkling converts before validating.
+
+### Optional: Google Gemini (18+ only)
+
+Google's Gemini API terms require users to be 18 or older and don't allow it in apps likely to be used by under-18s, so Inkling, a student notebook, does not rely on it: it is off unless chosen, marked 18+, and its consent asks you to confirm your age. It runs through the official Gen AI SDK (`@google/genai`) and is designed to cost nothing within Gemini's free tier.
 
 **Set up.**
 1. Create a free API key in [Google AI Studio](https://aistudio.google.com/apikey). No billing is needed. To be sure you stay free, use a key from a Google Cloud project **without billing enabled**: Inkling can't see your project's billing, and Google charges for any project that has it.
-2. Open Settings → AI Tutor, paste the key and press Save. Inkling runs a connection test: it lists the models your key can use and sends one tiny request. No notebook content is sent.
+2. Open Settings → AI Tutor, choose **Google Gemini**, paste the key and press Save. Inkling runs a connection test: it lists the models your key can use and sends one tiny request. No notebook content is sent.
 3. Choose a model: **Gemini 3.8 Flash** (default, best quality) or **Gemini 3.5 Flash-Lite** (lighter, more generous free limits). Models your key can't use are flagged.
-4. The first time you ask something, Inkling asks permission to send notebook content to Google.
+4. The first time you ask something, Inkling asks you to confirm you are 18 or older and agree to send notebook content to Google.
 
-**Using it.**
+### Using the tutor
+
 | What | How |
 |---|---|
 | Ask about your handwriting | Lasso-select your work → ✨ on the selection toolbar (or Ask AI), then type a question. Answers stream in, with formulas typeset. Follow-up questions keep the conversation. |
 | Quick actions | Give me a hint · Explain the concept · Check my work · Try a similar problem |
 | Context | The composer shows what is included: your selection, or this page. Remove it to ask a general question. |
 | Practice | Practice tab → difficulty, number of problems, optional topic. Reveal hints one at a time, check a typed answer or a handwritten one (select it), show the worked solution, or copy a problem onto the page. |
-| Corrections on the page | On Page tab → *Mark up my selection*, or **Show this on my page** under a chat answer. Gemini proposes ✓/✗ marks, circles, underlines, corrections and notes. They are previewed on the page, you can untick any of them, and *Add to my page* inserts them as one undoable step. They are ordinary objects in a handwriting font (Caveat): move, edit or delete them like anything else. |
+| Corrections on the page | On Page tab → *Mark up my selection*, or **Show this on my page** under a chat answer. The tutor proposes ✓/✗ marks, circles, underlines, corrections and notes. They are previewed on the page, you can untick any of them, and *Add to my page* inserts them as one undoable step. They are ordinary objects in a handwriting font (Caveat): move, edit or delete them like anything else. |
 
-**Privacy.** On Gemini's free tier, Google may use what you send, and its answers, to improve its products, and human reviewers may read them ([Gemini API terms](https://ai.google.dev/gemini-api/terms)). Don't send sensitive, confidential or personal information. Google requires API users to be 18 or older. Inkling sends only what you ask about: your question, and either a cropped image of the selected area or the current page's typed/PDF text plus an image of just its handwritten part. Nothing is sent before you agree and ask. You can withdraw permission in Settings.
+### Privacy, Gemini limits and keys
 
-**Free-tier protection.**
+**Privacy.** With Ollama, nothing leaves your computer. On Gemini's free tier, Google may use what you send, and its answers, to improve its products, and human reviewers may read them ([Gemini API terms](https://ai.google.dev/gemini-api/terms)). Don't send sensitive, confidential or personal information. Google requires API users to be 18 or older. Inkling sends only what you ask about: your question, and either a cropped image of the selected area or the current page's typed/PDF text plus an image of just its handwritten part. Nothing is sent before you agree and ask. You can withdraw permission in Settings.
+
+**Free-tier protection (Gemini).**
 - Only free-tier models are offered. Inkling never switches model or tier on its own. When a model's daily quota runs out, it says so (quotas reset at midnight Pacific) and offers a one-click switch to the other free model.
 - One request at a time, at most 8 per minute, and an accidental repeat of the same request within 10 seconds is refused. After a rate-limit or quota error, Inkling waits locally instead of retrying against the API.
 - Images are cropped to the relevant area and sent as JPEG, at most 1024 px on the long edge. Conversations keep only the last five exchanges, with earlier answers shortened and at most one earlier image.
 - Clear messages for an invalid key, rate limits, exhausted daily quota, models without free quota, unavailable models, network problems and blocked answers.
 
-**Key storage.** The key lives only in the main process, encrypted with the operating system's keychain (Electron `safeStorage`) in the app's config folder (`gemini-key.bin`, next to `ai-settings.json`), never in your notebooks. The interface only ever sees its last four characters. On Linux without a keyring the key is saved with weak protection, and Settings says so. Where nothing can encrypt, it is kept in memory for the session only.
+**Key storage (Gemini).** The key lives only in the main process, encrypted with the operating system's keychain (Electron `safeStorage`) in the app's config folder (`gemini-key.bin`, next to `ai-settings.json`), never in your notebooks. The interface only ever sees its last four characters. On Linux without a keyring the key is saved with weak protection, and Settings says so. Where nothing can encrypt, it is kept in memory for the session only.
 
-**Providers.** `src/main/ai/provider.ts` defines the small interface the tutor needs (`listModels`, `stream` with text and image parts and optional JSON-schema output). `src/main/ai/gemini.ts` implements it for Gemini. A local Ollama vision model (e.g. Qwen3-VL), OpenRouter or Anthropic Claude can be added as further implementations without changing the tutor or the UI.
+**Providers.** `src/main/ai/provider.ts` defines the small interface the tutor needs (`listModels`, `stream` with text and image parts and optional JSON-schema output). `src/main/ai/ollama.ts` and `src/main/ai/gemini.ts` implement it; `src/main/ai/service.ts` applies consent, pacing and validation per provider. OpenRouter or Anthropic Claude can be added the same way without changing the tutor or the UI.
+
+### Local model results
+
+<!-- local-model-results -->
+Not yet measured with a real model: the development sandbox for this milestone could not download model weights. Run `npm run test:live` and `npm run test:live:app` on a machine with Ollama (see `docs/windows-validation.md`) and record the reports here.
+<!-- /local-model-results -->
 
 ## Notebook context API
 
@@ -252,7 +296,8 @@ useStore.getState().run(
 
 ## Known limitations
 
-- Gemini is the only AI provider so far. Inkling can't tell whether your Google Cloud project has billing enabled. Use a key from a project without billing to be sure of no charges.
+- The local tutor's quality and speed depend on the model and the computer. Small models (2B) misread handwriting more often; see *Local model results* for what has actually been measured.
+- Gemini is for adults only (Google's terms). Inkling can't tell whether your Google Cloud project has billing enabled. Use a key from a project without billing to be sure of no charges.
 - Tutor conversations last for the session only and are not saved with the notebook.
 - The tutor reads handwriting from images, so its reading depends on legibility. "What the tutor read" in the On Page tab shows what it saw.
 - Live tests against the real Gemini API are optional and need your own key. Free-tier limits are set by Google per project and may change.
@@ -269,6 +314,7 @@ useStore.getState().run(
 - Very large PDFs import page by page with a progress notice; a 500-page PDF creates 500 page files.
 - No installer yet; `npm run build` produces the app for `npm start`. Packaging (electron-builder) is planned for Phase 6.
 - Automated tests run on Linux in CI. Windows 11 was tested once by independent QA at Phase 4 (see the Phase 4.5 notes below); macOS has not been tested on real hardware, and stylus pressure, palm rejection and touch gestures have not been tested on physical pen or touch devices.
+- In windows narrower than about 1180 px some toolbar buttons fold away (they all have shortcuts or Markdown input rules), and the AI Tutor button shows only its icon. The notebook title is shortened at the minimum width (960 px).
 - The production build still warns about chunks over 500 kB: the main renderer chunk (1.7 MB minified: React, Konva, Tiptap, KaTeX) and the on-demand PDF export chunk. pdf.js and the export code load only when first used.
 
 ### Phase 4.5 notes (Windows stabilisation)
@@ -276,5 +322,5 @@ useStore.getState().run(
 - **Clean install** — Electron 45 stopped downloading its binary on install; `postinstall` now does it (see *Install and run*).
 - **PDF unit tests on Windows** — the tests passed pdf.js a backslash path for its fonts; they now use a forward-slash path with a trailing `/` (`tests/support/pdfjsData.mjs`). App code was not affected.
 - **Intermittent resize failure** ("opposite corner fixed", seen once on Windows) — not reproduced: 25 normal and 10 CPU-starved runs on Linux, plus probes with 125–175 % display scaling, a window resize mid-drag and the pointer thrown past the opposite corner, all kept the corner within 0.003 page units (tolerance 1.5). The test now waits for the specific edit to reach disk and confirms the handle is under the pointer before dragging, and reports the full geometry and a screenshot if it fails again; it then passed 20 of 20 runs on Linux. Repeated runs on Windows (`npm run test:e2e:phase2`, ideally 20×) are still needed to close this out.
-- **Narrow windows** — below about 1000 px wide the top toolbar overlaps the notebook title and save status, and below about 750 px the bottom tool dock covers the tutor's composer and the zoom controls are clipped. Not fixed in this milestone (it needs a responsive toolbar layout); the *Ask AI* label no longer wraps.
+- **Narrow windows** — fixed in the local-AI milestone: less-needed controls fold away instead of overlapping; `tests/e2e/layout.e2e.mjs` checks seven window sizes from 960×600.
 - **Real Gemini** — not yet run against Google's API in this milestone (no key was configured in the test environment). Run the smoke test above, then try the four flows in the app.
