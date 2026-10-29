@@ -90,7 +90,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   return (
     <header className="relative flex h-[60px] shrink-0 items-center border-b border-line-soft bg-white px-3">
       {/* Left: navigation + notebook name */}
-      <div className="flex w-[clamp(190px,19vw,300px)] min-w-0 shrink-0 items-center gap-1">
+      <div className="flex w-[clamp(190px,19vw,300px)] min-w-0 shrink-0 items-center gap-1 max-[1180px]:w-[168px]">
         <IconButton
           label={inNotebook ? 'Back to library' : 'Back to notebook'}
           disabled={!inNotebook && !notebook}
@@ -139,7 +139,9 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
         </>
       )}
       {inNotebook && !inNote && (
-        <div className="flex min-w-0 flex-1 items-center justify-center gap-0.5" role="toolbar" aria-label="Drawing tools">
+        // A size container: as the space between title and status shrinks, the least needed
+        // controls fold away (they all have keyboard shortcuts or other places) instead of overlapping.
+        <div className="@container flex min-w-0 flex-1 items-center justify-center gap-0.5" role="toolbar" aria-label="Drawing tools">
           {TOOLS.map(({ tool: t, label, key, icon: Icon }) => (
             <IconButton key={t} label={label} hint={key} active={tool === t} onClick={() => st.setTool(t)} data-testid={`tool-${t}`}>
               <Icon size={19} strokeWidth={1.8} />
@@ -153,7 +155,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
             <Type size={19} strokeWidth={1.8} />
           </IconButton>
           <ImageButton />
-          <IconButton label="Audio recording — not yet available" disabled>
+          <IconButton label="Audio recording — not yet available" disabled className="@max-[720px]:hidden">
             <Mic size={19} strokeWidth={1.8} />
           </IconButton>
           <Divider />
@@ -165,7 +167,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
               aria-label={`Colour ${c}`}
               aria-pressed={currentColor === c}
               onClick={() => st.setColor(c)}
-              className="group relative flex h-9 w-8 items-center justify-center"
+              className="group relative flex h-9 w-8 items-center justify-center @max-[600px]:w-6"
             >
               <span
                 className="h-[18px] w-[18px] rounded-full transition-transform group-hover:scale-110"
@@ -173,9 +175,11 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
               />
             </button>
           ))}
-          <CustomColor value={currentColor} onPick={st.setColor} />
+          <span className="contents @max-[640px]:hidden">
+            <CustomColor value={currentColor} onPick={st.setColor} />
+          </span>
           <SizePicker />
-          <IconButton label="Hand (pan)" hint="Space" active={tool === 'hand'} onClick={() => st.setTool('hand')} data-testid="tool-hand">
+          <IconButton label="Hand (pan)" hint="Space" active={tool === 'hand'} onClick={() => st.setTool('hand')} data-testid="tool-hand" className="@max-[680px]:hidden">
             <Hand size={18} strokeWidth={1.8} />
           </IconButton>
           <Divider />
@@ -193,7 +197,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
       {!inNotebook && <div className="flex-1" />}
 
       {/* Right: status, tutor, export, settings */}
-      <div className="flex w-[clamp(250px,19vw,300px)] shrink-0 items-center justify-end gap-1">
+      <div className="flex min-w-[clamp(250px,19vw,300px)] shrink-0 items-center justify-end gap-1 max-[1180px]:min-w-0">
         <SaveIndicator />
         <button
           type="button"
@@ -201,14 +205,16 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           aria-pressed={tutorOpen}
           onClick={() => st.toggle('tutorOpen')}
           className={cx(
-            'mx-1 flex h-9 shrink-0 items-center gap-1.5 rounded-[11px] px-3.5 text-[14px] font-medium whitespace-nowrap transition-colors',
+            'group relative mx-1 flex h-9 shrink-0 items-center gap-1.5 rounded-[11px] px-3.5 text-[14px] font-medium whitespace-nowrap transition-colors max-[1180px]:px-2.5',
             tutorOpen
               ? 'bg-gradient-to-r from-[#8d8cf6] to-[#9fa7fb] text-white shadow-[0_2px_8px_-2px_rgb(109_99_240/0.5)]'
               : 'bg-lav-soft text-lav hover:bg-[#e2dffc]'
           )}
         >
           <Sparkles size={15} />
-          AI Tutor
+          {/* Icon only in narrow windows; the name stays for screen readers and the tooltip. */}
+          <span className="max-[1180px]:sr-only">AI Tutor</span>
+          <Tip text="AI Tutor" />
         </button>
         <IconButton
           label={inNote ? 'Export note as Markdown' : 'Export page as PNG'}

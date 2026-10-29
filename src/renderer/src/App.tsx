@@ -62,7 +62,7 @@ export function App() {
         {view.kind === 'notebook' ? (
           <>
             {navigatorOpen && <PageNavigator />}
-            <main className="relative min-w-0 flex-1 bg-paper">
+            <main className="@container relative min-w-0 flex-1 bg-paper">
               <Notices />
               <ActivePage />
               <FloatingToolbar onAskAi={askAi} compact={activeKind === 'note'} />

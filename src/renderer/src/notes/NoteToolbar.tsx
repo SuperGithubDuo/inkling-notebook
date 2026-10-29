@@ -113,7 +113,9 @@ function EditorToolbar({ editor }: { editor: Editor }) {
 
   return (
     <div
-      className="flex min-w-0 flex-1 items-center justify-center gap-0.5"
+      // A size container: in narrow windows the formatting that also has a shortcut or a
+      // Markdown input rule folds away instead of overlapping the title and save status.
+      className="@container flex min-w-0 flex-1 items-center justify-center gap-0.5"
       role="toolbar"
       aria-label="Formatting"
       data-testid="note-toolbar"
@@ -128,7 +130,7 @@ function EditorToolbar({ editor }: { editor: Editor }) {
         type="button"
         data-testid="text-style"
         onClick={(e) => setMenu({ kind: 'style', at: at(e) })}
-        className="flex h-9 w-[112px] items-center justify-between rounded-[10px] px-2.5 text-[13.5px] text-ink-2 hover:bg-[#f1f2f4]"
+        className="flex h-9 w-[112px] shrink-0 items-center justify-between rounded-[10px] px-2.5 text-[13.5px] text-ink-2 hover:bg-[#f1f2f4] @max-[700px]:w-[88px]"
       >
         {styleLabel}
         <ChevronDown size={14} className="text-ink-3" />
@@ -140,13 +142,13 @@ function EditorToolbar({ editor }: { editor: Editor }) {
       <IconButton label="Italic" hint="Ctrl+I" active={state.italic} onClick={() => chain().toggleItalic().run()}>
         <Italic size={17} />
       </IconButton>
-      <IconButton label="Underline" hint="Ctrl+U" active={state.underline} onClick={() => chain().toggleUnderline().run()}>
+      <IconButton label="Underline" hint="Ctrl+U" active={state.underline} onClick={() => chain().toggleUnderline().run()} className="@max-[700px]:hidden">
         <Underline size={17} />
       </IconButton>
-      <IconButton label="Strikethrough" hint="Ctrl+Shift+S" active={state.strike} onClick={() => chain().toggleStrike().run()}>
+      <IconButton label="Strikethrough" hint="Ctrl+Shift+S" active={state.strike} onClick={() => chain().toggleStrike().run()} className="@max-[860px]:hidden">
         <Strikethrough size={17} />
       </IconButton>
-      <IconButton label="Inline code" hint="Ctrl+E" active={state.code} onClick={() => chain().toggleCode().run()}>
+      <IconButton label="Inline code" hint="Ctrl+E" active={state.code} onClick={() => chain().toggleCode().run()} className="@max-[860px]:hidden">
         <Code size={17} />
       </IconButton>
       <Divider />
@@ -159,10 +161,10 @@ function EditorToolbar({ editor }: { editor: Editor }) {
       <IconButton label="Checklist" active={state.task} onClick={() => chain().toggleTaskList().run()} data-testid="fmt-task">
         <ListChecks size={18} />
       </IconButton>
-      <IconButton label="Quote" active={state.quote} onClick={() => chain().toggleBlockquote().run()}>
+      <IconButton label="Quote" hint="> at line start" active={state.quote} onClick={() => chain().toggleBlockquote().run()} className="@max-[780px]:hidden">
         <Quote size={17} />
       </IconButton>
-      <IconButton label="Code block" active={state.codeBlock} onClick={() => chain().toggleCodeBlock().run()}>
+      <IconButton label="Code block" hint="``` at line start" active={state.codeBlock} onClick={() => chain().toggleCodeBlock().run()} className="@max-[780px]:hidden">
         <FileCode2 size={17} />
       </IconButton>
       <Divider />
@@ -175,19 +177,21 @@ function EditorToolbar({ editor }: { editor: Editor }) {
       <IconButton label="Link" hint="Ctrl+K" active={state.link} onClick={openLink} data-testid="fmt-link">
         <Link2 size={17} />
       </IconButton>
-      <IconButton label="Link to a page or note" hint="[[" onClick={() => useNoteEditor.getState().openPagePicker()} data-testid="fmt-page-link">
+      <IconButton label="Link to a page or note" hint="[[" onClick={() => useNoteEditor.getState().openPagePicker()} data-testid="fmt-page-link" className="@max-[780px]:hidden">
         <FileSymlink size={17} />
       </IconButton>
       <IconButton label="Insert image" onClick={() => void insertImage()}>
         <Image size={17} />
       </IconButton>
-      <Divider />
-      <IconButton label="Undo" hint="Ctrl+Z" disabled={!state.canUndo} onClick={() => chain().undo().run()}>
-        <Undo2 size={18} />
-      </IconButton>
-      <IconButton label="Redo" hint="Ctrl+Shift+Z" disabled={!state.canRedo} onClick={() => chain().redo().run()}>
-        <Redo2 size={18} />
-      </IconButton>
+      <span className="contents @max-[700px]:hidden">
+        <Divider />
+        <IconButton label="Undo" hint="Ctrl+Z" disabled={!state.canUndo} onClick={() => chain().undo().run()}>
+          <Undo2 size={18} />
+        </IconButton>
+        <IconButton label="Redo" hint="Ctrl+Shift+Z" disabled={!state.canRedo} onClick={() => chain().redo().run()}>
+          <Redo2 size={18} />
+        </IconButton>
+      </span>
       <Menu at={menu?.at ?? null} items={menu ? menus[menu.kind] : []} onClose={() => setMenu(null)} />
     </div>
   )
