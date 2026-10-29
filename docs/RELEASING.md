@@ -12,22 +12,57 @@ To change the version: `npm version 0.2.0-beta.2 --no-git-tag-version`, commit, 
 
 ## Build on GitHub (recommended)
 
-The workflow is `.github/workflows/release.yml`.
+The workflow is `.github/workflows/release.yml`. It runs on GitHub's Windows and macOS machines; nothing needs installing on yours.
 
-1. **Installers to test.** Go to GitHub → Actions → **Release** → *Run workflow*. When it finishes, download **inkling-windows-latest** and **inkling-macos-latest** from the run's *Artifacts*. Nothing is published.
-2. **A release.** Tag the commit and push the tag:
-   ```bash
-   git tag v0.2.0-beta.1
-   git push origin v0.2.0-beta.1
-   ```
-   The workflow builds both installers and uploads them to a **draft** GitHub release, together with the `latest*.yml` files that in-app updates read. A draft is invisible to users: review it, add the release notes (`RELEASE_NOTES.md`), tick *Set as a pre-release* for betas, then press **Publish**. Only published releases reach users or their update checks.
+### Start a build
 
-Every run first passes these on Linux:
-- the typecheck, unit tests and the full acceptance suite
-- the large-notebook check
-- a smoke test of the packaged app
+GitHub's *Run workflow* button only lists workflows that exist on the **default branch** (`main`). Until the release work is merged, start builds by pushing a branch whose name starts with `build/`. The branch name picks the platforms:
 
-Each installer job then runs the unit tests and the packaged-app smoke test on its own system. A separate job runs the acceptance suite on Windows and macOS.
+| Push | Builds |
+|---|---|
+| `build/windows` | Windows installer |
+| `build/macos` | macOS installers |
+| `build/all` (or any other `build/…` name) | both |
+
+From a clone of the repository:
+
+```bash
+git fetch origin
+git push origin origin/beta-release:refs/heads/build/windows --force   # Windows from the current beta-release
+```
+
+On github.com, without git: open the `beta-release` branch, open the branch menu, type `build/windows` and choose *Create branch build/windows from beta-release*. Pushing the same branch again (with `--force`) starts a new build.
+
+Once the workflow is on `main`: *Actions → Release → Run workflow*, choose the branch (e.g. `beta-release`) and the platforms.
+
+### Get the installers
+
+Open *Actions → Release*, then the run, then **Artifacts** at the bottom of the summary. You need to be signed in to GitHub.
+- `inkling-Windows` contains `Inkling-Setup-<version>-x64.exe`.
+- `inkling-macOS` contains the `.dmg` files (arm64 and x64) and the `.zip` files used for updates.
+
+Nothing is published as a release. Note that this repository is public, so anyone signed in to GitHub who finds the run can download its artifacts. They aren't announced or linked anywhere, and they expire after 90 days.
+
+### What every build checks
+
+| Job | Where | What |
+|---|---|---|
+| Checks (Linux) | Ubuntu | typecheck, unit tests, production build, beta-server typecheck and bundle |
+| Installer | Windows / macOS | unit tests on that system, the installers, the packaged-app smoke test, then the **installer lifecycle**: install (silent NSIS / copy from the DMG) → use (handwriting, PDF import and export) → install a newer build over it → uninstall → reinstall. The notebooks must be unchanged after every step. |
+| Acceptance | Windows / macOS | every end-to-end suite, each as its own step (Phase 1–4, regressions, Ollama, cloud beta, layout, release, large notebook) |
+
+When a step fails, its key error lines appear as annotations on the run summary, and screenshots are in the `test-results-*` artifacts.
+
+### Publish a release (only with approval)
+
+Tag the commit and push the tag:
+
+```bash
+git tag v0.2.0-beta.1
+git push origin v0.2.0-beta.1
+```
+
+The workflow builds both installers and uploads them to a **draft** GitHub release, together with the `latest*.yml` files that in-app updates read. A draft is invisible to users. Review it, add the release notes (`RELEASE_NOTES.md`), tick *Set as a pre-release* for betas, then press **Publish**. Only published releases reach users or their update checks.
 
 ### Repository settings the workflow reads
 
@@ -94,7 +129,7 @@ The Windows uninstaller is configured with `deleteAppDataOnUninstall: false`. Re
 
 ## Release checklist
 
-1. All workflow jobs green. The Windows and macOS acceptance jobs are real systems, but not real stylus hardware.
+1. All workflow jobs green. The Windows and macOS jobs run on real systems (virtual machines), but without real pens or touch screens.
 2. Install the built `.exe` and `.dmg` on a real Windows PC and Mac, and go through `docs/DEVICE-TESTING.md`.
 3. Update `RELEASE_NOTES.md`. Bump the version.
 4. Tag, wait for the draft, check its assets: `.exe` ×2, `.dmg` ×2, `.zip` ×2, `latest.yml`, `latest-mac.yml`, `.blockmap` files.

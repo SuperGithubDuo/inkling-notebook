@@ -31,7 +31,36 @@ Neurons are Cloudflare's usage unit. For this model, Cloudflare's price list giv
 
 ## Deploy
 
-You need a Cloudflare account on the Workers **Free** plan.
+You need a Cloudflare account on the Workers **Free** plan. Open *Workers & Pages* in the dashboard once, so the account gets its `workers.dev` subdomain.
+
+### From GitHub Actions (recommended; nothing to install)
+
+`.github/workflows/beta-server.yml` deploys the server and then tests it against the real model.
+
+1. In Cloudflare, create an API token (*My Profile → API Tokens → Create Token → Create Custom Token*) with these permissions:
+   - Account › Workers Scripts: Edit
+   - Account › Account Settings: Read
+   - Account › Billing: Read
+   - Account › Workers AI: Read
+   - User › Memberships: Read
+   - User › User Details: Read
+
+   Limit it to your account.
+2. In GitHub, go to *Settings → Secrets and variables → Actions* and add three secrets:
+   - `CLOUDFLARE_ACCOUNT_ID`
+   - `CLOUDFLARE_API_TOKEN`
+   - `INKLING_ADMIN_TOKEN`: at least 32 random characters, e.g. from `openssl rand -base64 36`. Keep a copy for `npm run admin`.
+3. Push the branch `deploy/beta-server`, for example on github.com: open the branch menu and create `deploy/beta-server` from `beta-release`. Once the workflow is on `main`, you can instead use *Actions → Beta AI server → Run workflow*.
+
+The workflow:
+- refuses to deploy to an account on Workers Paid, where usage beyond the free allowance would be billed
+- deploys, then checks that requests without a code are rejected and that the admin API is hidden
+- creates a temporary tester code, runs the handwriting scenarios against the real model, then revokes the code
+- shows answers, timings and Neurons as annotations on the run, and uploads the full report as `live-cloud-report`
+
+The run summary shows the server address. Set it as the repository **variable** `INKLING_BETA_URL`, and the next installer build has cloud AI built in.
+
+### From your computer
 
 ```bash
 cd beta-server

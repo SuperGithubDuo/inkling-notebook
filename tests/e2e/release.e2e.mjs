@@ -14,7 +14,7 @@
  * Usage: npm run build && xvfb-run -a node tests/e2e/release.e2e.mjs
  */
 import { _electron as electron } from 'playwright-core'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { electronPath } from '../support/electronPath.mjs'
 import { mkdtemp, mkdir, readFile, readdir, writeFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -129,9 +129,13 @@ try {
   await waitSaved(win)
   await sleep(200)
   const { pageId } = await activeIds(win)
-  // No chance to save on exit: the whole process tree is killed.
-  app.process().kill('SIGKILL')
-  await sleep(500)
+  // No chance to save on exit: the whole process tree is killed, as Task Manager's "End task" does.
+  const proc = app.process()
+  const gone = new Promise((r) => proc.once('exit', r))
+  if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' })
+  else proc.kill('SIGKILL')
+  await gone
+  await sleep(300)
   current = await launch(a.env)
   ;({ app, win } = current)
   const lib = await libraryOf(a.dataDir)
@@ -296,7 +300,7 @@ try {
   assert.ok(!win.isClosed(), 'the first copy is still running')
   await win.getByText('Legacy notebook').first().waitFor()
   await app.close()
-  step('a second copy of Inkling on the same notebooks quits immediately; the first keeps running')
+  step('a second copy of Inkling on the same notebooks quits; the first keeps running')
 
   console.log('\nRelease acceptance: all checks passed')
 } catch (err) {

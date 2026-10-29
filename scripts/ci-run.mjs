@@ -24,7 +24,12 @@ const child = spawn(cmd.join(' '), { shell: true, stdio: ['inherit', 'pipe', 'pi
 child.stdout.on('data', (d) => (process.stdout.write(d), keep(d)))
 child.stderr.on('data', (d) => (process.stderr.write(d), keep(d)))
 child.on('close', (code) => {
-  if (code === 0) return process.exit(0)
+  if (code === 0) {
+    // Evidence of what passed, readable from the checks API.
+    const passed = tail.filter((l) => /^\s*✓/.test(l)).map((l) => l.trim())
+    if (passed.length) console.log(`::notice title=${label} passed::${passed.join('\n').replace(/%/g, '%25').replace(/\n/g, '%0A').slice(0, 6000)}`)
+    return process.exit(0)
+  }
   const esc = (s) => s.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
   // eslint-disable-next-line no-control-regex
   const clean = tail.map((l) => l.replace(/\x1b\[[0-9;]*m/g, '')).filter((l) => l.trim() && !/dbus|NODE_OPTION|DevTools listening/.test(l))

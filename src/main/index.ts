@@ -44,7 +44,16 @@ app.setName('Inkling')
 pinUserData()
 
 // Two copies of Inkling on the same notebooks would overwrite each other's saves.
-if (!app.requestSingleInstanceLock()) {
+// Right after a crash, the old copy's processes can hold the lock for a moment
+// (seen on Windows), so retry briefly before deciding another copy is running.
+function acquireSingleInstanceLock(): boolean {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (app.requestSingleInstanceLock()) return true
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500)
+  }
+  return false
+}
+if (!acquireSingleInstanceLock()) {
   app.quit()
   process.exit(0)
 }
