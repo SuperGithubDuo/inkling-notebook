@@ -10,6 +10,7 @@
  */
 import { _electron as electron } from 'playwright-core'
 import { electronPath } from '../support/electronPath.mjs'
+import { pdfjsDataDir } from '../support/pdfjsData.mjs'
 import { mkdtemp, readFile, readdir, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -597,13 +598,13 @@ const canvasPages = physics.pages.filter((p) => !p.deletedAt && p.kind === 'canv
 assert.equal(outDoc.getPageCount(), canvasPages)
 const exportedPdfPageIdx = physics.pages.filter((p) => !p.deletedAt && p.kind === 'canvas').findIndex((p) => p.id === pdfMetas[0].id)
 assert.deepEqual(outDoc.getPage(exportedPdfPageIdx).getSize(), { width: 595.28, height: 841.89 })
-const pdfjsDoc = await getDocument({ data: new Uint8Array(exported), standardFontDataUrl: join(root, 'node_modules/pdfjs-dist/standard_fonts/') }).promise
+const pdfjsDoc = await getDocument({ data: new Uint8Array(exported), standardFontDataUrl: pdfjsDataDir('standard_fonts') }).promise
 const exportedPage = await pdfjsDoc.getPage(exportedPdfPageIdx + 1)
 const exportedText = (await exportedPage.getTextContent()).items.map((i) => i.str).join(' ')
 assert.match(exportedText, /Newton's second law/, 'original PDF text kept as text')
 assert.match(exportedText, /Check units/, 'text annotation exported as text')
 const ops = await exportedPage.getOperatorList()
-const originalOps = await (await (await getDocument({ data: new Uint8Array(srcBytes), standardFontDataUrl: join(root, 'node_modules/pdfjs-dist/standard_fonts/') }).promise).getPage(1)).getOperatorList()
+const originalOps = await (await (await getDocument({ data: new Uint8Array(srcBytes), standardFontDataUrl: pdfjsDataDir('standard_fonts') }).promise).getPage(1)).getOperatorList()
 assert.ok(ops.fnArray.length > originalOps.fnArray.length + 5, 'annotations added as vector drawing operations')
 assert.equal(sha(await readFile(storedPdf)), sha(srcBytes), 'stored original still unchanged after export')
 step(`exported an annotated ${outDoc.getPageCount()}-page PDF: original content preserved, annotations as vectors and text`)

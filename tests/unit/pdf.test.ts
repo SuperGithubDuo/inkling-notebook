@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib'
 import { getDocument, Util } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { pdfjsDataDir } from '../support/pdfjsData.mjs'
 import { buildNotebookPdf, shapePolylines, wrapText } from '../../src/renderer/src/pdf/exportPdf'
 import { createNotebook, createPageDoc, createPageMeta, createPdfPageDoc, PDF_SCALE } from '../../src/shared/factory'
 import type { CanvasObject, PageDoc, ShapeObject } from '../../src/shared/schema'
@@ -23,7 +24,7 @@ async function sourcePdf(): Promise<Uint8Array> {
 }
 
 async function textItems(bytes: Uint8Array, pageNo: number) {
-  const pdf = await getDocument({ data: bytes.slice(), disableFontFace: true, useSystemFonts: false, standardFontDataUrl: join(root, 'node_modules/pdfjs-dist/standard_fonts/') }).promise
+  const pdf = await getDocument({ data: bytes.slice(), disableFontFace: true, useSystemFonts: false, standardFontDataUrl: pdfjsDataDir('standard_fonts') }).promise
   const page = await pdf.getPage(pageNo)
   const viewport = page.getViewport({ scale: 1 })
   const content = await page.getTextContent()
@@ -39,6 +40,17 @@ async function textItems(bytes: Uint8Array, pageNo: number) {
 }
 
 const base = { author: 'user' as const, createdAt: 0 }
+
+describe('pdf.js test resources', () => {
+  // Regression: on Windows `path.join` gave "...\\standard_fonts\\", which pdf.js
+  // rejects (it needs a trailing "/"), failing every test below that reads text.
+  it('resolves a forward-slash folder with a trailing "/" that fs can read', async () => {
+    const dir = pdfjsDataDir('standard_fonts')
+    expect(dir.endsWith('/')).toBe(true)
+    expect(dir).not.toContain('\\')
+    expect((await readFile(`${dir}FoxitDingbats.pfb`)).byteLength).toBeGreaterThan(0)
+  })
+})
 
 describe('annotated PDF export', () => {
   it('keeps original PDF content as vectors/text and places annotations exactly, also on rotated pages', async () => {
