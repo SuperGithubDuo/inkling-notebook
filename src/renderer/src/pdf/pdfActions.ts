@@ -3,7 +3,6 @@ import { selectActiveNotebook, useStore } from '@/store/store'
 import interWoff from '@fontsource/inter/files/inter-latin-400-normal.woff?url'
 import caveatWoff from '@fontsource/caveat/files/caveat-latin-500-normal.woff?url'
 import { loadPdf, readAssetBytes, readPdfPages } from './pdfjs'
-import { buildNotebookPdf } from './exportPdf'
 
 async function toPng(bytes: Uint8Array): Promise<Uint8Array> {
   const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]))
@@ -46,6 +45,8 @@ export async function exportActiveNotebookPdf(): Promise<void> {
   await s.flush()
   try {
     s.setNotice('Preparing PDF…')
+    // pdf-lib and fontkit (~1.5 MB) are only needed here, so they load on first export.
+    const { buildNotebookPdf } = await import('./exportPdf')
     const { bytes, skippedNotes } = await buildNotebookPdf(notebook, {
       getPage: async (id) => useStore.getState().pages[id] ?? (await window.inkling.loadPage(notebook.id, id)).page,
       readAsset: readAssetBytes,

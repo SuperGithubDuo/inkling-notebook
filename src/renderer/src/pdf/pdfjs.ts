@@ -2,13 +2,26 @@
  * PDF reading with pdf.js (Apache-2.0). Documents are loaded from the
  * notebook's assets and rendered on demand at the current zoom; nothing is
  * ever stored as a rasterised image.
+ *
+ * pdf.js itself (~750 KB) is loaded on first use, so notebooks without PDFs
+ * don't pay for it at startup.
  */
 import { useEffect, useState } from 'react'
-import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { PDFJS_RESOURCE_URL, assetUrl } from '@shared/ipc'
 
-GlobalWorkerOptions.workerSrc = workerUrl
+let pdfjs: Promise<typeof import('pdfjs-dist')> | null = null
+function loadPdfjs(): Promise<typeof import('pdfjs-dist')> {
+  if (!pdfjs) {
+    pdfjs = import('pdfjs-dist').then((m) => {
+      m.GlobalWorkerOptions.workerSrc = workerUrl
+      return m
+    })
+    pdfjs.catch(() => (pdfjs = null)) // allow a retry after a failed load
+  }
+  return pdfjs
+}
 
 const docs = new Map<string, Promise<PDFDocumentProxy>>()
 
@@ -22,8 +35,8 @@ export function loadPdf(notebookId: string, asset: string): Promise<PDFDocumentP
   const key = `${notebookId}/${asset}`
   let doc = docs.get(key)
   if (!doc) {
-    doc = readAssetBytes(notebookId, asset).then(
-      (data) =>
+    doc = Promise.all([readAssetBytes(notebookId, asset), loadPdfjs()]).then(
+      ([data, { getDocument }]) =>
         getDocument({
           data,
           standardFontDataUrl: `${PDFJS_RESOURCE_URL}standard_fonts/`,
