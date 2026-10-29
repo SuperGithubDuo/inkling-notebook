@@ -9,6 +9,7 @@
  * Usage: npm run build && xvfb-run -a node tests/e2e/phase3.e2e.mjs
  */
 import { _electron as electron } from 'playwright-core'
+import { electronPath } from '../support/electronPath.mjs'
 import { mkdtemp, readFile, readdir, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -28,7 +29,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 let app, win
 const cspViolations = []
 async function launch() {
-  app = await electron.launch({ executablePath: join(root, 'node_modules/electron/dist/electron'), args: ['--no-sandbox', root], env })
+  app = await electron.launch({ executablePath: electronPath, args: ['--no-sandbox', root], env })
   win = await app.firstWindow()
   win.on('pageerror', (e) => console.error('PAGE ERROR', e))
   win.on('console', (m) => {

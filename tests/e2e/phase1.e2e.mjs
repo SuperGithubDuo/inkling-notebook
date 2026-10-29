@@ -6,6 +6,7 @@
  * Usage: npm run build && xvfb-run -a npm run test:e2e   (screenshots → $SHOTS or ./test-results)
  */
 import { _electron as electron } from 'playwright-core'
+import { electronPath } from '../support/electronPath.mjs'
 import { mkdtemp, readFile, readdir, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -22,7 +23,7 @@ delete env.ELECTRON_RUN_AS_NODE
 
 async function launch() {
   const app = await electron.launch({
-    executablePath: join(root, 'node_modules/electron/dist/electron'),
+    executablePath: electronPath,
     args: ['--no-sandbox', root],
     env
   })

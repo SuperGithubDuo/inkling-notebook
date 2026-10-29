@@ -7,6 +7,7 @@
  * Usage: npm run build && xvfb-run -a npm run test:e2e:phase2
  */
 import { _electron as electron } from 'playwright-core'
+import { electronPath } from '../support/electronPath.mjs'
 import { mkdtemp, readFile, readdir, writeFile, utimes, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -24,7 +25,7 @@ const step = (msg) => console.log(`  ✓ ${msg}`)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function launch() {
-  const app = await electron.launch({ executablePath: join(root, 'node_modules/electron/dist/electron'), args: ['--no-sandbox', root], env })
+  const app = await electron.launch({ executablePath: electronPath, args: ['--no-sandbox', root], env })
   const win = await app.firstWindow()
   win.on('pageerror', (e) => console.error('PAGE ERROR', e))
   win.on('console', (m) => m.type() === 'error' && console.error('CONSOLE', m.text()))

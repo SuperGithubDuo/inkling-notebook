@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "AI-native handwriting notebook",
   "main": "out/main/index.js",
+  "engines": {
+    "node": "^22.13.0 || ^24.0.0 || >=26.0.0"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -11,7 +14,9 @@
     "test": "vitest run",
     "test:e2e": "node tests/e2e/phase1.e2e.mjs && node tests/e2e/phase2.e2e.mjs && node tests/e2e/regressions.e2e.mjs && node tests/e2e/phase3.e2e.mjs && node tests/e2e/phase4.e2e.mjs",
     "test:e2e:phase2": "node tests/e2e/phase2.e2e.mjs",
-    "test:smoke": "vitest run -c vitest.smoke.config.mts"
+    "test:smoke": "vitest run -c vitest.smoke.config.mts",
+    "postinstall": "node scripts/ensure-electron.mjs",
+    "electron:install": "node scripts/ensure-electron.mjs --strict"
   },
   "author": "",
   "license": "UNLICENSED",

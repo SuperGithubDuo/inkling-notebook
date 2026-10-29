@@ -13,17 +13,25 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 
 ## Requirements
 
-- Node.js 20+ (developed on Node 22) and npm
-- Windows 10/11, macOS or Linux. Electron's binary is downloaded by `npm install`.
+- Node.js **22.13 or later in the 22.x line, 24.x, or 26+** (Node 22 LTS or 24 LTS recommended), with the npm that ships with it. This is the strictest range among the toolchain: Electron 45 and `@electron/get` need ≥ 22.12, pdf.js needs ≥ 22.13, and Vitest 5 doesn't support the odd-numbered 23.x/25.x lines. `package.json` declares it under `engines`. Node 20 is not supported.
+- Windows 10/11, macOS or Linux, with internet access during install (the Electron runtime is about 100 MB).
 
 ## Install and run
 
 ```bash
-npm install
+npm ci             # or npm install; also downloads the Electron runtime (see below)
 npm run dev        # development, with hot reload
 npm run build      # production build into out/
 npm start          # run the production build
 ```
+
+**The Electron runtime.** Since Electron 45 the `electron` npm package no longer downloads its binary during install; it downloads it lazily, the first time something calls `require('electron')`. electron-vite (`npm run dev`, `npm start`) and the Playwright tests don't go through that path, so on a clean checkout they found no binary. Inkling's own `postinstall` step (`scripts/ensure-electron.mjs`) now runs Electron's installer, which verifies the download against Electron's checksums and does nothing when the right binary is already present. If the download fails (offline, a proxy), `npm ci` still succeeds with a warning; fix the network and run:
+
+```bash
+npm run electron:install   # downloads node_modules/electron/dist; fails loudly if it can't
+```
+
+Set `ELECTRON_SKIP_BINARY_DOWNLOAD=1` to skip the download, as CI does, since typecheck, unit tests and the build never launch Electron. Electron's usual download settings (`ELECTRON_MIRROR`, `electron_config_cache`, proxy variables) still apply.
 
 Notes are saved to the OS app-data folder (`%APPDATA%\Inkling\Library` on Windows, `~/Library/Application Support/Inkling/Library` on macOS). Set `INKLING_DATA_DIR` to use another folder. Settings → Storage shows the path.
 
