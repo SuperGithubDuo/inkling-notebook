@@ -377,5 +377,9 @@ describe('request validation', () => {
     expect(apiKeySchema.safeParse(` ${VALID_KEY} `).success).toBe(true)
     expect(apiKeySchema.safeParse('short').success).toBe(false)
     expect(apiKeySchema.safeParse('AIza key with spaces 0123456789').success).toBe(false)
+    // Newer Google keys use an `AQ.` prefix with a dot; both formats must pass.
+    expect(apiKeySchema.safeParse('AQ.Ab8RN6Kx_fake-0123456789abcdefGHIJ').success).toBe(true)
+    expect(apiKeySchema.safeParse('AIzaSyFakeLegacyKey_0123456789abcdef').success).toBe(true)
+    expect(apiKeySchema.safeParse('AQ.Ab8RN6Kx\nfake0123456789abcdef').success).toBe(false)
   })
 })

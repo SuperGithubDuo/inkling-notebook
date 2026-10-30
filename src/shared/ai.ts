@@ -230,10 +230,15 @@ export type AiEvent =
   | { requestId: string; type: 'done'; text: string; usage: AiUsage; model: AiModelId }
   | { requestId: string; type: 'error'; error: AiError }
 
-/** Accepted shape of a Gemini API key (format only; Google decides validity). */
+/**
+ * Accepted shape of a Gemini API key (format only; Google decides validity).
+ * Google has used more than one format (legacy `AIza…` keys and newer `AQ.…`
+ * keys), so we only require printable ASCII with no spaces, which is what an
+ * HTTP header value can carry, rather than tying validation to any prefix.
+ */
 export const apiKeySchema = z
   .string()
   .trim()
   .min(20, 'That does not look like a Gemini API key.')
   .max(200)
-  .regex(/^[A-Za-z0-9_-]+$/, 'That does not look like a Gemini API key.')
+  .regex(/^[\x21-\x7E]+$/, 'That does not look like a Gemini API key.')

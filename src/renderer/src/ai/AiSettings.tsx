@@ -302,7 +302,7 @@ function GeminiSettings({ status }: { status: AiStatus }) {
               aria-label="Gemini API key"
               autoComplete="off"
               spellCheck={false}
-              placeholder="Paste your key (starts with AIza…)"
+              placeholder="Paste your key (starts with AQ. or AIza…)"
               onChange={(e) => setKey(e.target.value)}
               className="min-w-0 flex-1 rounded-xl border border-line bg-white px-3 py-2 text-[13px] outline-none select-text focus:border-accent"
             />
