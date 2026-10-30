@@ -91,11 +91,18 @@ jobs:
             fi
           fi
 
-      - name: Typecheck the server
-        working-directory: beta-server
+      # The server shares Inkling's request schema and tutor prompts (src/shared, src/main/ai), which
+      # import packages from the app's own node_modules: install both.
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
         run: |
           npm ci
-          node ../scripts/ci-run.mjs "beta-server typecheck" npm run typecheck
+          npm --prefix beta-server ci
+
+      - name: Typecheck the server
+        working-directory: beta-server
+        run: node ../scripts/ci-run.mjs "beta-server typecheck" npm run typecheck
 
       - name: Deploy
         id: deploy
@@ -130,7 +137,6 @@ jobs:
           URL: ${{ steps.deploy.outputs.url }}
           INKLING_LIVE_PROBE: '1'
         run: |
-          npm ci
           created=$(curl -sS -X POST "$URL/admin/testers" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN" -H 'content-type: application/json' -d '{"name":"CI live test","dailyNeurons":4000}')
           id=$(echo "$created" | jq -r .id); code=$(echo "$created" | jq -r .accessCode)
           [ "$code" != null ] || { echo "::error title=Live test::Could not create a test tester: $created"; exit 1; }

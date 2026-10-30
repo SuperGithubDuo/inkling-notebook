@@ -63,6 +63,7 @@ The run summary shows the server address. Set it as the repository **variable** 
 ### From your computer
 
 ```bash
+npm ci                                      # in the repository root: the server shares the app's request schema and prompts
 cd beta-server
 npm ci
 npx wrangler login                          # once
