@@ -11,12 +11,14 @@ export interface AiHandlers {
   onError(error: AiError): void
 }
 
+type RequestEvent = Exclude<AiEvent, { type: 'status' }>
+
 const handlers = new Map<string, AiHandlers>()
 /** Events that arrive before start() has returned the request id. */
-const early = new Map<string, AiEvent[]>()
+const early = new Map<string, RequestEvent[]>()
 let subscribed = false
 
-function dispatch(h: AiHandlers, e: AiEvent): void {
+function dispatch(h: AiHandlers, e: RequestEvent): void {
   if (e.type === 'delta') return h.onDelta?.(e.text)
   handlers.delete(e.requestId)
   if (e.type === 'done') h.onDone(e)
@@ -31,6 +33,8 @@ function subscribe(): void {
   if (subscribed) return
   subscribed = true
   window.inkling.ai.onEvent((e) => {
+    // Status pushes belong to the AI store (aiStore.ts), not to any request.
+    if (e.type === 'status') return
     const h = handlers.get(e.requestId)
     if (h) return dispatch(h, e)
     const list = early.get(e.requestId) ?? []

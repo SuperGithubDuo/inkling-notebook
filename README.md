@@ -185,7 +185,7 @@ Free for everyone who installs Inkling, with nothing to set up: no account, acce
 - about 10 typical answers a day per installation (900 Neurons), 2,700 Neurons per internet connection (a school or office shares this), and 9,000 Neurons for everyone together;
 - one answer at a time per installation, a few a minute.
 
-The panel shows roughly how many answers are left. When an allowance runs out, the tutor says so plainly, notebooks work as usual, and it offers a one-click switch to the local Ollama tutor. Inkling never switches by itself and never moves to paid usage.
+The panel shows roughly how many answers are left, using the server's own count: it updates after every answer (chat, markup, practice and checks), after a stopped answer, and again after the midnight UTC reset. The app never estimates or counts down by itself. When an allowance runs out, the tutor says so plainly, notebooks work as usual, and it offers a one-click switch to the local Ollama tutor. Inkling never switches by itself and never moves to paid usage.
 
 **What is sent and kept.** Your question, and an image of your selection or the page's typed/PDF text plus an image of its handwriting. The app sends only the task and the conversation; the server adds Inkling's instructions and limits, so it can't be used as a general AI service. Neither Inkling's server nor Cloudflare keeps the content ([Cloudflare's data usage](https://developers.cloudflare.com/workers-ai/platform/privacy/)). To enforce the limits, the server counts usage per installation (a random ID the app creates) and per network address, stored only as hashes with a salt that changes daily and deleted at the end of each UTC day. There is no credential in the app, and no Cloudflare API token anywhere: the server reaches Workers AI through its built-in binding.
 
@@ -360,7 +360,7 @@ useStore.getState().run(
 - The beta server can only declare, not verify, that its Cloudflare account is on the Workers Free plan (`ACCOUNT_PLAN`). On a Workers Paid account, usage beyond the free allowance would be billed, though the server's own cap still stops at 9,000 Neurons a day.
 - The local tutor's quality and speed depend on the model and the computer. Small models (2B) misread handwriting more often; see *Local model results* for what has actually been measured.
 - Gemini is for adults only (Google's terms). Inkling can't tell whether your Google Cloud project has billing enabled. Use a key from a project without billing to be sure of no charges.
-- Tutor conversations last for the session only and are not saved with the notebook.
+- **Tutor chats are kept for the session only.** They clear when Inkling closes, and the chat says so. What the tutor adds to a page after you approve it (marks, corrections, notes) is ordinary page content and is saved with the notebook. Practice sets are session-only too.
 - The tutor reads handwriting from images, so its reading depends on legibility. "What the tutor read" in the On Page tab shows what it saw.
 - Live tests against the real Gemini API are optional and need your own key. Free-tier limits are set by Google per project and may change.
 - AI notes in the PDF export use Caveat when it has every character, and otherwise fall back to Inter. Some maths symbols (e.g. √) may then be missing in the PDF.

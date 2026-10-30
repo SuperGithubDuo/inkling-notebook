@@ -4,7 +4,7 @@ Thank you for testing Inkling! This guide takes about five minutes. You don't ne
 
 ## Windows 10 or 11
 
-1. Download **Inkling-Setup-0.2.0-beta.1-x64.exe**. If your PC has an ARM processor, such as a Surface Pro X or a Copilot+ PC with Snapdragon, download the **-arm64** file instead.
+1. Download **Inkling-Setup-0.2.0-beta.2-x64.exe**. If your PC has an ARM processor, such as a Surface Pro X or a Copilot+ PC with Snapdragon, download the **-arm64** file instead.
 2. Double-click the file. Inkling installs for your user account (no administrator password needed), adds a Start menu and desktop shortcut, and opens.
 3. **If Windows shows "Windows protected your PC":** click **More info**, then **Run anyway**. This appears because the beta isn't yet signed with a code-signing certificate.
 
@@ -13,7 +13,7 @@ To uninstall, go to *Settings → Apps → Installed apps → Inkling → Uninst
 ## macOS 12 or later
 
 1. Download the DMG for your Mac:
-   - **Inkling-0.2.0-beta.1-arm64.dmg** for Apple silicon (M1 or later; *Apple menu → About This Mac* shows "Chip: Apple M…").
+   - **Inkling-0.2.0-beta.2-arm64.dmg** for Apple silicon (M1 or later; *Apple menu → About This Mac* shows "Chip: Apple M…").
    - **-x64.dmg** for Intel Macs.
 2. Open the DMG and drag **Inkling** into **Applications**.
 3. Open Inkling from Applications. **If macOS says it can't verify the developer:** open *System Settings → Privacy & Security*, scroll down, and click **Open Anyway** next to the message about Inkling. Confirm with your password. You only need to do this once.

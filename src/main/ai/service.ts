@@ -99,6 +99,8 @@ export class AiService {
   private readonly makeCloud: NonNullable<AiServiceOptions['makeCloudProvider']>
   private cloud: { provider: BetaProvider; key: string } | null = null
   private cloudInfo: { quota: CloudQuota | null; checkedAt: string | null } = { quota: null, checkedAt: null }
+  /** Counts allowance reports from the server, so a request can tell whether it brought one. */
+  private quotaReports = 0
   private models: ProviderModel[] | null = null
   private modelsCheckedAt: string | null = null
   private readonly cooldowns = new Map<AiModelId, Cooldown>()
@@ -144,23 +146,54 @@ export class AiService {
       url: this.config.cloudUrl,
       urlFromBuild: this.config.cloudUrlFromBuild,
       consented: this.config.cloudConsented,
-      quota: this.cloudInfo.quota,
+      // After the UTC reset the last report no longer describes today: show nothing rather than yesterday's count.
+      quota: this.quotaExpired() ? null : this.cloudInfo.quota,
       checkedAt: this.cloudInfo.checkedAt
     }
   }
 
+  private quotaExpired(): boolean {
+    const resetAt = this.cloudInfo.quota ? Date.parse(this.cloudInfo.quota.resetAt) : NaN
+    return Number.isFinite(resetAt) && resetAt <= this.now()
+  }
+
+  /**
+   * Keeps the allowance the server reports (with every answer, refusal and
+   * status check) and tells the renderer at once. The server's figures are the
+   * only source: the app never estimates or counts down by itself.
+   */
   private noteQuota = (quota: CloudQuota): void => {
+    this.quotaReports++
     this.cloudInfo = { quota, checkedAt: new Date(this.now()).toISOString() }
+    this.emit({ type: 'status', status: this.status() })
+  }
+
+  /** Asks the server for today's allowance. Costs no model usage; never throws. */
+  private async refreshCloudQuota(): Promise<void> {
+    // Switched to another provider meanwhile: nothing to show, so nothing to ask.
+    const beta = this.config.provider === 'cloud' ? this.getCloud() : null
+    if (!beta) return
+    try {
+      const st = await beta.status()
+      this.noteQuota(st.quota)
+      // A new UTC day (or freed room) ends a daily-quota pause the server set earlier.
+      const cd = this.cooldowns.get(CLOUD_MODEL)
+      if (cd?.reason === 'daily_quota' && st.quota.approxAnswersLeft > 0) {
+        this.cooldowns.delete(CLOUD_MODEL)
+        this.emit({ type: 'status', status: this.status() })
+      }
+    } catch {
+      /* offline or paused: keep what is known */
+    }
   }
 
   /** The status, re-checking the local server first if that is due. */
   async freshStatus(): Promise<AiStatus> {
     if (this.config.provider === 'ollama' && this.now() - this.ollamaCheckedAt > OLLAMA_RECHECK_MS) await this.checkOllama()
     if (this.config.provider === 'cloud') {
-      // Today's allowance, at most once a minute (the status call costs no model usage).
+      // Today's allowance, at most once a minute or right after the UTC reset (the status call costs no model usage).
       const at = this.cloudInfo.checkedAt ? Date.parse(this.cloudInfo.checkedAt) : 0
-      const beta = this.getCloud()
-      if (beta && !this.active && this.now() - at > 60_000) await beta.status().then((st) => this.noteQuota(st.quota), () => undefined)
+      if (!this.active && (this.now() - at > 60_000 || this.quotaExpired())) await this.refreshCloudQuota()
     }
     return this.status()
   }
@@ -339,6 +372,7 @@ export class AiService {
     const name = provider.id === 'ollama' ? 'The local model' : provider.id === 'cloud' ? 'The AI tutor' : 'Gemini'
     let firstTokenMs: number | undefined
     let text = ''
+    const reportsBefore = this.quotaReports
     try {
       let usage = {}
       let finishReason: string | undefined
@@ -372,6 +406,9 @@ export class AiService {
       this.emit({ requestId: id, type: 'error', error })
     } finally {
       if (this.active?.id === id) this.active = null
+      // A stopped, timed-out or dropped cloud answer brings no allowance report, though the server may
+      // have charged for it: ask once (a status check, not a model call) so the count stays true.
+      if (provider.id === 'cloud' && this.quotaReports === reportsBefore) void this.refreshCloudQuota()
     }
   }
 

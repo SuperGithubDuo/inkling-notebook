@@ -138,15 +138,33 @@ function Elapsed() {
   )
 }
 
+/**
+ * Chats are kept for this session only (a product decision for the preview):
+ * say so where people chat, so a restart doesn't come as a surprise.
+ */
+function SessionNote() {
+  return (
+    <p data-testid="tutor-session-note" className="mx-auto mt-3 max-w-[300px] text-center text-[12px] leading-snug text-ink-3">
+      Chats aren’t saved: they clear when you close Inkling. Marks you add to your page are saved with it.
+    </p>
+  )
+}
+
 /** Where questions go, in one line under the tutor. */
 function ProviderNote() {
   const status = useAi((s) => s.status)
   if (status?.provider === 'gemini') return <span data-testid="ai-provider-note">Sent to Google Gemini only when you ask.</span>
   if (status?.provider === 'cloud') {
     const q = status.cloud.quota
+    const left = q ? Math.max(0, q.approxAnswersLeft) : null
     return (
       <span data-testid="ai-provider-note">
-        Sent to Inkling’s AI server only when you ask.{q ? ` About ${q.approxAnswersLeft} answer${q.approxAnswersLeft === 1 ? '' : 's'} left today.` : ''}
+        Sent to Inkling’s AI server only when you ask.
+        {left !== null && (
+          <span data-testid="ai-answers-left" data-left={left}>
+            {left > 0 ? ` About ${left} answer${left === 1 ? '' : 's'} left today.` : ' Today’s free answers are used up.'}
+          </span>
+        )}
       </span>
     )
   }
@@ -245,6 +263,7 @@ function ChatView({ onOpenSettings, inputId }: { onOpenSettings: () => void; inp
         {messages.length === 0 ? (
           <>
             <Intro icon={Sparkles} title="Ask about this page" body="Check your working, get a concept explained, or ask follow-up questions about the page you are on or a lasso selection." />
+            <SessionNote />
             <AiStatusCard onOpenSettings={onOpenSettings} compact />
             <div className="mt-auto grid grid-cols-2 gap-2.5 pt-5">
               {(Object.keys(QUICK) as QuickAction[]).map((q) => {
@@ -267,6 +286,7 @@ function ChatView({ onOpenSettings, inputId }: { onOpenSettings: () => void; inp
           </>
         ) : (
           <div className="flex flex-col gap-3.5">
+            <SessionNote />
             {messages.map((m, i) =>
               m.role === 'user' ? <UserMessage key={m.id} m={m} /> : <ModelMessage key={m.id} m={m} region={messages[i - 1]?.region} onOpenSettings={onOpenSettings} />
             )}

@@ -13,6 +13,7 @@ import { startBetaServer, RATES, type BetaServer } from '../support/fakeBeta.mjs
 import { AiConfig, migrateSettings, type SecretCipher } from '../../src/main/ai/config'
 import { AiService } from '../../src/main/ai/service'
 import { GeminiProvider } from '../../src/main/ai/gemini'
+import { CloudProvider } from '../../src/main/ai/cloud'
 import { OllamaProvider } from '../../src/main/ai/ollama'
 import { CLOUD_MAX_TOKENS, TASKS, taskSpec } from '../../src/main/ai/prompts'
 import { CLOUD_MODEL, betaUrlSchema, installIdSchema, type AiEvent, type AiRequest } from '../../src/shared/ai'
@@ -693,6 +694,145 @@ describe('app on the cloud AI', () => {
     expect(ask('three')).toMatchObject({ error: { code: 'daily_quota' } })
     expect(service.status().cooldown?.reason).toBe('daily_quota')
     expect(server.ai.calls.length).toBe(calls)
+  })
+
+  // Hermes QA (Beta 1): the panel showed ~10 answers left through several answers and ~6 after a restart.
+  describe('the allowance shown stays current without restarting', () => {
+    let statusCalls = 0
+    let streamCalls = 0
+    /** The real CloudProvider, counting what it asks the server. */
+    const counting = () => {
+      statusCalls = 0
+      streamCalls = 0
+      return (o: ConstructorParameters<typeof CloudProvider>[0]) => {
+        const p = new CloudProvider(o)
+        const status = p.status.bind(p)
+        const stream = p.stream.bind(p)
+        p.status = (s) => (statusCalls++, status(s))
+        p.stream = (r, s) => (streamCalls++, stream(r, s))
+        return p
+      }
+    }
+    const pushed = () => events.filter((e): e is Extract<AiEvent, { type: 'status' }> => e.type === 'status')
+    const lastLeft = () => pushed().at(-1)?.status.cloud.quota?.approxAnswersLeft
+    const lastUsed = () => pushed().at(-1)?.status.cloud.quota?.installUsed
+
+    const serviceWith = async (opts: Parameters<typeof startBetaServer>[0] = {}) => {
+      server = await startBetaServer(opts)
+      config = new AiConfig(dir, memoryCipher, { builtInCloudUrl: server.url, defaultProvider: 'cloud' })
+      await config.load()
+      await config.setCloudConsent(true)
+      service = new AiService({
+        config,
+        makeProvider: (k) => new GeminiProvider({ apiKey: k, baseUrl: 'http://127.0.0.1:9' }),
+        makeLocalProvider: () => new OllamaProvider({ baseUrl: 'http://127.0.0.1:9' }),
+        makeCloudProvider: counting(),
+        emit: (e) => events.push(e),
+        now: () => Date.now() + server.clock.offset,
+        limits: { duplicateWindowMs: 0, minIntervalMs: 0 }
+      })
+    }
+
+    it('after chat, markup, practice and check answers, each pushed to the window before the answer, with no extra server calls', async () => {
+      await serviceWith({ installDailyNeurons: 900, typicalNeuronsPerAnswer: 80 })
+      const image = await fixture('scenario-a.jpg')
+      const requests: AiRequest[] = [
+        { task: 'chat', turns: [{ role: 'user', parts: [{ text: 'Explain factorising' }] }] },
+        { task: 'annotate', turns: [{ role: 'user', parts: [{ text: 'Check my work in the image and mark it up.' }, { image: { mimeType: 'image/jpeg', data: image } }] }] },
+        { task: 'practice', turns: [{ role: 'user', parts: [{ text: 'Make 2 easy practice problems about factorising quadratics.' }] }] },
+        { task: 'check', turns: [{ role: 'user', parts: [{ text: 'Problem: factorise x^2+5x+6. My answer: (x+2)(x+3)' }] }] }
+      ]
+      let used = 0
+      for (const req of requests) {
+        const before = events.length
+        const r = service.start(req)
+        if ('error' in r) throw new Error(r.error.message)
+        const done = await finish(r.requestId)
+        expect(done.type, req.task).toBe('done')
+        // The renderer hears the new allowance before the answer itself.
+        const doneAt = events.indexOf(done)
+        const push = events.findIndex((e, i) => i >= before && e.type === 'status')
+        expect(push, `${req.task}: status pushed`).toBeGreaterThanOrEqual(0)
+        expect(push).toBeLessThan(doneAt)
+        // Exactly the server's figures: nothing estimated in the app.
+        const server_ = (await statusOf(server, { install: config.installId })).quota
+        expect(lastUsed(), req.task).toBe(server_.installUsed)
+        expect(lastLeft(), req.task).toBe(server_.approxAnswersLeft)
+        expect(server_.installUsed, req.task).toBeGreaterThan(used)
+        used = server_.installUsed
+        expect(service.status().cloud.quota).toEqual(server_)
+      }
+      expect(lastLeft()).toBeLessThan(900 / 80)
+      // One model call per answer; the allowance came with the answers, not from extra status checks.
+      expect(streamCalls).toBe(4)
+      expect(server.ai.calls).toHaveLength(4)
+      expect(statusCalls).toBe(0)
+    })
+
+    it('a used-up allowance pushes zero left, from the server’s refusal', async () => {
+      await serviceWith({ installDailyNeurons: 500 })
+      server.ai.reply({ text: 'x', usage: { inputTokens: 3000, outputTokens: 1200 } })
+      const first = ask('one')
+      if ('error' in first) throw new Error()
+      await finish(first.requestId)
+      const second = ask('two')
+      if ('error' in second) throw new Error()
+      expect(await finish(second.requestId)).toMatchObject({ type: 'error', error: { code: 'daily_quota' } })
+      expect(lastLeft()).toBe(0)
+      expect(service.status().cloud.quota!.approxAnswersLeft).toBe(0)
+      expect(statusCalls).toBe(0)
+    })
+
+    it('a stopped answer refreshes the count with one free status check, not a model call', async () => {
+      await serviceWith()
+      server.ai.reply({ chunks: Array.from({ length: 60 }, () => 'word '), chunkDelayMs: 20 })
+      const r = ask('a long one')
+      if ('error' in r) throw new Error()
+      while (!events.some((e) => e.requestId === r.requestId && e.type === 'delta')) await new Promise((res) => setTimeout(res, 5))
+      service.cancel(r.requestId)
+      expect(await finish(r.requestId)).toMatchObject({ type: 'error', error: { code: 'canceled' } })
+      while (!pushed().length) await new Promise((res) => setTimeout(res, 5))
+      await server.settled()
+      expect(statusCalls).toBe(1)
+      expect(server.ai.calls).toHaveLength(1)
+      expect(lastUsed()).toBeGreaterThan(0)
+    })
+
+    it('after midnight UTC yesterday’s count is not shown; the next check shows the new day and ends the daily pause', async () => {
+      await serviceWith({ installDailyNeurons: 500 })
+      server.ai.reply({ text: 'x', usage: { inputTokens: 3000, outputTokens: 1200 } })
+      for (const t of ['one', 'two']) {
+        const r = ask(t)
+        if ('error' in r) throw new Error()
+        await finish(r.requestId)
+      }
+      expect(service.status().cooldown?.reason).toBe('daily_quota')
+      const resetAt = Date.parse(service.status().cloud.quota!.resetAt)
+      server.clock.offset = resetAt - Date.now() + 1000
+      expect(service.status().cloud.quota).toBeNull()
+      const fresh = await service.freshStatus()
+      expect(fresh.cloud.quota).toMatchObject({ installUsed: 0 })
+      expect(fresh.cloud.quota!.approxAnswersLeft).toBeGreaterThan(0)
+      expect(fresh.cooldown).toBeNull()
+      expect(lastUsed()).toBe(0)
+      server.ai.reply({ text: 'A new day.' })
+      const r = ask('three')
+      if ('error' in r) throw new Error(r.error.message)
+      expect((await finish(r.requestId)).type).toBe('done')
+    })
+
+    it('switching provider shows that provider; a late refresh never brings the cloud back', async () => {
+      await serviceWith()
+      server.ai.reply({ chunks: Array.from({ length: 60 }, () => 'word '), chunkDelayMs: 20 })
+      const r = ask('a long one')
+      if ('error' in r) throw new Error()
+      while (!events.some((e) => e.requestId === r.requestId && e.type === 'delta')) await new Promise((res) => setTimeout(res, 5))
+      expect((await service.setProvider('ollama')).provider).toBe('ollama')
+      await finish(r.requestId)
+      await new Promise((res) => setTimeout(res, 50))
+      expect(statusCalls).toBe(0)
+      for (const e of pushed()) expect(e.status.provider).toBe('ollama')
+    })
   })
 
   it('Ollama and Gemini stay available', async () => {

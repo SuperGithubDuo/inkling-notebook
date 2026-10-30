@@ -1,6 +1,6 @@
 {
   "name": "inkling",
-  "version": "0.2.0-beta.1",
+  "version": "0.2.0-beta.2",
   "description": "Handwritten notes with an AI tutor",
   "main": "out/main/index.js",
   "engines": {

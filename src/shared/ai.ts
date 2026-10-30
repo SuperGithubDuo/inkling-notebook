@@ -304,6 +304,12 @@ export type AiEvent =
   | { requestId: string; type: 'delta'; text: string }
   | { requestId: string; type: 'done'; text: string; usage: AiUsage; model: AiModelId }
   | { requestId: string; type: 'error'; error: AiError }
+  /**
+   * The main process's status changed without the renderer asking: the cloud
+   * server reported a new allowance (with an answer, a refusal or a status
+   * check). Not tied to a request; sent before that request's done or error.
+   */
+  | { requestId?: undefined; type: 'status'; status: AiStatus }
 
 /** Accepted shape of a Gemini API key (format only; Google decides validity). */
 export const apiKeySchema = z

@@ -24,7 +24,7 @@ const shots = process.env.SHOTS ?? join(root, 'test-results')
 await mkdir(shots, { recursive: true })
 const dataDir = await mkdtemp(join(tmpdir(), 'inkling-cloud-'))
 const configDir = await mkdtemp(join(tmpdir(), 'inkling-cloud-config-'))
-const server = await startBetaServer({ installDailyNeurons: 600 })
+const server = await startBetaServer({ installDailyNeurons: 800 })
 const ollama = await startFakeOllama()
 let installId = ''
 const env = {
@@ -92,7 +92,23 @@ const ask = async (text) => {
 }
 const activePageObjects = () => win.evaluate(() => window.__inkling.notebookContext.page(document.querySelector('[data-testid="page-surface"]').dataset.pageId).then((p) => p.objects))
 const lastCall = () => server.ai.calls.at(-1)
-const quotaUsed = async () => (await (await fetch(`${server.url}/v1/status`, { headers: { 'x-inkling-install': installId } })).json()).quota.installUsed
+const serverQuota = async () => (await (await fetch(`${server.url}/v1/status`, { headers: { 'x-inkling-install': installId } })).json()).quota
+const quotaUsed = async () => (await serverQuota()).installUsed
+/**
+ * The count of answers left shown under the tutor matches the server's own
+ * figure, without restarting (Hermes QA, Beta 1: it stayed at ~10 until a
+ * restart). Reading the server's status here costs no model usage.
+ */
+async function shownMatchesServer(label) {
+  const expected = (await serverQuota()).approxAnswersLeft
+  try {
+    await win.waitForFunction((n) => document.querySelector('[data-testid="ai-answers-left"]')?.getAttribute('data-left') === String(n), expected, { timeout: 5000 })
+  } catch {
+    const shown = await win.getAttribute('[data-testid="ai-answers-left"]', 'data-left').catch(() => null)
+    assert.fail(`${label}: the panel shows ${shown} answers left, the server says ${expected}`)
+  }
+  return expected
+}
 
 try {
   // ================================================================ setup
@@ -114,6 +130,7 @@ try {
   assert.equal((await readdir(configDir)).includes('beta-access.bin'), false)
   await win.screenshot({ path: join(shots, 'cloud-settings.png') })
   await closeSettings()
+  const leftAtStart = await shownMatchesServer('before any question')
   step('a fresh install is ready on the cloud AI: no code, key, account or download; today’s allowance shown; no model call')
 
   // ================================================================ chat
@@ -144,9 +161,12 @@ try {
   const answer = await win.locator('[data-testid="tutor-message"][data-role="model"]').last().textContent()
   assert.match(answer, /−2|-2/)
   await win.locator('[data-testid="ai-provider-note"]').getByText(/AI server only when you ask\. About \d answers? left today/).waitFor()
+  const leftAfterChat = await shownMatchesServer('after the first chat answer')
+  assert.equal(await win.locator('[data-testid="tutor-session-note"]').count(), 1, 'the chat says it is kept for this session only')
   const afterChat = await quotaUsed()
   assert.ok(afterChat > 80 && afterChat < 100, `the answer cost about 92 Neurons (${afterChat})`)
   await win.screenshot({ path: join(shots, 'cloud-chat.png') })
+  assert.ok(leftAfterChat < leftAtStart, `the count went down without a restart (${leftAtStart} → ${leftAfterChat})`)
   step(`streamed an answer about the handwriting image after consent; the server charged ${afterChat} Neurons and the panel shows what is left`)
 
   // ================================================================ on-page marks
@@ -154,6 +174,7 @@ try {
   await win.locator('[data-testid="tutor-show-on-page"]').first().click()
   await win.waitForSelector('[data-testid="markup-proposal"]')
   assert.equal(lastCall().task, 'annotate')
+  await shownMatchesServer('after a page markup (structured answer)')
   assert.match(lastCall().inputs.messages[0].content, /bbox_2d/, 'Qwen is asked for its native boxes')
   assert.match(lastCall().inputs.messages[0].content, /JSON Schema/)
   assert.equal(await win.locator('[data-testid="markup-item"]').count(), 3)
@@ -181,23 +202,29 @@ try {
   await win.click('[data-testid="practice-generate"]')
   await win.waitForFunction(() => document.querySelector('[data-testid="practice-position"]')?.textContent === '1 / 2')
   assert.equal(lastCall().task, 'practice')
+  await shownMatchesServer('after a practice set (structured answer)')
   await win.fill('[data-testid="practice-answer"]', 'x = 3')
   await win.click('[data-testid="practice-check"]')
   await win.getByText('Correct!').waitFor()
-  step('practice problems generated and an answer checked through the cloud AI')
+  const callsBeforeCheck = server.ai.calls.length
+  await shownMatchesServer('after an answer check (structured answer)')
+  assert.equal(server.ai.calls.length, callsBeforeCheck, 'keeping the count current calls no model')
+  step('practice problems generated and an answer checked through the cloud AI; the count stayed current after each')
 
   // ================================================================ allowance runs out
   console.log('allowance')
   await win.click('[data-testid="tutor-tab-chat"]')
   const before = server.ai.calls.length
   // A big answer uses up the rest; the next request is refused by the server before the model.
-  server.ai.reply({ text: 'A long answer.', usage: { inputTokens: 3000, outputTokens: 1400 } })
+  server.ai.reply({ text: 'A long answer.', usage: { inputTokens: 3000, outputTokens: 2400 } })
   await ask('Explain everything about quadratics.')
   await waitAnswer()
   await ask('And one more thing?')
   await win.locator('[data-testid="tutor-error"][data-code="daily_quota"]').getByText(/used today’s free AI answers on this computer.*notebooks work as usual/).waitFor()
   assert.equal(server.ai.calls.length, before + 1, 'the refused request never reached the model')
   assert.equal(await win.locator('[data-testid="tutor-retry"]').count(), 0, 'no pointless retry button')
+  await win.locator('[data-testid="ai-answers-left"]').getByText(/used up/).waitFor()
+  await shownMatchesServer('after the server refused for the day')
   await win.screenshot({ path: join(shots, 'cloud-quota.png') })
   step('when the allowance is used up the tutor says so plainly and stops; nothing paid, no retry loop')
 

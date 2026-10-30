@@ -1,5 +1,15 @@
 # Inkling release notes
 
+## 0.2.0-beta.2 — QA fixes (draft, not published)
+
+Fixes from independent QA of the Beta 1 Windows installer. Beta 1 was never published; this build replaces it.
+
+**Fixed**
+- **Free AI answers left:** the count under the tutor now updates after every answer, including page markups, practice sets and answer checks, instead of staying the same until Inkling was restarted. It uses the AI server's own figures, refreshes after a stopped answer, and refreshes after the daily reset at midnight UTC.
+
+**Clarified**
+- **Tutor chats aren't saved.** The chat now says that it clears when you close Inkling. Marks and corrections you add to your page are saved with the notebook, as before.
+
 ## 0.2.0-beta.1 — first public beta (draft)
 
 The first version of Inkling you can install like any other app. No developer tools are needed.
