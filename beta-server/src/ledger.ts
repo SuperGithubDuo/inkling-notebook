@@ -136,10 +136,19 @@ export class Ledger {
 
   constructor(
     private readonly storage: LedgerStorage,
-    private readonly limits: LedgerLimits,
+    private limits: LedgerLimits,
     private readonly now: () => number = Date.now,
     private readonly randomId: () => string = () => crypto.randomUUID()
   ) {}
+
+  /**
+   * Applies the limits of the Worker version that is calling. A Durable Object
+   * can keep running across a deploy, so the Worker passes its limits along
+   * rather than the object relying on the ones it started with.
+   */
+  useLimits(limits: LedgerLimits | undefined): void {
+    if (limits) this.limits = limits
+  }
 
   /** Runs `fn` after every earlier ledger operation has finished: one at a time. */
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {

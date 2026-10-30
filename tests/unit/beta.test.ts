@@ -218,6 +218,14 @@ describe('ledger', () => {
     expect((await ledger.reserve(bo, 1)).ok).toBe(true)
   })
 
+  it('takes new limits from the calling Worker version without restarting', async () => {
+    await spend(ada, 300)
+    t += 61_000
+    ledger.useLimits({ ...limits, installDailyNeurons: 200 })
+    expect(await ledger.reserve(ada, 10)).toMatchObject({ ok: false, code: 'install_quota' })
+    expect((await ledger.summary()).limits.installDailyNeurons).toBe(200)
+  })
+
   it('removes the access-code version’s tester records', async () => {
     storage.map.set('testers', [{ name: 'Ada', tokenHash: 'a'.repeat(64) }])
     storage.map.set('usage', { day: '2026-10-28' })

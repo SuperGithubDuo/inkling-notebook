@@ -71,13 +71,15 @@ export class LedgerObject extends DurableObject<Env> {
       limits(env)
     )
   }
-  reserve(id: Identity, worst: number, expected: number): Promise<ReserveResult> {
+  reserve(id: Identity, worst: number, expected: number, l?: LedgerLimits): Promise<ReserveResult> {
+    this.ledger.useLimits(l)
     return this.ledger.reserve(id, worst, expected)
   }
   settle(id: string, neurons: number | undefined, opts?: { upstreamExhausted?: boolean; failedBeforeModel?: boolean }): Promise<void> {
     return this.ledger.settle(id, neurons, opts)
   }
-  quota(id: Identity): Promise<Quota> {
+  quota(id: Identity, l?: LedgerLimits): Promise<Quota> {
+    this.ledger.useLimits(l)
     return this.ledger.quota(id)
   }
   isPaused(): Promise<boolean> {
@@ -86,7 +88,8 @@ export class LedgerObject extends DurableObject<Env> {
   setPaused(p: boolean): Promise<void> {
     return this.ledger.setPaused(p)
   }
-  summary(): ReturnType<Ledger['summary']> {
+  summary(l?: LedgerLimits): ReturnType<Ledger['summary']> {
+    this.ledger.useLimits(l)
     return this.ledger.summary()
   }
 }
@@ -109,8 +112,16 @@ export default {
       maxInputTokens: Number(env.MAX_INPUT_TOKENS) || 12_000,
       adminTokenHash: env.ADMIN_TOKEN && env.ADMIN_TOKEN.length >= 32 ? await sha256Hex(env.ADMIN_TOKEN) : null
     }
-    // The stub's methods match Ledger's; RPC returns plain data.
-    const ledger = stub as unknown as Ledger
+    // The stub's methods match Ledger's (RPC returns plain data); each call carries this version's limits.
+    const l = limits(env)
+    const ledger = {
+      reserve: (id: Identity, worst: number, expected: number) => stub.reserve(id, worst, expected, l),
+      quota: (id: Identity) => stub.quota(id, l),
+      summary: () => stub.summary(l),
+      settle: (id: string, n: number | undefined, o?: { upstreamExhausted?: boolean; failedBeforeModel?: boolean }) => stub.settle(id, n, o),
+      isPaused: () => stub.isPaused(),
+      setPaused: (p: boolean) => stub.setPaused(p)
+    } as unknown as Ledger
     return handle(request, { ai: env.AI as unknown as { run(m: string, i: Record<string, unknown>): Promise<unknown> }, ledger, config, waitUntil: (p) => ctx.waitUntil(p) })
   }
 } satisfies ExportedHandler<Env>
