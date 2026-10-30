@@ -99,7 +99,7 @@ try {
   step(`frame time on the heavy page: median ${m.frameMs.median} ms, 95th percentile ${m.frameMs.p95} ms`)
 
   const tsSearch = Date.now()
-  await win.keyboard.press('Control+f')
+  await win.keyboard.press('ControlOrMeta+f')
   await win.keyboard.type('momentum')
   await win.waitForSelector('[data-testid="search-result"]', { timeout: 20000 })
   m.searchMs = Date.now() - tsSearch

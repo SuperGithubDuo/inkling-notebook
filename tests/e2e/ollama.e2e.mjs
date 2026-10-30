@@ -226,10 +226,10 @@ try {
   await win.screenshot({ path: join(shots, 'ollama-markup-applied.png') })
   step('approved: AI-authored marks added at the right line, the correction as editable text')
 
-  await win.keyboard.press('Control+z')
+  await win.keyboard.press('ControlOrMeta+z')
   await sleep(200)
   assert.equal((await activePageObjects()).length, userObjects.length)
-  await win.keyboard.press('Control+Shift+z')
+  await win.keyboard.press('ControlOrMeta+Shift+z')
   await sleep(200)
   after = await activePageObjects()
   assert.equal(after.length, userObjects.length + added.length)

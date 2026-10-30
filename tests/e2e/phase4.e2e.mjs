@@ -506,10 +506,10 @@ try {
   step('approved 3 of 4 marks: added as AI-authored objects beside the work, saved')
 
   // One undo removes them all; redo brings them back.
-  await win.keyboard.press('Control+z')
+  await win.keyboard.press('ControlOrMeta+z')
   await sleep(200)
   assert.equal((await pageObjects()).length, userObjects.length)
-  await win.keyboard.press('Control+Shift+z')
+  await win.keyboard.press('ControlOrMeta+Shift+z')
   await sleep(200)
   after = await pageObjects()
   assert.equal(after.length, userObjects.length + added.length)

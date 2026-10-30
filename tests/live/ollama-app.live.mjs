@@ -145,10 +145,10 @@ try {
     await win.screenshot({ path: join(shots, `live-app-${slug}-applied.png`) })
 
     // 7: undo and redo.
-    await win.keyboard.press('Control+z')
+    await win.keyboard.press('ControlOrMeta+z')
     await sleep(300)
     assert.equal((await objects()).length, mine.length, 'undo removes the correction')
-    await win.keyboard.press('Control+Shift+z')
+    await win.keyboard.press('ControlOrMeta+Shift+z')
     await sleep(300)
     assert.equal((await objects()).length, after.length, 'redo restores it')
     log('Undo removed all AI marks in one step; redo restored them.')

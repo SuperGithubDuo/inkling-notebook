@@ -179,7 +179,7 @@ try {
   assert.ok(lowest > top + (bottom - top) * 0.6, 'the ✗ sits by the last line')
   await win.keyboard.press('Escape')
   await win.screenshot({ path: join(shots, 'cloud-markup-applied.png') })
-  await win.keyboard.press('Control+z')
+  await win.keyboard.press('ControlOrMeta+z')
   await sleep(200)
   assert.equal((await activePageObjects()).length, userObjects.length)
   step('the cloud model’s marks were previewed, approved as one undoable AI-authored step, at the right line')
