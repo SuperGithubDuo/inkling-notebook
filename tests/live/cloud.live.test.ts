@@ -72,6 +72,7 @@ let quotaAfter: CloudQuota | null = null
 let mode = ''
 let installations = 0
 let installLimitHits = 0
+let capacityRetries = 0
 
 describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
   let server: BetaServer | null = null
@@ -157,6 +158,13 @@ describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
         installLimitHits++
         console.log(`  installation ${installations} reached its daily allowance (${service.status().cloud.quota?.installUsed ?? '?'} Neurons); continuing as a fresh install`)
         await freshInstall()
+        continue
+      }
+      // Workers AI is briefly out of capacity (error 3040): ask again, as a person would.
+      if (end.type === 'error' && end.error.code === 'server' && /capacity/i.test(end.error.message) && attempt < 3) {
+        capacityRetries++
+        console.log('  Workers AI at capacity; asking again in 20 s')
+        await new Promise((res) => setTimeout(res, 20_000))
         continue
       }
       break
@@ -257,7 +265,7 @@ function report(): string {
   lines.push('', '## Allowance', '')
   lines.push(`- Answers: ${done.length} of ${runs.length} succeeded; checks passed: ${allChecks.filter((c) => c.pass).length} of ${allChecks.length}.`)
   lines.push(`- Neurons used by this run (from the model’s token counts × Cloudflare’s published rates): **${total.toFixed(0)}**.`)
-  if (quotaBefore && quotaAfter) lines.push(`- Server ledger, whole service, before → after: ${quotaBefore.globalUsed} → ${quotaAfter.globalUsed} of ${quotaAfter.globalLimit}. Installations used: ${installations}; per-installation limit reached ${installLimitHits} time(s).`)
+  if (quotaBefore && quotaAfter) lines.push(`- Server ledger, whole service, before → after: ${quotaBefore.globalUsed} → ${quotaAfter.globalUsed} of ${quotaAfter.globalLimit}. Installations used: ${installations}; per-installation limit reached ${installLimitHits} time(s); Workers AI capacity errors retried: ${capacityRetries}.`)
   lines.push('- Compare with the Cloudflare dashboard (Workers AI → Neurons used today) before and after the run.', '')
   lines.push('| Interaction | Answers | Mean Neurons | Mean first text | Mean total |', '|---|---|---|---|---|')
   for (const t of ['chat', 'annotate', 'practice', 'check']) {

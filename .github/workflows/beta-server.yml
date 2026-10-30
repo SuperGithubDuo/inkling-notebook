@@ -180,7 +180,8 @@ jobs:
           exit $status
 
       - name: Usage-limit checks on a temporary server with tiny limits
-        if: github.event_name == 'push' || inputs.live_test
+        # Also after a failed live test, so every run reports every check.
+        if: (success() || failure()) && steps.deploy.outputs.url != '' && (github.event_name == 'push' || inputs.live_test)
         working-directory: beta-server
         shell: bash
         env:
