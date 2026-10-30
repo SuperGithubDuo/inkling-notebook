@@ -1,17 +1,8 @@
 # Status and remaining work
 
-## Verification status (29 Oct 2026)
+## Verification status
 
-| Area | Automated, Linux (this environment) | Windows / macOS runners | Real hardware |
-|---|---|---|---|
-| Notebook, canvas, notes, search, graph, PDF (`test:e2e` phase 1–3, regressions, layout) | ✅ passing | Prepared in `release.yml`, **not yet run** | ❌ not tested |
-| AI Tutor: consent, streaming, practice, previewed marks, errors (fakes of Gemini, Ollama, cloud) | ✅ passing | prepared, not run | ❌ |
-| Data safety: first launch, kill −9, damaged index, newer files, backup/restore, v1 upgrade, pinned folder, single instance (`release.e2e`) | ✅ passing | prepared, not run | ❌ |
-| Large notebook (330 pages, 150k-point page; `test:perf`) | ✅ 2.8 s to open, 17 ms frames, ~0.6 s to save a stroke | prepared, not run | ❌ |
-| Packaged app (asar, production paths, pdf.js in-app, PDF export, restart) | ✅ Linux package | prepared (Windows `.exe`, macOS `.app`), not run | ❌ |
-| Installers (`.exe`, `.dmg`) | ❌ can't be built here (needs Windows/macOS) | prepared, not run | ❌ |
-| Cloud AI against the real model | ❌ Cloudflare not reachable here | – | – |
-| Stylus pressure, palm rejection, touch, display scaling | ❌ | ❌ | ❌ **must be tested by hand** (`DEVICE-TESTING.md`) |
+See [`READINESS.md`](READINESS.md) for the current, evidence-based checklist. As of 30 Oct, every automated suite and the installer lifecycle pass on real Windows and macOS runners; the cloud AI against the real model and hands-on pen testing are still pending.
 
 ## Before inviting external testers (7 November)
 
