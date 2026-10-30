@@ -16,13 +16,21 @@
  *       workflow), so the daily limits can be reached cheaply:
  *         stage 1: installation quota, one-at-a-time, the network's
  *                  per-minute limit, the operator's pause (needs INKLING_ADMIN_TOKEN)
- *         stage 2: (redeployed with a small network limit) the network's daily
- *                  allowance, whatever installation IDs are used
+ *         stage 2: (redeployed with a small network limit) an installation's
+ *                  per-minute limit; the network's daily allowance, whatever
+ *                  installation IDs are used
  *         stage 3: (redeployed with a small global cap) a burst of simultaneous
  *                  requests from many "installations" never takes the service
  *                  past its global cap.
  */
 import { randomBytes } from 'node:crypto'
+import dns from 'node:dns'
+import net from 'node:net'
+
+// One address family for every request, so all of them count against the same network
+// (a dual-stack runner would otherwise alternate between its IPv4 and IPv6 address).
+dns.setDefaultResultOrder('ipv4first')
+net.setDefaultAutoSelectFamily(false)
 
 const [mode, rawUrl, stage] = process.argv.slice(2)
 const url = (rawUrl ?? '').replace(/\/+$/, '')
@@ -153,6 +161,11 @@ async function limits1() {
 }
 
 async function limits2() {
+  // Two accepted requests a minute per installation here.
+  const p = newId()
+  const pace = []
+  for (let i = 0; i < 3; i++) pace.push(await tutor(p, tiny()))
+  check('an installation’s per-minute limit applies', !!pace[0].done && !!pace[1].done && pace[2].error?.code === 'rate_limited' && Number(pace[2].headers.get('retry-after')) > 0, pace.map(describe).join(', '))
   // The network's daily allowance (300 here): new installation IDs don't help.
   const more = []
   for (let i = 0; i < 20; i++) {

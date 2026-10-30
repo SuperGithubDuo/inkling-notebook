@@ -198,26 +198,28 @@ jobs:
             done
             url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/limits-deploy.log | head -1)
           }
+          # Ready once the admin API answers with the limits just deployed (a new version takes a moment to reach every location).
           ready() {
-            for i in $(seq 1 30); do
-              code=$(curl -sS -o /dev/null -w '%{http_code}' "$url/admin/summary" -H "Authorization: Bearer $ADMIN")
-              [ "$code" = 200 ] && return 0
+            for i in $(seq 1 45); do
+              got=$(curl -sS "$url/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c "[.limits.networkDailyNeurons, .limits.globalDailyNeurons, .limits.installPerMinute]" 2>/dev/null || true)
+              [ "$got" = "$1" ] && { sleep 10; return 0; }
               sleep 4
             done
-            echo "::error title=Temporary server::$url not ready ($code)"; exit 1
+            echo "::error title=Temporary server::$url did not start serving limits $1 (got $got)"; exit 1
           }
           fail=0
           deploy --var INSTALL_DAILY_NEURONS:120 --var NETWORK_DAILY_NEURONS:100000 --var NETWORK_PER_MINUTE:6 --var GLOBAL_DAILY_NEURONS:1500
           printf '%s' "$ADMIN" | npx wrangler secret put ADMIN_TOKEN --name "$NAME" > /dev/null 2>&1
-          ready
+          ready '[100000,1500,6]'
           echo "::notice title=Temporary server::$url"
           node ../scripts/abuse-check.mjs limits "$url" 1 || fail=1
-          deploy --var NETWORK_DAILY_NEURONS:300 --var NETWORK_PER_MINUTE:100 --var GLOBAL_DAILY_NEURONS:1500
-          ready
+          deploy --var NETWORK_DAILY_NEURONS:300 --var NETWORK_PER_MINUTE:100 --var GLOBAL_DAILY_NEURONS:1500 --var INSTALL_PER_MINUTE:2
+          ready '[300,1500,2]'
           node ../scripts/abuse-check.mjs limits "$url" 2 || fail=1
           used=$(curl -sS "$url/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -r .globalUsed)
-          deploy --var NETWORK_DAILY_NEURONS:100000 --var NETWORK_PER_MINUTE:100 --var GLOBAL_DAILY_NEURONS:$((used + 400))
-          ready
+          cap=$((used + 400))
+          deploy --var NETWORK_DAILY_NEURONS:100000 --var NETWORK_PER_MINUTE:100 --var GLOBAL_DAILY_NEURONS:$cap
+          ready "[100000,$cap,6]"
           node ../scripts/abuse-check.mjs limits "$url" 3 || fail=1
           exit $fail
 
@@ -226,12 +228,14 @@ jobs:
         working-directory: beta-server
         shell: bash
         run: |
-          if npx wrangler delete --name inkling-ai-limits-test --force > /tmp/delete.log 2>&1; then
+          # Through the API (force: also removes its Durable Object data).
+          res=$(curl -sS -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/inkling-ai-limits-test?force=true")
+          if [ "$(echo "$res" | jq -r .success)" = true ]; then
             echo "::notice title=Temporary server::deleted"
-          elif grep -qi 'not found\|does not exist\|10007' /tmp/delete.log; then
+          elif echo "$res" | jq -e '[.errors[]?.code] | index(10007)' >/dev/null; then
             echo "::notice title=Temporary server::none to delete"
           else
-            echo "::warning title=Temporary server::could not delete inkling-ai-limits-test: $(tail -3 /tmp/delete.log | tr '\n' ' ')"
+            echo "::warning title=Temporary server::could not delete inkling-ai-limits-test: $(echo "$res" | jq -c .errors)"
           fi
 
       - name: Cloudflare's own count of today's Neurons
