@@ -112,7 +112,21 @@ jobs:
           node ../scripts/ci-run.mjs "wrangler deploy" npx wrangler deploy 2>&1 | tee /tmp/deploy.log
           url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
           [ -n "$url" ] || { echo "::error title=Deploy::Deployed, but no workers.dev address was printed. Open Workers & Pages in the Cloudflare dashboard once to create your workers.dev subdomain."; exit 1; }
-          printf '%s' "$INKLING_ADMIN_TOKEN" | node ../scripts/ci-run.mjs "set ADMIN_TOKEN" npx wrangler secret put ADMIN_TOKEN
+          # Trailing whitespace from pasting the secret would make the token unusable in a header.
+          token=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          printf '%s' "$token" | npx wrangler secret put ADMIN_TOKEN > /tmp/secret.log 2>&1 || { echo "::error title=set ADMIN_TOKEN::$(tr '\n' ' ' < /tmp/secret.log)"; exit 1; }
+          echo "::notice title=set ADMIN_TOKEN::$(grep -v '^\s*$' /tmp/secret.log | tail -3 | tr '\n' ' ')"
+          # A new secret takes a few seconds to reach the running Worker.
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$url/admin/summary" -H "Authorization: Bearer $token")
+            [ "$code" = 200 ] && break
+            sleep 4
+          done
+          if [ "$code" != 200 ]; then
+            echo "::error title=Admin token::The admin API still answers $code two minutes after setting ADMIN_TOKEN. Check that the INKLING_ADMIN_TOKEN secret is 32–200 characters on one line, without spaces."
+            exit 1
+          fi
+          echo "::notice title=Admin token::accepted by the server after $((i * 4)) s"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "::notice title=Beta server deployed::$url  (set this as the repository variable INKLING_BETA_URL to build it into the app)"
 
@@ -121,13 +135,14 @@ jobs:
         env:
           URL: ${{ steps.deploy.outputs.url }}
         run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
           for i in $(seq 1 20); do body=$(curl -sS "$URL/" || true); [[ "$body" == *"Inkling AI beta server"* ]] && break; sleep 3; done
           [[ "$body" == *"Inkling AI beta server"* ]] || { echo "::error title=Deployed server::$URL did not answer as expected: $body"; exit 1; }
           code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$URL/v1/tutor" -H 'content-type: application/json' -d '{}')
           [ "$code" = 401 ] || { echo "::error title=Security::POST /v1/tutor without an access code returned $code, expected 401"; exit 1; }
           code=$(curl -sS -o /dev/null -w '%{http_code}' "$URL/admin/testers")
           [ "$code" = 404 ] || { echo "::error title=Security::/admin without the admin token returned $code, expected 404"; exit 1; }
-          summary=$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN")
+          summary=$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN")
           echo "::notice title=Beta server today::$summary"
 
       - name: Live test against the real model
@@ -137,7 +152,8 @@ jobs:
           URL: ${{ steps.deploy.outputs.url }}
           INKLING_LIVE_PROBE: '1'
         run: |
-          created=$(curl -sS -X POST "$URL/admin/testers" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN" -H 'content-type: application/json' -d '{"name":"CI live test","dailyNeurons":4000}')
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          created=$(curl -sS -X POST "$URL/admin/testers" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"name":"CI live test","dailyNeurons":4000}')
           id=$(echo "$created" | jq -r .id); code=$(echo "$created" | jq -r .accessCode)
           [ "$code" != null ] || { echo "::error title=Live test::Could not create a test tester: $created"; exit 1; }
           echo "::add-mask::$code"
@@ -151,9 +167,9 @@ jobs:
           set -e
           t1=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           # The test code is revoked whatever happened.
-          curl -sS -X PATCH "$URL/admin/testers/$id" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN" -H 'content-type: application/json' -d '{"revoked":true}' >/dev/null
+          curl -sS -X PATCH "$URL/admin/testers/$id" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"revoked":true}' >/dev/null
           node scripts/live-summary.mjs
-          echo "::notice title=Beta server after the test::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN")"
+          echo "::notice title=Beta server after the test::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN")"
           # Cloudflare's own count, for comparison with the server's estimate (analytics lag a few minutes).
           sleep 240
           during=$(node scripts/cf-neurons.mjs "$t0" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
