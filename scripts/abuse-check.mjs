@@ -86,9 +86,9 @@ async function security() {
   check('too many turns → 400', (await tutor(id, { task: 'chat', turns: Array.from({ length: 400 }, (_, i) => ({ role: i % 2 ? 'model' : 'user', parts: [{ text: 'hi' }] })) })).status === 400)
   const big = await tutor(id, tiny('x'.repeat(4_000_000)))
   check('4 MB request → 413', big.status === 413, `${big.status}`)
-  // Within the schema's per-part limits, but far over the server's input-token limit.
-  const page = 'word '.repeat(4_800)
-  const long = await tutor(id, { task: 'chat', turns: [{ role: 'user', parts: [{ text: page }, { text: page }, { text: page }] }, { role: 'model', parts: [{ text: page }] }, { role: 'user', parts: [{ text: page }, { text: page }] }] })
+  // Within the schema's text limits (60,000 characters), but over the server's input-token limit.
+  const page = 'word '.repeat(3_800)
+  const long = await tutor(id, { task: 'chat', turns: [{ role: 'user', parts: [{ text: page }, { text: page }, { text: page }] }] })
   check('over the input-token limit → 413', long.status === 413, `${long.status}`)
   const s0 = await status(id)
   check('none of the refused requests was charged', s0.status === 200 && s0.body?.quota?.installUsed === 0, JSON.stringify(s0.body?.quota))
