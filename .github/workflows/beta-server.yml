@@ -135,15 +135,34 @@ jobs:
           id=$(echo "$created" | jq -r .id); code=$(echo "$created" | jq -r .accessCode)
           [ "$code" != null ] || { echo "::error title=Live test::Could not create a test tester: $created"; exit 1; }
           echo "::add-mask::$code"
+          day_start=$(date -u +%Y-%m-%dT00:00:00Z)
+          before=$(node scripts/cf-neurons.mjs "$day_start")
+          echo "::notice title=Cloudflare-counted Neurons today before the test::$before"
+          t0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           set +e
           INKLING_BETA_URL="$URL" INKLING_BETA_TOKEN="$code" node scripts/ci-run.mjs "live cloud test" npm run test:live:cloud
           status=$?
           set -e
+          t1=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           # The test code is revoked whatever happened.
           curl -sS -X PATCH "$URL/admin/testers/$id" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN" -H 'content-type: application/json' -d '{"revoked":true}' >/dev/null
           node scripts/live-summary.mjs
           echo "::notice title=Beta server after the test::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $INKLING_ADMIN_TOKEN")"
+          # Cloudflare's own count, for comparison with the server's estimate (analytics lag a few minutes).
+          sleep 240
+          during=$(node scripts/cf-neurons.mjs "$t0" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+          after=$(node scripts/cf-neurons.mjs "$day_start")
+          echo "::notice title=Cloudflare-counted Neurons during the test ($t0 → $t1)::$during"
+          echo "::notice title=Cloudflare-counted Neurons today after the test::$after"
           exit $status
+
+      - name: Confirm the account is still on Workers Free
+        if: always()
+        shell: bash
+        run: |
+          subs=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/subscriptions")
+          plans=$(echo "$subs" | jq -r 'if .success then ([.result[]? | "\(.rate_plan.id // "?") (\(.rate_plan.public_name // .product.name // "?"))"] | join(", ")) else "could not read: \([.errors[]?.message] | join("; "))" end')
+          echo "::notice title=Cloudflare plan after the test::Account subscriptions: ${plans:-none (free plans only)}"
 
       - uses: actions/upload-artifact@v4
         if: always()
