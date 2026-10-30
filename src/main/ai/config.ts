@@ -1,7 +1,7 @@
 /**
  * AI settings (provider, model per provider, consent for each cloud provider,
- * the beta server address) and two secrets — the Gemini API key and the
- * cloud beta access code — stored in the app's private config folder —
+ * the anonymous installation ID for the cloud AI's fair-use limits) and the
+ * Gemini API key, stored in the app's private config folder —
  * never in the notebook library, so keys can't end up in synced or shared
  * notebooks. The key is encrypted with the operating system's keychain
  * (Electron safeStorage). Where no keychain is available it is kept in memory
@@ -10,8 +10,10 @@
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { randomBytes } from 'node:crypto'
 import {
   CLOUD_CONSENT_VERSION,
+  installIdSchema,
   CLOUD_MODEL,
   CONSENT_VERSION,
   DEFAULT_MODEL,
@@ -42,10 +44,12 @@ const settingsSchema = z.object({
   models: z.object({ gemini: geminiModelIdSchema, ollama: ollamaModelIdSchema }),
   /** Agreement to send notebook content to Google (Gemini only). */
   consent: consentSchema,
-  /** Agreement to send notebook content to Inkling's beta server (Cloudflare Workers AI). */
+  /** Agreement to send notebook content to Inkling's AI server (Cloudflare Workers AI). */
   cloudConsent: consentSchema,
-  /** A beta server address the user entered (overrides the one built in). */
-  cloudUrl: z.string().max(300).nullable()
+  /** No longer used (the server address comes with the build); kept so older files still load. */
+  cloudUrl: z.string().max(300).nullable(),
+  /** A random ID for this installation, sent to the cloud AI to share out its free allowance. Not secret, not an account. */
+  installId: installIdSchema.optional()
 })
 export type AiSettings = z.infer<typeof settingsSchema>
 
@@ -88,15 +92,15 @@ interface Secret {
 
 export interface AiConfigOptions {
   platform?: NodeJS.Platform
-  /** Provider for a fresh install: the cloud beta when this build has a beta server, else Ollama. */
+  /** Provider for a fresh install: the cloud AI when this build has its server, else Ollama. */
   defaultProvider?: AiProviderId
-  /** The beta server address built into this version of Inkling, if any. */
+  /** The cloud AI server address built into this version of Inkling, if any. */
   builtInCloudUrl?: string | null
 }
 
 export class AiConfig {
   private settings: AiSettings
-  private readonly secrets: Record<'gemini' | 'beta', Secret> = { gemini: { value: null, protection: null }, beta: { value: null, protection: null } }
+  private readonly secrets: Record<'gemini', Secret> = { gemini: { value: null, protection: null } }
   private readonly platform: NodeJS.Platform
   private readonly defaultProvider: AiProviderId
   readonly builtInCloudUrl: string | null
@@ -116,8 +120,8 @@ export class AiConfig {
   private get settingsPath(): string {
     return join(this.dir, 'ai-settings.json')
   }
-  private secretPath(kind: 'gemini' | 'beta'): string {
-    return join(this.dir, kind === 'gemini' ? 'gemini-key.bin' : 'beta-access.bin')
+  private secretPath(_kind: 'gemini'): string {
+    return join(this.dir, 'gemini-key.bin')
   }
 
   async load(): Promise<void> {
@@ -127,10 +131,16 @@ export class AiConfig {
     } catch {
       this.settings = defaults(this.defaultProvider)
     }
-    for (const kind of ['gemini', 'beta'] as const) await this.loadSecret(kind)
+    await this.loadSecret('gemini')
+    // Beta access codes are gone: the cloud AI needs no code. Remove a saved one.
+    await fs.rm(join(this.dir, 'beta-access.bin'), { force: true }).catch(() => undefined)
+    if (!this.settings.installId) {
+      this.settings = { ...this.settings, installId: newInstallId() }
+      await this.saveSettings().catch(() => undefined)
+    }
   }
 
-  private async loadSecret(kind: 'gemini' | 'beta'): Promise<void> {
+  private async loadSecret(kind: 'gemini'): Promise<void> {
     const path = this.secretPath(kind)
     try {
       const bytes = await fs.readFile(path)
@@ -144,7 +154,7 @@ export class AiConfig {
     }
   }
 
-  private async saveSecret(kind: 'gemini' | 'beta', value: string): Promise<KeyProtection> {
+  private async saveSecret(kind: 'gemini', value: string): Promise<KeyProtection> {
     const path = this.secretPath(kind)
     if (!(await this.cipher.isAsyncEncryptionAvailable())) {
       this.secrets[kind] = { value, protection: 'session' }
@@ -157,7 +167,7 @@ export class AiConfig {
     return this.secrets[kind].protection!
   }
 
-  private async clearSecret(kind: 'gemini' | 'beta'): Promise<void> {
+  private async clearSecret(kind: 'gemini'): Promise<void> {
     this.secrets[kind] = { value: null, protection: null }
     await fs.rm(this.secretPath(kind), { force: true })
   }
@@ -165,7 +175,7 @@ export class AiConfig {
   get provider(): AiProviderId {
     return this.settings.provider
   }
-  /** The model chosen for the active provider (the cloud beta's is set by its server). */
+  /** The model chosen for the active provider (the cloud AI's is set by its server). */
   get model(): AiModelId {
     const p = this.settings.provider
     return p === 'cloud' ? CLOUD_MODEL : this.settings.models[p]
@@ -180,7 +190,7 @@ export class AiConfig {
   get consented(): boolean {
     return this.settings.consent?.version === CONSENT_VERSION
   }
-  /** Consent to send content to the cloud beta. */
+  /** Consent to send content to the cloud AI. */
   get cloudConsented(): boolean {
     return this.settings.cloudConsent?.version === CLOUD_CONSENT_VERSION
   }
@@ -193,36 +203,17 @@ export class AiConfig {
   get keyHint(): string | null {
     return this.secrets.gemini.value?.slice(-4) ?? null
   }
-  /** The beta server address: the user's own, else the one this build came with. */
+  /** The cloud AI server this build came with (null: none, so the cloud AI isn't offered). */
   get cloudUrl(): string | null {
-    return this.settings.cloudUrl ?? this.builtInCloudUrl
+    return this.builtInCloudUrl
   }
   get cloudUrlFromBuild(): boolean {
-    return !this.settings.cloudUrl && !!this.builtInCloudUrl
+    return !!this.builtInCloudUrl
   }
-  get betaToken(): string | null {
-    return this.secrets.beta.value
-  }
-  get betaTokenProtection(): KeyProtection | null {
-    return this.secrets.beta.value ? this.secrets.beta.protection : null
-  }
-  get betaTokenHint(): string | null {
-    return this.secrets.beta.value?.slice(-4) ?? null
-  }
-
-  /** Saves the beta access code (encrypted) and, if given, a server address other than the built-in one. */
-  async setBetaAccess(token: string, url: string | null): Promise<KeyProtection> {
-    const protection = await this.saveSecret('beta', token)
-    const cloudUrl = url && url !== this.builtInCloudUrl ? url : null
-    if (cloudUrl !== this.settings.cloudUrl) {
-      this.settings = { ...this.settings, cloudUrl }
-      await this.saveSettings()
-    }
-    return protection
-  }
-
-  async clearBetaAccess(): Promise<void> {
-    await this.clearSecret('beta')
+  /** This installation's anonymous ID (created on first load). */
+  get installId(): string {
+    if (!this.settings.installId) this.settings = { ...this.settings, installId: newInstallId() }
+    return this.settings.installId!
   }
 
   async setCloudConsent(accepted: boolean): Promise<void> {
@@ -268,6 +259,11 @@ export class AiConfig {
     await fs.mkdir(this.dir, { recursive: true })
     await atomicWrite(this.settingsPath, Buffer.from(JSON.stringify(this.settings, null, 2)), 0o600)
   }
+}
+
+/** `inst_` and 32 random URL-safe characters. */
+function newInstallId(): string {
+  return `inst_${randomBytes(24).toString('base64url')}`
 }
 
 async function atomicWrite(path: string, bytes: Buffer, mode: number): Promise<void> {

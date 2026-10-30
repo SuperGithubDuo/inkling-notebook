@@ -29,8 +29,14 @@ export interface AiBindingLike {
 export interface BetaServerOptions {
   ai?: AiBindingLike
   globalDailyNeurons?: number
-  testerDailyNeurons?: number
-  perMinute?: number
+  installDailyNeurons?: number
+  networkDailyNeurons?: number
+  installPerMinute?: number
+  networkPerMinute?: number
+  installConcurrent?: number
+  networkConcurrent?: number
+  globalConcurrent?: number
+  maxInputTokens?: number
   typicalNeuronsPerAnswer?: number
   model?: string
   rates?: { inputPerM: number; outputPerM: number }
@@ -47,7 +53,9 @@ export interface BetaServer {
   config: any
   adminToken: string
   clock: { offset: number }
-  addTester(name: string, dailyNeurons?: number): Promise<{ id: string; name: string; dailyNeurons: number; accessCode: string }>
+  storage: { store: Map<string, unknown>; list(prefix: string): Promise<string[]> }
+  admin(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }>
+  pause(paused?: boolean): Promise<{ status: number; body: any }>
   settled(): Promise<unknown>
   close(): Promise<void>
 }

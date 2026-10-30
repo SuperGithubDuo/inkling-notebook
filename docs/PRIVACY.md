@@ -16,9 +16,9 @@ We have no account system and no cloud storage, and we can't see your notebooks.
 ## What leaves your device, and when
 
 1. **AI Tutor questions, only when you ask and only after you agree.** We send your question and the context you chose: an image of your selection, or the page's typed or PDF text. Where it goes depends on the provider you selected:
-   - **Inkling beta (cloud).** It goes to our server on Cloudflare, which forwards it to Cloudflare Workers AI for an answer.
+   - **Inkling AI (cloud, the default).** It goes to our server on Cloudflare, which forwards it to Cloudflare Workers AI for an answer.
      - We don't store the question, the image or the answer.
-     - Our server records only an access-code identifier, the date and the amount of AI usage, to enforce daily limits.
+     - To enforce the free daily limits, our server counts AI usage per installation (a random ID the app creates, not linked to you) and per network address. Both are stored only in scrambled (salted-hash) form, and the counts and the salt are deleted at the end of every UTC day.
      - Cloudflare processes the content to produce the answer. It states that it doesn't use it to train models and doesn't keep it afterwards ([Cloudflare's Workers AI data usage](https://developers.cloudflare.com/workers-ai/platform/privacy/)).
      - Cloudflare also keeps operational metadata (times, sizes, token counts), not content.
    - **Ollama.** It goes to a program on your own computer, and nothing leaves it.
@@ -28,9 +28,9 @@ We have no account system and no cloud storage, and we can't see your notebooks.
 
 There are no analytics, advertising, tracking cookies or crash reporting.
 
-## Keys and access codes
+## Keys
 
-API keys and beta access codes are stored encrypted using your operating system's keychain, and are used only to reach the provider you chose.
+The cloud AI needs no account or key. A Gemini API key, if you add one, is stored encrypted using your operating system's keychain and used only to reach Google.
 
 ## Children and students
 
@@ -43,7 +43,7 @@ API keys and beta access codes are stored encrypted using your operating system'
 - Delete your data by deleting the Inkling folder:
   - Windows: `%APPDATA%\Inkling`
   - macOS: `~/Library/Application Support/Inkling`
-- For the cloud beta, ask us to delete your access code's usage record: [contact].
+- The cloud AI's usage counts are deleted automatically every day; we can't link them to you.
 
 ## Changes
 

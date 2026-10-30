@@ -25,7 +25,7 @@ export function loadServer() {
   modulePromise ??= (async () => {
     const out = await build({
       stdin: {
-        contents: `export { handle, sha256Hex, newAccessCode } from './beta-server/src/handler.ts'\nexport { Ledger } from './beta-server/src/ledger.ts'\nexport * as upstream from './beta-server/src/upstream.ts'`,
+        contents: `export { handle, sha256Hex } from './beta-server/src/handler.ts'\nexport { Ledger, networkOf } from './beta-server/src/ledger.ts'\nexport * as upstream from './beta-server/src/upstream.ts'`,
         resolveDir: root,
         loader: 'ts'
       },
@@ -125,15 +125,26 @@ export function fakeWorkersAi() {
 export async function startBetaServer(options = {}) {
   const mod = await loadServer()
   const store = new Map()
-  const storage = { get: async (k) => structuredClone(store.get(k)), put: async (k, v) => void store.set(k, structuredClone(v)), delete: async (k) => void store.delete(k) }
+  const storage = {
+    store,
+    get: async (k) => structuredClone(store.get(k)),
+    put: async (k, v) => void store.set(k, structuredClone(v)),
+    delete: async (k) => void store.delete(k),
+    list: async (prefix) => [...store.keys()].filter((k) => k.startsWith(prefix))
+  }
   const clock = { offset: 0 }
   const now = () => Date.now() + clock.offset
   const limits = {
     globalDailyNeurons: options.globalDailyNeurons ?? 9000,
-    testerDailyNeurons: options.testerDailyNeurons ?? 900,
-    perMinute: options.perMinute ?? 6,
+    installDailyNeurons: options.installDailyNeurons ?? 900,
+    networkDailyNeurons: options.networkDailyNeurons ?? 2700,
+    installPerMinute: options.installPerMinute ?? 6,
+    networkPerMinute: options.networkPerMinute ?? 20,
+    installConcurrent: options.installConcurrent ?? 1,
+    networkConcurrent: options.networkConcurrent ?? 4,
+    globalConcurrent: options.globalConcurrent ?? 12,
     reservationTtlMs: 10 * 60_000,
-    typicalNeuronsPerAnswer: options.typicalNeuronsPerAnswer ?? 150
+    typicalNeuronsPerAnswer: options.typicalNeuronsPerAnswer ?? 90
   }
   const ledger = new mod.Ledger(storage, limits, now)
   const ai = options.ai ?? fakeWorkersAi()
@@ -146,6 +157,7 @@ export async function startBetaServer(options = {}) {
     structured: options.structured ?? 'prompt',
     imagePatch: options.imagePatch ?? 28,
     maxBodyBytes: 3_500_000,
+    maxInputTokens: options.maxInputTokens ?? 12_000,
     adminTokenHash: await mod.sha256Hex(adminToken)
   }
   const pending = new Set()
@@ -158,7 +170,13 @@ export async function startBetaServer(options = {}) {
     const chunks = []
     for await (const c of req) chunks.push(c)
     const body = Buffer.concat(chunks)
-    const request = new Request(`http://127.0.0.1${req.url}`, { method: req.method, headers: req.headers, ...(body.length && req.method !== 'GET' ? { body } : {}) })
+    // Like Cloudflare: the client's address is set by the edge, never taken from the client.
+    // Tests simulate different networks with x-test-ip.
+    const headers = { ...req.headers }
+    delete headers['cf-connecting-ip']
+    headers['cf-connecting-ip'] = typeof req.headers['x-test-ip'] === 'string' ? req.headers['x-test-ip'] : (req.socket.remoteAddress ?? '127.0.0.1')
+    delete headers['x-test-ip']
+    const request = new Request(`http://127.0.0.1${req.url}`, { method: req.method, headers, ...(body.length && req.method !== 'GET' ? { body } : {}) })
     const response = await mod.handle(request, { ai, ledger, config, waitUntil, now })
     res.writeHead(response.status, Object.fromEntries(response.headers))
     if (!response.body) return res.end()
@@ -174,9 +192,9 @@ export async function startBetaServer(options = {}) {
   await new Promise((r) => server.listen(options.port ?? 0, '127.0.0.1', r))
   const url = `http://127.0.0.1:${server.address().port}`
 
-  const addTester = async (name, dailyNeurons) => {
-    const r = await fetch(`${url}/admin/testers`, { method: 'POST', headers: { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ name, ...(dailyNeurons !== undefined ? { dailyNeurons } : {}) }) })
-    return r.json()
+  const admin = async (method, path, body) => {
+    const r = await fetch(`${url}${path}`, { method, headers: { authorization: `Bearer ${adminToken}`, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) })
+    return { status: r.status, body: await r.json().catch(() => null) }
   }
   return {
     url,
@@ -185,7 +203,9 @@ export async function startBetaServer(options = {}) {
     config,
     adminToken,
     clock,
-    addTester,
+    storage,
+    admin,
+    pause: (paused = true) => admin('POST', '/admin/pause', { paused }),
     /** Waits until every answer has been settled in the ledger. */
     settled: () => Promise.all([...pending]),
     close: () => new Promise((r) => server.close(r))

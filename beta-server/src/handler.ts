@@ -1,23 +1,32 @@
 /**
- * The beta server's HTTP API, independent of the Workers runtime so it can be
- * tested in Node with a fake model and an in-memory ledger.
+ * The public AI service's HTTP API, independent of the Workers runtime so it
+ * can be tested in Node with a fake model and an in-memory ledger.
  *
- *   GET  /v1/status   → tester name, today's allowance, model (no model call)
+ *   GET  /v1/status   → model, pause state, today's allowance for this installation (no model call)
  *   POST /v1/tutor    → { task, turns } → server-sent events: delta*, then done | error
- *   GET|POST|PATCH /admin/...  → testers and pause switch (ADMIN_TOKEN only)
+ *   GET  /admin/summary, POST /admin/pause   → operator only (ADMIN_TOKEN secret)
  *
- * The app sends only a task and the conversation, the same validated request
- * it uses for every provider. The instructions, output schema and token caps
- * come from Inkling's own prompts module on the server, so an access code
- * can't be used as a general-purpose free model API.
+ * Anyone may ask: there are no accounts or codes. Each request carries the
+ * app's random installation ID (x-inkling-install); Cloudflare supplies the
+ * client's IP (cf-connecting-ip, which clients can't set). The ledger limits
+ * each installation, each network and the whole service per day.
+ *
+ * Not a general-purpose model proxy: callers send only a task and the
+ * conversation, in Inkling's validated request format. The instructions,
+ * output format, token caps, temperature and model are the server's (the
+ * tutor prompts in src/main/ai/prompts.ts); nothing else is passed through.
+ * Browsers on other sites can't call it (no CORS headers).
  *
  * Credentials: the Worker reaches Workers AI through its `AI` binding, so no
- * Cloudflare API token exists anywhere: not in the app, not in the Worker.
- * Testers hold only their own revocable access code.
+ * Cloudflare API token exists anywhere. The operator's ADMIN_TOKEN is a
+ * Worker secret and is never sent to users.
+ *
+ * Privacy: request content is never logged or stored. Logs carry only error
+ * kinds; usage counts are kept per salted, daily-rotated hash (ledger.ts).
  */
 import { aiRequestSchema, type AiRequest } from '../../src/shared/ai'
 import { taskSpec } from '../../src/main/ai/prompts'
-import type { Ledger, Quota, Tester } from './ledger'
+import type { Identity, Ledger, Quota, RefusalCode } from './ledger'
 import { classifyUpstream, estimateInputTokens, neuronsFor, parseUpstream, readSse, toMessages, type Rates, type Usage } from './upstream'
 
 /** The parts of the Workers AI binding the server uses. */
@@ -38,6 +47,8 @@ export interface ServerConfig {
   imagePatch: number
   /** Largest accepted request body, in bytes. */
   maxBodyBytes: number
+  /** Largest accepted request, in estimated input tokens. */
+  maxInputTokens: number
   adminTokenHash: string | null
 }
 
@@ -52,10 +63,13 @@ export interface Deps {
 
 const MIN_CHAT_TOKENS = 300
 /**
- * Output tokens a typical answer uses, per task: what a tester needs room for.
+ * Output tokens a typical answer uses, per task: what an installation needs room for.
  * Measured with the real model (docs/live-results/cloud-qwen3.8-27b.md).
  */
 export const EXPECTED_OUTPUT_TOKENS: Record<AiRequest['task'], number> = { chat: 350, practice: 900, check: 180, annotate: 380 }
+
+/** The app's random installation ID. */
+export const INSTALL_ID = /^inst_[A-Za-z0-9_-]{22,64}$/
 
 export async function handle(request: Request, deps: Deps): Promise<Response> {
   const url = new URL(request.url)
@@ -63,42 +77,97 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
     if (url.pathname === '/v1/status' && request.method === 'GET') return await status(request, deps)
     if (url.pathname === '/v1/tutor' && request.method === 'POST') return await tutor(request, deps)
     if (url.pathname.startsWith('/admin/')) return await admin(request, url, deps)
-    if (url.pathname === '/' && request.method === 'GET') return new Response('Inkling AI beta server\n', { headers: { 'content-type': 'text/plain; charset=utf-8' } })
+    if (url.pathname === '/' && request.method === 'GET') return new Response('Inkling AI server\n', { headers: { 'content-type': 'text/plain; charset=utf-8' } })
+    // No CORS: a cross-site preflight (OPTIONS) gets no Access-Control-Allow-* headers, so browsers won't send the request.
+    if (request.method === 'OPTIONS') return new Response(null, { status: 405 })
     return problem(404, 'bad_request', 'Not found.')
   } catch (err) {
-    console.error('unhandled', (err as Error)?.message)
-    return problem(500, 'server', 'The beta server had a problem. Try again in a moment.')
+    console.error('unhandled', (err as Error)?.name)
+    return problem(500, 'server', 'Inkling’s AI server had a problem. Try again in a moment.')
   }
 }
 
-// --------------------------------------------------------------- tester API
+// --------------------------------------------------------------- public API
 
-async function authenticate(request: Request, ledger: Ledger): Promise<Tester | Response> {
-  const auth = request.headers.get('authorization') ?? ''
-  const m = /^Bearer (ink_[A-Za-z0-9_-]{32})$/.exec(auth)
-  if (!m) return problem(401, 'invalid_key', 'This beta access code isn’t valid. Check it in AI settings.')
-  const tester = await ledger.findByTokenHash(await sha256Hex(m[1]!))
-  if (!tester) return problem(401, 'invalid_key', 'This beta access code isn’t valid. Check it in AI settings.')
-  if (tester.revoked) return problem(403, 'beta_closed', 'This beta access code has been switched off. Ask the Inkling team for a new one.')
-  return tester
+function identify(request: Request): Identity | Response {
+  const install = request.headers.get('x-inkling-install') ?? ''
+  if (!INSTALL_ID.test(install)) return problem(400, 'bad_request', 'This version of Inkling can’t use the AI service. Update Inkling.')
+  return { install, network: request.headers.get('cf-connecting-ip') ?? 'unknown' }
+}
+
+const inAbout = (seconds?: number): string => {
+  if (!seconds || seconds < 3600) return 'within the hour'
+  const h = Math.round(seconds / 3600)
+  return `in about ${h} hour${h === 1 ? '' : 's'}`
+}
+
+/** What each refusal tells the person, and with which app error code. */
+function refusal(code: RefusalCode, retryAfter: number | undefined, quota?: Quota): Response {
+  const later = inAbout(retryAfter)
+  const keepGoing = 'Your notebooks work as usual, and you can use the tutor on this computer (Ollama) meanwhile.'
+  switch (code) {
+    case 'install_quota':
+      return problem(429, 'daily_quota', `You’ve used today’s free AI answers on this computer. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
+    case 'network_quota':
+      return problem(429, 'daily_quota', `Today’s free AI answers for your internet connection (shared by everyone on it, such as a school or office) are used up. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
+    case 'global_quota':
+      return problem(429, 'daily_quota', `Inkling’s free AI answers for today are used up for everyone. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
+    case 'too_large':
+      return problem(413, 'bad_request', 'This request is too large for the free AI. Select a smaller part of the page or ask for fewer problems.', undefined, { scope: code })
+    case 'busy':
+      return problem(429, 'busy', 'Another answer is still being written on this computer or connection. Wait for it to finish.', retryAfter, { scope: code })
+    case 'capacity':
+      return problem(503, 'server', 'Inkling’s free AI is busy right now. Try again in a few seconds.', retryAfter, { scope: code })
+    case 'paused':
+      return problem(503, 'beta_closed', 'Inkling’s free AI is paused for maintenance. Try again later; your notebooks work as usual.', undefined, { scope: code })
+    case 'rate_limited':
+    default:
+      return problem(429, 'rate_limited', 'That’s a lot of questions in a minute. Try again in a few seconds.', retryAfter, { scope: code })
+  }
 }
 
 async function status(request: Request, deps: Deps): Promise<Response> {
-  const tester = await authenticate(request, deps.ledger)
-  if (tester instanceof Response) return tester
-  return json(200, { tester: tester.name, model: deps.config.model, paused: await deps.ledger.isPaused(), quota: await deps.ledger.quota(tester) })
+  const id = identify(request)
+  if (id instanceof Response) return id
+  return json(200, { model: deps.config.model, paused: await deps.ledger.isPaused(), quota: await deps.ledger.quota(id) })
+}
+
+/** Reads at most `max` bytes of the body; null if it is longer. */
+async function readCapped(request: Request, max: number): Promise<string | null> {
+  if (!request.body) return ''
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > max) {
+      await reader.cancel().catch(() => undefined)
+      return null
+    }
+    chunks.push(value)
+  }
+  const all = new Uint8Array(size)
+  let at = 0
+  for (const c of chunks) {
+    all.set(c, at)
+    at += c.byteLength
+  }
+  return new TextDecoder().decode(all)
 }
 
 async function tutor(request: Request, deps: Deps): Promise<Response> {
   const { ledger, config } = deps
   const now = deps.now ?? Date.now
-  const tester = await authenticate(request, ledger)
-  if (tester instanceof Response) return tester
+  const id = identify(request)
+  if (id instanceof Response) return id
+  if (!/^application\/json\b/i.test(request.headers.get('content-type') ?? '')) return problem(415, 'bad_request', 'The request was not in the format Inkling uses.')
 
-  const length = Number(request.headers.get('content-length') ?? '0')
-  if (length > config.maxBodyBytes) return problem(413, 'bad_request', 'This request is too large. Select a smaller part of the page.')
-  const raw = await request.text()
-  if (raw.length > config.maxBodyBytes) return problem(413, 'bad_request', 'This request is too large. Select a smaller part of the page.')
+  const tooLarge = (): Response => problem(413, 'bad_request', 'This request is too large. Select a smaller part of the page.')
+  if (Number(request.headers.get('content-length') ?? '0') > config.maxBodyBytes) return tooLarge()
+  const raw = await readCapped(request, config.maxBodyBytes)
+  if (raw === null) return tooLarge()
   let body: AiRequest
   try {
     const parsed = aiRequestSchema.safeParse(JSON.parse(raw))
@@ -110,28 +179,25 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
 
   const spec = taskSpec(body.task, 'cloud')
   const inputTokens = estimateInputTokens(spec.system, body.turns, config.imagePatch)
+  if (inputTokens > config.maxInputTokens) return tooLarge()
   const outRate = config.rates.outputPerM / 1e6
   const inputCost = inputTokens * (config.rates.inputPerM / 1e6)
 
-  // Reserve the worst case against the beta's cap; the tester needs room for a typical answer.
-  // Near the beta's cap a chat answer may be shortened to fit; a structured answer can't be.
+  // Reserve the worst case against the service's cap; the installation and network need room for a typical answer.
+  // Near the cap a chat answer may be shortened to fit; a structured answer can't be.
   let maxTokens = spec.maxOutputTokens
   let reserved = Math.ceil(inputCost + maxTokens * outRate)
   const expected = Math.ceil(inputCost + Math.min(maxTokens, EXPECTED_OUTPUT_TOKENS[body.task]) * outRate)
-  let res = await ledger.reserve(tester, reserved, expected)
+  let res = await ledger.reserve(id, reserved, expected)
   if (!res.ok && body.task === 'chat' && res.code === 'global_quota' && res.quota) {
     const fit = Math.floor((res.quota.globalLimit - res.quota.globalUsed - inputCost) / outRate)
     if (fit >= MIN_CHAT_TOKENS) {
       maxTokens = Math.min(maxTokens, fit)
       reserved = Math.ceil(inputCost + maxTokens * outRate)
-      res = await ledger.reserve(tester, reserved, Math.min(expected, reserved))
+      res = await ledger.reserve(id, reserved, Math.min(expected, reserved))
     }
   }
-  if (!res.ok) {
-    const statusCode = res.code === 'rate_limited' || res.code === 'busy' ? 429 : res.code === 'paused' || res.code === 'revoked' ? 503 : res.code === 'too_large' ? 413 : 429
-    const code = res.code === 'tester_quota' || res.code === 'global_quota' ? 'daily_quota' : res.code === 'paused' || res.code === 'revoked' ? 'beta_closed' : res.code === 'busy' ? 'busy' : res.code === 'too_large' ? 'bad_request' : 'rate_limited'
-    return problem(statusCode, code, res.message, res.retryAfter, { scope: res.code, ...(res.quota ? { quota: res.quota } : {}) })
-  }
+  if (!res.ok) return refusal(res.code, res.retryAfter, res.quota)
   const reservationId = res.reservationId
 
   const inputs: Record<string, unknown> = {
@@ -152,7 +218,8 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     upstream = await deps.ai.run(config.model, inputs)
   } catch (err) {
     const { kind, detail } = classifyUpstream(err)
-    console.warn('workers-ai error', kind, detail)
+    // The kind only: an error message could in principle quote what was sent.
+    console.warn('workers-ai error', kind)
     // An error before any answer: the model did no work, except possibly for capacity errors mid-way (not knowable): charge nothing.
     await ledger.settle(reservationId, undefined, { failedBeforeModel: true, upstreamExhausted: kind === 'free_allocation' })
     return upstreamProblem(kind)
@@ -198,14 +265,15 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
         if (text) await send('delta', { text })
       }
     } catch (err) {
-      failed = classifyUpstream(err).detail
-      console.warn('stream failed', failed)
+      const c = classifyUpstream(err)
+      failed = c.detail
+      console.warn('stream failed', c.kind)
     }
     // Unknown usage: estimate from what was produced, never below the input estimate; and never above the reservation.
     // A stream stopped early has no usage report, and the model may have run on a little: charge the reservation.
     const cost = usage ? neuronsFor(usage, config.rates) : clientGone || (failed && !text) ? reserved : Math.min(reserved, inputCost + ((text.length + reasoningChars) / 3) * outRate)
     await ledger.settle(reservationId, cost)
-    const quota = await ledger.quota(tester)
+    const quota = await ledger.quota(id)
     if (failed && !text) {
       await send('error', { code: 'server', message: 'The model stopped before answering. Try again in a moment.', quota })
     } else {
@@ -229,13 +297,13 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
 function upstreamProblem(kind: ReturnType<typeof classifyUpstream>['kind']): Response {
   switch (kind) {
     case 'free_allocation':
-      return problem(429, 'daily_quota', 'Cloudflare’s free AI allowance for the beta is used up for today. It resets at midnight UTC. The local Ollama tutor still works in the meantime.', secondsToUtcMidnight(), { scope: 'global_quota' })
+      return refusal('global_quota', secondsToUtcMidnight())
     case 'rate_limited':
       return problem(429, 'rate_limited', 'The AI service is busy. Try again in a few seconds.', 10)
     case 'capacity':
       return problem(503, 'server', 'The AI service is at capacity right now. Try again in a minute.', 30)
     case 'model_unavailable':
-      return problem(503, 'model_unavailable', 'The beta’s AI model isn’t available right now. Try again later.')
+      return problem(503, 'model_unavailable', 'Inkling’s AI model isn’t available right now. Try again later.')
     case 'json_mode':
       return problem(502, 'bad_response', 'The model couldn’t give its answer in the expected format. Try again.')
     case 'bad_request':
@@ -254,29 +322,6 @@ async function admin(request: Request, url: URL, deps: Deps): Promise<Response> 
   if (!config.adminTokenHash || !auth || !timingSafeHexEqual(await sha256Hex(auth[1]!), config.adminTokenHash)) return problem(404, 'bad_request', 'Not found.')
 
   if (url.pathname === '/admin/summary' && request.method === 'GET') return json(200, await ledger.summary())
-  if (url.pathname === '/admin/testers' && request.method === 'GET') return json(200, { testers: await ledger.listTesters() })
-  if (url.pathname === '/admin/testers' && request.method === 'POST') {
-    const body = (await request.json().catch(() => null)) as { name?: unknown; dailyNeurons?: unknown } | null
-    const name = typeof body?.name === 'string' ? body.name.trim().slice(0, 60) : ''
-    if (!name) return problem(400, 'bad_request', 'A tester name is required.')
-    const dailyNeurons = typeof body?.dailyNeurons === 'number' && body.dailyNeurons >= 0 ? body.dailyNeurons : undefined
-    const token = newAccessCode()
-    const tester = await ledger.addTester({ name, tokenHash: await sha256Hex(token), dailyNeurons })
-    // The only time the code exists outside the tester's app.
-    return json(201, { id: tester.id, name: tester.name, dailyNeurons: tester.dailyNeurons, accessCode: token })
-  }
-  const one = /^\/admin\/testers\/(t_[a-z0-9]{1,20})$/.exec(url.pathname)
-  if (one && request.method === 'PATCH') {
-    const body = (await request.json().catch(() => ({}))) as { revoked?: unknown; dailyNeurons?: unknown; name?: unknown }
-    const t = await ledger.updateTester(one[1]!, {
-      ...(typeof body.revoked === 'boolean' ? { revoked: body.revoked } : {}),
-      ...(typeof body.dailyNeurons === 'number' && body.dailyNeurons >= 0 ? { dailyNeurons: body.dailyNeurons } : {}),
-      ...(typeof body.name === 'string' && body.name.trim() ? { name: body.name.trim().slice(0, 60) } : {})
-    })
-    if (!t) return problem(404, 'bad_request', 'No such tester.')
-    const { tokenHash: _, ...rest } = t
-    return json(200, rest)
-  }
   if (url.pathname === '/admin/pause' && request.method === 'POST') {
     const body = (await request.json().catch(() => ({}))) as { paused?: unknown }
     await ledger.setPaused(body.paused !== false)
@@ -286,11 +331,6 @@ async function admin(request: Request, url: URL, deps: Deps): Promise<Response> 
 }
 
 // ----------------------------------------------------------------- helpers
-
-export function newAccessCode(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(24))
-  return `ink_${btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_')}`
-}
 
 export async function sha256Hex(s: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))
@@ -314,8 +354,8 @@ function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 }
 
-function problem(status: number, code: string, message: string, retryAfter?: number, extra?: { scope?: string; quota?: Quota }): Response {
-  const res = json(status, { error: { code, message, ...(retryAfter !== undefined ? { retryAfter } : {}), ...extra } })
+function problem(status: number, code: string, message: string, retryAfter?: number, extra?: { scope?: string; quota?: Quota | undefined }): Response {
+  const res = json(status, { error: { code, message, ...(retryAfter !== undefined ? { retryAfter } : {}), ...(extra?.scope ? { scope: extra.scope } : {}), ...(extra?.quota ? { quota: extra.quota } : {}) } })
   if (retryAfter !== undefined) res.headers.set('retry-after', String(retryAfter))
   return res
 }

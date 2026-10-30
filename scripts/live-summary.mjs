@@ -47,6 +47,6 @@ const summary = [
   `Answers: ${done.length}/${r.runs.length}; Neurons used by the run: ${total.toFixed(0)}`,
   ...Object.keys(mix).map((t) => `${t}: mean ${Number.isFinite(mean(t)) ? mean(t).toFixed(1) : '–'} N`),
   `Blended interaction: ${Number.isFinite(blended) ? blended.toFixed(0) : '–'} N → ${Number.isFinite(blended) ? Math.floor(10000 / blended) : '–'} per day on 10,000 free Neurons (${Number.isFinite(blended) ? Math.floor(9000 / blended) : '–'} under the 9,000 cap)`,
-  r.quotaBefore && r.quotaAfter ? `Server ledger: tester ${r.quotaBefore.testerUsed}→${r.quotaAfter.testerUsed}, beta ${r.quotaBefore.globalUsed}→${r.quotaAfter.globalUsed}` : ''
+  r.quotaBefore && r.quotaAfter ? `Server ledger, whole service: ${r.quotaBefore.globalUsed}→${r.quotaAfter.globalUsed} of ${r.quotaAfter.globalLimit}` : ''
 ]
 console.log(`::notice title=Live cloud: allowance::${esc(summary.filter(Boolean).join('\n'))}`)

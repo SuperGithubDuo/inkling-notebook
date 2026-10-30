@@ -1,5 +1,5 @@
 {
-  // Inkling AI beta server. Deploy with: npx wrangler deploy (from beta-server/).
+  // Inkling's free AI server. Deploy with: npx wrangler deploy (from beta-server/).
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "inkling-ai-beta",
   "main": "src/index.ts",
@@ -21,9 +21,17 @@
     "ACCOUNT_PLAN": "free",
     // Cloudflare's free allowance is 10,000 Neurons a day per account (00:00 UTC reset). Leave headroom.
     "GLOBAL_DAILY_NEURONS": "9000",
-    "TESTER_DAILY_NEURONS": "900",
-    "PER_MINUTE": "6",
+    // Fair shares of the day for anonymous users (an installation can be reinstalled and a network
+    // changed, so these spread the allowance; the global cap above is what bounds use).
+    "INSTALL_DAILY_NEURONS": "900",
+    "NETWORK_DAILY_NEURONS": "2700",
+    "INSTALL_PER_MINUTE": "6",
+    "NETWORK_PER_MINUTE": "20",
+    "INSTALL_CONCURRENT": "1",
+    "NETWORK_CONCURRENT": "4",
+    "GLOBAL_CONCURRENT": "12",
     "TYPICAL_NEURONS_PER_ANSWER": "90",
+    "MAX_INPUT_TOKENS": "12000",
     // Cloudflare's published price for @cf/qwen/qwen3.8-27b, in Neurons per million tokens.
     "INPUT_NEURONS_PER_M": "40909",
     "OUTPUT_NEURONS_PER_M": "290909",

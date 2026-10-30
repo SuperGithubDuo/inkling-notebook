@@ -73,20 +73,47 @@ try {
   step(`starts as installed Inkling ${facts.version}, data in ${facts.userData}, welcome shown, no developer menu`)
 
   if (expectBetaUrl) {
-    // A fresh install uses the cloud beta built into it; no Ollama, no key, nothing to download.
+    // A fresh install uses the cloud AI built into it: no code, key, account, Ollama or download.
     const ai = await win.evaluate(() => window.inkling.ai.status())
     assert.equal(ai.provider, 'cloud', 'cloud AI is the default provider')
-    assert.equal(ai.cloud.url, expectBetaUrl, 'the beta server address is built in')
+    assert.equal(ai.cloud.url, expectBetaUrl, 'the AI server address is built in')
     assert.equal(ai.cloud.urlFromBuild, true, 'the address comes from the build, not the environment')
     assert.equal(ai.local, false)
     const card = (await win.locator('[data-testid="ai-status"]').first().textContent()) ?? ''
-    assert.match(card, /beta access code/i, 'the tutor asks for a beta access code')
-    assert.doesNotMatch(card, /Start Ollama|Install Qwen/i, 'the tutor does not ask for Ollama')
-    // The installed app reaches the real server: a made-up code is refused by it (no model call, nothing charged).
-    const probe = await win.evaluate(() => window.inkling.ai.setBetaAccess('ink_' + 'Q'.repeat(32), null))
-    assert.equal(probe?.error?.code, 'invalid_key', `the beta server answered: ${JSON.stringify(probe)}`)
+    assert.equal(await win.getAttribute('[data-testid="ai-status"] >> nth=0', 'data-state'), 'ready', `the tutor is ready at once: ${card}`)
+    assert.doesNotMatch(card, /access code|Start Ollama|Install Qwen|API key/i, 'the tutor asks for nothing')
+    // The installed app reaches the real server anonymously (a status check: no model call, nothing charged).
+    const probe = await win.evaluate(() => window.inkling.ai.test())
+    assert.equal(probe?.ok, true, `the AI server answered: ${JSON.stringify(probe)}`)
+    const quota = (await win.evaluate(() => window.inkling.ai.status())).cloud.quota
+    assert.ok(quota && quota.installLimit > 0 && quota.globalLimit <= 9500, `today’s allowance came back: ${JSON.stringify(quota)}`)
+    let answered = 'not asked (set INKLING_LIVE_AI_CHECK=1)'
+    if (process.env.INKLING_LIVE_AI_CHECK === '1') {
+      // One tiny real question, as a new user would ask it after allowing the upload.
+      await win.evaluate(() => window.inkling.ai.setConsent(true))
+      const end = await win.evaluate(
+        () =>
+          new Promise((resolve) => {
+            const off = window.inkling.ai.onEvent((e) => {
+              if (e.type !== 'delta') {
+                off()
+                resolve(e)
+              }
+            })
+            window.inkling.ai.start({ task: 'chat', turns: [{ role: 'user', parts: [{ text: 'What is 7 × 8? Answer with the number only.' }] }] }).then((r) => {
+              if (r.error) {
+                off()
+                resolve({ type: 'error', error: r.error })
+              }
+            })
+          })
+      )
+      assert.equal(end.type, 'done', `the real model answered: ${JSON.stringify(end)}`)
+      assert.match(end.text, /56/)
+      answered = `answered “${end.text.trim().slice(0, 40)}” (${Math.round(end.usage?.neurons ?? 0)} Neurons)`
+    }
     await win.screenshot({ path: join(shots, 'packaged-cloud-default.png') })
-    step(`cloud AI is the default, with ${ai.cloud.url} built in; the installed app reached it (a made-up code was refused); no Ollama needed`)
+    step(`cloud AI is the default and ready with no code or key, ${ai.cloud.url} built in; status check OK (${quota.approxAnswersLeft} answers left here); real question: ${answered}`)
   }
 
   // Handwriting.

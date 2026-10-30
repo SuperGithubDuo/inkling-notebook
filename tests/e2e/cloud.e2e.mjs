@@ -1,9 +1,9 @@
 /**
- * Cloud beta acceptance test: the AI Tutor on Inkling's beta server, driven
+ * Cloud AI acceptance test: the AI Tutor on Inkling's free AI server, driven
  * through the real Electron app. The server is the real beta-server code
  * (handler + ledger) on a local port, in front of a fake Workers AI model
- * (tests/support/fakeBeta.mjs). Covers: a beta build starting on the cloud
- * beta, entering an access code (a wrong one refused), consent, streaming
+ * (tests/support/fakeBeta.mjs). Covers: a fresh install ready on the cloud
+ * AI with no code or account, consent before the first upload, streaming
  * chat about a handwritten selection, practice, approved on-page marks, the
  * daily allowance shown and enforced, and switching to the local tutor.
  *
@@ -24,15 +24,15 @@ const shots = process.env.SHOTS ?? join(root, 'test-results')
 await mkdir(shots, { recursive: true })
 const dataDir = await mkdtemp(join(tmpdir(), 'inkling-cloud-'))
 const configDir = await mkdtemp(join(tmpdir(), 'inkling-cloud-config-'))
-const server = await startBetaServer()
+const server = await startBetaServer({ installDailyNeurons: 600 })
 const ollama = await startFakeOllama()
-const { accessCode } = await server.addTester('Ada (beta)', 600)
+let installId = ''
 const env = {
   ...process.env,
   INKLING_SKIP_WELCOME: '1', INKLING_DATA_DIR: dataDir,
   INKLING_CONFIG_DIR: configDir,
   INKLING_TEST_HOOKS: '1',
-  // What a beta build has built in (MAIN_VITE_INKLING_BETA_URL).
+  // What a release build has built in (MAIN_VITE_INKLING_BETA_URL).
   INKLING_BETA_URL: server.url,
   INKLING_OLLAMA_URL: ollama.url,
   INKLING_GEMINI_BASE_URL: 'http://127.0.0.1:9',
@@ -92,38 +92,29 @@ const ask = async (text) => {
 }
 const activePageObjects = () => win.evaluate(() => window.__inkling.notebookContext.page(document.querySelector('[data-testid="page-surface"]').dataset.pageId).then((p) => p.objects))
 const lastCall = () => server.ai.calls.at(-1)
-const quotaUsed = async () => (await (await fetch(`${server.url}/v1/status`, { headers: { authorization: `Bearer ${accessCode}` } })).json()).quota.testerUsed
+const quotaUsed = async () => (await (await fetch(`${server.url}/v1/status`, { headers: { 'x-inkling-install': installId } })).json()).quota.installUsed
 
 try {
   // ================================================================ setup
   console.log('setup')
   await launch()
-  await win.getByText('Set up the AI Tutor').first().waitFor()
+  // A fresh install of a build with the server built in: ready, no code, key or account.
+  await win.getByText(/Inkling AI · Qwen/).first().waitFor()
+  assert.equal(await win.getByText(/access code|beta code/i).count(), 0, 'nothing asks for a code')
   await openSettings()
-  assert.equal(await win.getAttribute('[data-testid="ai-settings"]', 'data-provider'), 'cloud', 'a beta build starts on the cloud beta')
-  await win.getByText(/built into this version/).first().waitFor()
-  assert.equal(await win.locator('[data-testid="ai-beta-url"]').count(), 0, 'the built-in server needs no address')
-  step('a beta build starts on the cloud beta with its server built in; nothing to download')
-
-  await win.fill('[data-testid="ai-beta-token"]', 'ink_' + 'w'.repeat(32))
-  await win.click('[data-testid="ai-beta-save"]')
-  await win.locator('[data-testid="ai-beta-error"]').getByText(/isn’t valid/).waitFor()
-  assert.equal(await win.locator('[data-testid="ai-beta-saved"]').count(), 0)
-  await win.fill('[data-testid="ai-beta-token"]', 'not a code')
-  await win.click('[data-testid="ai-beta-save"]')
-  await win.locator('[data-testid="ai-beta-error"]').getByText(/starts with ink_/).waitFor()
-  await win.fill('[data-testid="ai-beta-token"]', accessCode)
-  await win.click('[data-testid="ai-beta-save"]')
-  await win.locator('[data-testid="ai-beta-saved"]').getByText('Ada (beta)').waitFor()
-  await win.locator('[data-testid="ai-beta-quota"]').getByText(/About 4 answers left today/).waitFor()
+  assert.equal(await win.getAttribute('[data-testid="ai-settings"]', 'data-provider'), 'cloud', 'a fresh install starts on the cloud AI')
+  assert.equal(await win.locator('[data-testid="ai-beta-url"], [data-testid="ai-beta-token"]').count(), 0, 'no address or code to enter')
+  await win.locator('[data-testid="ai-cloud-quota"]').getByText(/About \d+ free answers? left today on this computer/).waitFor()
   await win.click('[data-testid="ai-test"]')
-  await win.locator('[data-testid="ai-test-result"]').getByText(/uses none of your allowance/).waitFor()
-  assert.equal(server.ai.calls.length, 0, 'checking the code and testing the connection call no model')
-  const configFiles = await readdir(configDir)
-  for (const f of configFiles) assert.ok(!(await readFile(join(configDir, f))).toString().includes(accessCode), `${f} does not hold the code in clear text`)
+  await win.locator('[data-testid="ai-test-result"]').getByText(/uses none of your answers/).waitFor()
+  assert.equal(server.ai.calls.length, 0, 'the status check calls no model')
+  const settings = JSON.parse(await readFile(join(configDir, 'ai-settings.json'), 'utf8'))
+  assert.match(settings.installId, /^inst_[A-Za-z0-9_-]{22,64}$/, 'a random installation ID was created')
+  installId = settings.installId
+  assert.equal((await readdir(configDir)).includes('beta-access.bin'), false)
   await win.screenshot({ path: join(shots, 'cloud-settings.png') })
   await closeSettings()
-  step('a wrong code is refused before saving; the right one shows the tester and today’s allowance; no model call')
+  step('a fresh install is ready on the cloud AI: no code, key, account or download; today’s allowance shown; no model call')
 
   // ================================================================ chat
   console.log('chat')
@@ -137,7 +128,7 @@ try {
   server.ai.reply({ chunks: ['I read: $x^2+5x+6=0$, $(x+2)(x+3)=0$, $x = 2, 3$.\n\n', 'The factorisation is right, but each factor is zero when ', '$x = -2$ or $x = -3$.'], chunkDelayMs: 250, usage: { inputTokens: 1600, outputTokens: 90 } })
   await ask('Is this right?')
   await win.waitForSelector('[data-testid="ai-consent"][data-provider="cloud"]')
-  await win.getByText(/does not use this content to train models/).waitFor()
+  await win.getByText(/does not use it to train models/).first().waitFor()
   assert.equal(server.ai.calls.length, 0, 'nothing is sent before consent')
   await win.click('[data-testid="ai-consent-allow"]')
   await waitAnswer('streaming')
@@ -152,7 +143,7 @@ try {
   assert.match(imgs[0].image_url.url, /^data:image\/jpeg;base64,/)
   const answer = await win.locator('[data-testid="tutor-message"][data-role="model"]').last().textContent()
   assert.match(answer, /−2|-2/)
-  await win.locator('[data-testid="ai-provider-note"]').getByText(/beta server only when you ask\. About \d answers? left today/).waitFor()
+  await win.locator('[data-testid="ai-provider-note"]').getByText(/AI server only when you ask\. About \d answers? left today/).waitFor()
   const afterChat = await quotaUsed()
   assert.ok(afterChat > 80 && afterChat < 100, `the answer cost about 92 Neurons (${afterChat})`)
   await win.screenshot({ path: join(shots, 'cloud-chat.png') })
@@ -193,7 +184,7 @@ try {
   await win.fill('[data-testid="practice-answer"]', 'x = 3')
   await win.click('[data-testid="practice-check"]')
   await win.getByText('Correct!').waitFor()
-  step('practice problems generated and an answer checked through the beta')
+  step('practice problems generated and an answer checked through the cloud AI')
 
   // ================================================================ allowance runs out
   console.log('allowance')
@@ -204,7 +195,7 @@ try {
   await ask('Explain everything about quadratics.')
   await waitAnswer()
   await ask('And one more thing?')
-  await win.locator('[data-testid="tutor-error"][data-code="daily_quota"]').getByText(/used today’s free beta allowance.*midnight UTC/).waitFor()
+  await win.locator('[data-testid="tutor-error"][data-code="daily_quota"]').getByText(/used today’s free AI answers on this computer.*notebooks work as usual/).waitFor()
   assert.equal(server.ai.calls.length, before + 1, 'the refused request never reached the model')
   assert.equal(await win.locator('[data-testid="tutor-retry"]').count(), 0, 'no pointless retry button')
   await win.screenshot({ path: join(shots, 'cloud-quota.png') })
@@ -220,9 +211,9 @@ try {
   assert.ok(ollama.requests.some((r) => r.path === '/api/chat'), 'the local tutor answered')
   step('one click switches to the local Ollama tutor, which still works')
 
-  console.log('\nCloud beta acceptance: all checks passed')
+  console.log('\nCloud AI acceptance: all checks passed')
 } catch (err) {
-  console.error('\nCloud beta acceptance FAILED:', err)
+  console.error('\nCloud AI acceptance FAILED:', err)
   await win?.screenshot({ path: join(shots, 'cloud-failure.png') }).catch(() => undefined)
   process.exitCode = 1
 } finally {

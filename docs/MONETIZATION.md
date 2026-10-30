@@ -37,7 +37,7 @@ Nothing in the app checks entitlements yet. When a Pro feature is built, its ent
 2. **Checkout.** The app opens Stripe Checkout in the browser (`shell.openExternal`); card details never pass through Inkling. A Stripe Customer Portal link handles cancellation and invoices.
 3. **Webhook.** The Worker receives Stripe's `checkout.session.completed`, `customer.subscription.updated` and `customer.subscription.deleted` events. It verifies Stripe's signature and stores the subscription state per account.
 4. **Licence.** On sign-in, or each day, the app fetches a licence: a small JSON with the edition, features and validity, signed by the server (Ed25519). The app verifies it with a public key built into the app, so a licence can't be forged locally. Licences stay valid offline until `validUntil` plus a grace period.
-5. **Allowance.** The AI server reads the same subscription state to set each user's daily allowance. This is the per-tester ledger that already exists.
+5. **Allowance.** The AI server reads the same subscription state to set each user's daily allowance. The per-installation ledger that already exists becomes per user.
 6. **Taxes and refunds.** Use Stripe Tax, or a merchant of record such as Paddle or Lemon Squeezy, to handle VAT and sales tax, which matters for a worldwide student product. Write a refund policy before launch.
 
 Not needed for any of this: the app store, a separate subscription server, or storing card data.

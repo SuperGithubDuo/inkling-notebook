@@ -122,15 +122,12 @@ export interface InklingApi {
   }
   /** Menu commands for the renderer; returns an unsubscribe function. */
   onCommand(handler: (command: AppCommand) => void): () => void
-  /** AI tutor (cloud beta, local Ollama or Gemini). Keys and access codes stay in the main process; only their last 4 characters come back. */
+  /** AI tutor (cloud, local Ollama or Gemini). A Gemini key stays in the main process; only its last 4 characters come back. */
   ai: {
     status(): Promise<AiStatus>
     setKey(key: string): Promise<AiStatus | { error: string }>
     clearKey(): Promise<AiStatus>
-    /** Checks a beta access code with the server and saves it; `url` null keeps the built-in server address. */
-    setBetaAccess(token: string, url: string | null): Promise<AiStatus | { error: AiError }>
-    clearBetaAccess(): Promise<AiStatus>
-    /** Switches between the cloud beta, local Ollama and Gemini. */
+    /** Switches between the cloud AI, local Ollama and Gemini. */
     setProvider(provider: AiProviderId): Promise<AiStatus>
     /** Model of the active provider. */
     setModel(model: AiModelId): Promise<AiStatus>
@@ -170,8 +167,6 @@ export const IPC = {
   aiStatus: 'ai:status',
   aiSetKey: 'ai:set-key',
   aiClearKey: 'ai:clear-key',
-  aiSetBetaAccess: 'ai:set-beta-access',
-  aiClearBetaAccess: 'ai:clear-beta-access',
   aiSetModel: 'ai:set-model',
   aiSetProvider: 'ai:set-provider',
   aiSetConsent: 'ai:set-consent',

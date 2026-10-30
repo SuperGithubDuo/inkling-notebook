@@ -1,12 +1,13 @@
 /**
- * Inkling's free cloud beta as a tutor provider: a small server on Cloudflare
+ * Inkling's free cloud AI as a tutor provider: a small server on Cloudflare
  * Workers (beta-server/) that answers with Workers AI (Qwen 3.8 27B).
  *
- * The app holds only the tester's own access code. It sends the task and the
- * conversation — the same validated request every provider gets — and the
- * server chooses the instructions, output format and token caps, and keeps
- * each tester (and the whole beta) inside a daily allowance that fits in
- * Cloudflare's free tier. The server reports what is left with every answer.
+ * No account, code or key: each request carries this installation's random
+ * ID, which the server uses (with the network address) to share out the free
+ * daily allowance. The app sends the task and the conversation — the same
+ * validated request every provider gets — and the server chooses the
+ * instructions, output format and token caps. It reports what is left with
+ * every answer.
  *
  * Plain fetch with server-sent events; no Electron imports, so it is tested
  * against the real server code with a fake model (tests/support/fakeBeta.mjs).
@@ -22,13 +23,13 @@ const STATUS_TIMEOUT_MS = 15_000
 
 export interface CloudOptions {
   baseUrl: string
-  token: string
+  /** This installation's anonymous ID. */
+  installId: string
   /** Called whenever the server reports the allowance (status and every answer). */
-  onQuota?: (quota: CloudQuota, tester?: string) => void
+  onQuota?: (quota: CloudQuota) => void
 }
 
 export interface CloudStatus {
-  tester: string
   model: string
   paused: boolean
   quota: CloudQuota
@@ -52,7 +53,7 @@ export class CloudProvider implements AiProvider {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '')
   }
 
-  /** Who the access code belongs to and today's allowance. Costs no model usage. */
+  /** Today's allowance for this installation. Costs no model usage. */
   async status(signal?: AbortSignal): Promise<CloudStatus> {
     const timeout = AbortSignal.timeout(STATUS_TIMEOUT_MS)
     let res: Response
@@ -63,8 +64,8 @@ export class CloudProvider implements AiProvider {
     }
     const body = (await res.json().catch(() => null)) as (CloudStatus & { error?: ServerError }) | null
     if (!res.ok || !body || body.error) throw serverError(res.status, body?.error)
-    if (!body.quota) throw new ProviderError('bad_response', 'Something answered at this address, but it isn’t an Inkling beta server.')
-    this.options.onQuota?.(body.quota, body.tester)
+    if (!body.quota) throw new ProviderError('bad_response', 'Something answered at this address, but it isn’t Inkling’s AI server.')
+    this.options.onQuota?.(body.quota)
     return body
   }
 
@@ -74,7 +75,7 @@ export class CloudProvider implements AiProvider {
   }
 
   async *stream(request: ProviderRequest, signal?: AbortSignal): AsyncIterable<ProviderChunk> {
-    if (!request.task) throw new ProviderError('bad_request', 'The cloud beta answers tutor tasks only.')
+    if (!request.task) throw new ProviderError('bad_request', 'The cloud AI answers tutor tasks only.')
     const controller = new AbortController()
     const outer = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
     let timedOut = false
@@ -128,7 +129,7 @@ export class CloudProvider implements AiProvider {
           try {
             payload = JSON.parse(data)
           } catch {
-            throw new ProviderError('bad_response', 'The beta server sent a reply Inkling could not read. Try again.')
+            throw new ProviderError('bad_response', 'Inkling’s AI server sent a reply the app could not read. Try again.')
           }
           if (event === 'delta' && typeof payload.text === 'string') yield { type: 'text', text: payload.text }
           else if (event === 'error') {
@@ -147,7 +148,7 @@ export class CloudProvider implements AiProvider {
           }
         }
       }
-      if (!ended) throw new ProviderError('network', 'The connection to the beta server closed before the answer was complete. Try again.')
+      if (!ended) throw new ProviderError('network', 'The connection to Inkling’s AI server closed before the answer was complete. Try again.')
     } catch (err) {
       void reader.cancel().catch(() => undefined)
       throw networkError(err, { aborted: !!signal?.aborted, timedOut })
@@ -157,7 +158,7 @@ export class CloudProvider implements AiProvider {
   }
 
   private headers(): Record<string, string> {
-    return { authorization: `Bearer ${this.options.token}` }
+    return { 'x-inkling-install': this.options.installId }
   }
 }
 
@@ -165,19 +166,17 @@ function serverError(status: number, e: ServerError | undefined): ProviderError 
   const code = (e?.code && KNOWN_CODES.has(e.code as AiErrorCode) ? e.code : status === 401 ? 'invalid_key' : status === 429 ? 'rate_limited' : status >= 500 ? 'server' : 'unknown') as AiErrorCode
   const message =
     e?.message ??
-    (status === 401
-      ? 'This beta access code isn’t valid. Check it in AI settings.'
-      : status === 404
-        ? 'No Inkling beta server answered at this address. Check the server address in AI settings.'
-        : `The beta server returned an error (${status}). Try again in a moment.`)
+    (status === 404
+      ? 'Inkling’s AI server could not be found. Update Inkling, or choose another AI in settings.'
+      : `Inkling’s AI server returned an error (${status}). Try again in a moment.`)
   return new ProviderError(code, message, e?.retryAfter)
 }
 
 function networkError(err: unknown, ctx: { aborted: boolean; timedOut: boolean }): ProviderError {
   if (err instanceof ProviderError) return err
   if (ctx.aborted) return new ProviderError('canceled', 'Stopped.')
-  if (ctx.timedOut) return new ProviderError('network', 'The beta server took too long to answer. Try again, perhaps with a smaller selection.')
+  if (ctx.timedOut) return new ProviderError('network', 'Inkling’s AI server took too long to answer. Try again, perhaps with a smaller selection.')
   const e = err as { name?: string; message?: string }
   if (e?.name === 'AbortError') return new ProviderError('canceled', 'Stopped.')
-  return new ProviderError('network', 'Couldn’t reach the Inkling beta server. Check your internet connection and try again.')
+  return new ProviderError('network', 'Couldn’t reach Inkling’s AI server. Check your internet connection and try again. Your notebooks work as usual offline.')
 }

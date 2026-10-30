@@ -1,7 +1,13 @@
 name: Beta AI server
 
-# Deploys the cloud AI beta server (beta-server/) to Cloudflare and tests it
-# against the REAL model (@cf/qwen/qwen3.8-27b), from GitHub's runners.
+# Deploys Inkling's free cloud AI server (beta-server/) to Cloudflare and tests
+# it against the REAL model (@cf/qwen/qwen3.8-27b), from GitHub's runners:
+#   1. security checks on the deployed server (scripts/abuse-check.mjs security);
+#   2. the real-model test, anonymously, as a freshly installed app;
+#   3. usage-limit checks on a TEMPORARY copy of the server with tiny limits
+#      (installation, network, per-minute, one-at-a-time, global cap under a
+#      burst, pause), deleted again at the end.
+# Anyone may use the deployed server without an account; see beta-server/README.md.
 #
 # Start it by pushing the branch `deploy/beta-server` (works from any branch,
 # without touching main), or Actions → Beta AI server → Run workflow once this
@@ -13,7 +19,8 @@ name: Beta AI server
 #                           Account › Account Settings: Read, Account › Billing: Read,
 #                           Account › Workers AI: Read, User › Memberships: Read,
 #                           User › User Details: Read
-#   INKLING_ADMIN_TOKEN     a long random string (≥ 32 characters) for managing testers
+#   INKLING_ADMIN_TOKEN     a long random string (≥ 32 characters): the operator's
+#                           summary and emergency pause (no user accounts exist)
 #
 # It refuses to deploy to an account on Workers Paid (where usage beyond the free
 # allowance is billed) unless that is explicitly confirmed.
@@ -22,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       live_test:
-        description: Run the real-model tests after deploying (uses ~2,000–3,000 of today's 10,000 free Neurons)
+        description: Run the real-model and usage-limit tests after deploying (uses ~1,500–2,500 of today's 10,000 free Neurons)
         type: boolean
         default: true
   push:
@@ -128,24 +135,22 @@ jobs:
           fi
           echo "::notice title=Admin token::accepted by the server after $((i * 4)) s"
           echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "::notice title=Beta server deployed::$url  (set this as the repository variable INKLING_BETA_URL to build it into the app)"
+          echo "::notice title=AI server deployed::$url  (set this as the repository variable INKLING_BETA_URL to build it into the app)"
 
-      - name: Check the deployed server
+      - name: Security checks on the deployed server
         shell: bash
         env:
           URL: ${{ steps.deploy.outputs.url }}
         run: |
           ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
-          for i in $(seq 1 20); do body=$(curl -sS "$URL/" || true); [[ "$body" == *"Inkling AI beta server"* ]] && break; sleep 3; done
-          [[ "$body" == *"Inkling AI beta server"* ]] || { echo "::error title=Deployed server::$URL did not answer as expected: $body"; exit 1; }
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$URL/v1/tutor" -H 'content-type: application/json' -d '{}')
-          [ "$code" = 401 ] || { echo "::error title=Security::POST /v1/tutor without an access code returned $code, expected 401"; exit 1; }
-          code=$(curl -sS -o /dev/null -w '%{http_code}' "$URL/admin/testers")
-          [ "$code" = 404 ] || { echo "::error title=Security::/admin without the admin token returned $code, expected 404"; exit 1; }
-          summary=$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN")
-          echo "::notice title=Beta server today::$summary"
+          for i in $(seq 1 20); do body=$(curl -sS "$URL/" || true); [[ "$body" == *"Inkling AI server"* ]] && break; sleep 3; done
+          [[ "$body" == *"Inkling AI server"* ]] || { echo "::error title=Deployed server::$URL did not answer as expected: $body"; exit 1; }
+          # The emergency pause must be off for the public.
+          curl -sS -X POST "$URL/admin/pause" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"paused":false}' >/dev/null
+          node scripts/abuse-check.mjs security "$URL"
+          echo "::notice title=AI server today::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN")"
 
-      - name: Live test against the real model
+      - name: Live test against the real model (anonymous, as a fresh install)
         if: github.event_name == 'push' || inputs.live_test
         shell: bash
         env:
@@ -153,30 +158,77 @@ jobs:
           INKLING_LIVE_PROBE: '1'
         run: |
           ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
-          created=$(curl -sS -X POST "$URL/admin/testers" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"name":"CI live test","dailyNeurons":4000}')
-          id=$(echo "$created" | jq -r .id); code=$(echo "$created" | jq -r .accessCode)
-          [ "$code" != null ] || { echo "::error title=Live test::Could not create a test tester: $created"; exit 1; }
-          echo "::add-mask::$code"
           day_start=$(date -u +%Y-%m-%dT00:00:00Z)
+          echo "day_start=$day_start" >> "$GITHUB_ENV"
           before=$(node scripts/cf-neurons.mjs "$day_start")
-          echo "::notice title=Cloudflare-counted Neurons today before the test::$before"
+          echo "::notice title=Cloudflare-counted Neurons today before the tests::$before"
           t0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           set +e
-          INKLING_BETA_URL="$URL" INKLING_BETA_TOKEN="$code" node scripts/ci-run.mjs "live cloud test" npm run test:live:cloud
+          INKLING_BETA_URL="$URL" INKLING_LIVE_CLOUD=1 node scripts/ci-run.mjs "live cloud test" npm run test:live:cloud
           status=$?
           set -e
-          t1=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          # The test code is revoked whatever happened.
-          curl -sS -X PATCH "$URL/admin/testers/$id" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"revoked":true}' >/dev/null
           node scripts/live-summary.mjs
-          echo "::notice title=Beta server after the test::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN")"
-          # Cloudflare's own count, for comparison with the server's estimate (analytics lag a few minutes).
-          sleep 240
-          during=$(node scripts/cf-neurons.mjs "$t0" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
-          after=$(node scripts/cf-neurons.mjs "$day_start")
-          echo "::notice title=Cloudflare-counted Neurons during the test ($t0 → $t1)::$during"
-          echo "::notice title=Cloudflare-counted Neurons today after the test::$after"
+          echo "::notice title=AI server after the live test::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN")"
           exit $status
+
+      - name: Usage-limit checks on a temporary server with tiny limits
+        if: github.event_name == 'push' || inputs.live_test
+        working-directory: beta-server
+        shell: bash
+        env:
+          NAME: inkling-ai-limits-test
+        run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          export INKLING_ADMIN_TOKEN="$ADMIN"
+          # Same code and model as production; separate ledger; only the limits differ.
+          common=(--name "$NAME" --var NETWORK_CONCURRENT:20 --var GLOBAL_CONCURRENT:20)
+          deploy() {
+            npx wrangler deploy "${common[@]}" "$@" > /tmp/limits-deploy.log 2>&1 || { echo "::error title=Temporary server::$(tail -5 /tmp/limits-deploy.log | tr '\n' ' ')"; exit 1; }
+            url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/limits-deploy.log | head -1)
+          }
+          ready() {
+            for i in $(seq 1 30); do
+              code=$(curl -sS -o /dev/null -w '%{http_code}' "$url/admin/summary" -H "Authorization: Bearer $ADMIN")
+              [ "$code" = 200 ] && return 0
+              sleep 4
+            done
+            echo "::error title=Temporary server::$url not ready ($code)"; exit 1
+          }
+          fail=0
+          deploy --var INSTALL_DAILY_NEURONS:120 --var NETWORK_DAILY_NEURONS:100000 --var NETWORK_PER_MINUTE:6 --var GLOBAL_DAILY_NEURONS:1500
+          printf '%s' "$ADMIN" | npx wrangler secret put ADMIN_TOKEN --name "$NAME" > /dev/null 2>&1
+          ready
+          echo "::notice title=Temporary server::$url"
+          node ../scripts/abuse-check.mjs limits "$url" 1 || fail=1
+          deploy --var NETWORK_DAILY_NEURONS:300 --var NETWORK_PER_MINUTE:100 --var GLOBAL_DAILY_NEURONS:1500
+          ready
+          node ../scripts/abuse-check.mjs limits "$url" 2 || fail=1
+          used=$(curl -sS "$url/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -r .globalUsed)
+          deploy --var NETWORK_DAILY_NEURONS:100000 --var NETWORK_PER_MINUTE:100 --var GLOBAL_DAILY_NEURONS:$((used + 400))
+          ready
+          node ../scripts/abuse-check.mjs limits "$url" 3 || fail=1
+          exit $fail
+
+      - name: Delete the temporary server
+        if: always()
+        working-directory: beta-server
+        shell: bash
+        run: |
+          if npx wrangler delete --name inkling-ai-limits-test --force > /tmp/delete.log 2>&1; then
+            echo "::notice title=Temporary server::deleted"
+          elif grep -qi 'not found\|does not exist\|10007' /tmp/delete.log; then
+            echo "::notice title=Temporary server::none to delete"
+          else
+            echo "::warning title=Temporary server::could not delete inkling-ai-limits-test: $(tail -3 /tmp/delete.log | tr '\n' ' ')"
+          fi
+
+      - name: Cloudflare's own count of today's Neurons
+        if: always() && (github.event_name == 'push' || inputs.live_test)
+        shell: bash
+        run: |
+          # Analytics lag a few minutes.
+          sleep 240
+          echo "::notice title=Cloudflare-counted Neurons today after all tests::$(node scripts/cf-neurons.mjs "${day_start:-$(date -u +%Y-%m-%dT00:00:00Z)}")"
 
       - name: Confirm the account is still on Workers Free
         if: always()

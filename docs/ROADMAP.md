@@ -21,7 +21,7 @@ See [`READINESS.md`](READINESS.md) for the current, evidence-based checklist. As
 1. **Code signing and notarization.** Apple Developer ID ($99/yr), and a Windows certificate or Azure Trusted Signing. This removes the security prompts and enables self-installing updates. The workflow already uses them when the secrets exist.
 2. **Trademark clearance for "Inkling"**, given prior use by Wacom (digital pen) and Inkling (digital textbooks). Have a fallback name. See `LAUNCH.md`.
 3. **Legal texts:** privacy policy (draft in `PRIVACY.md`), terms of use/EULA (only a placeholder `LICENSE.txt` exists), and a school/parental-consent approach.
-4. **Hosted AI at scale:** a Workers Paid account with a billing alert, sign-in instead of access codes, and per-user allowances from entitlements. See `AI.md`.
+4. **Hosted AI at scale:** a Workers Paid account with a billing alert, sign-in, and per-user allowances from entitlements. See `AI.md`.
 5. **Device coverage:** Windows on ARM, Intel Macs, Wacom/Surface/Huion pens, 4K displays, slow 8 GB laptops.
 6. **Crash reporting (opt-in)** and an in-app "copy diagnostics" button, so testers can send useful reports without notebook content.
 7. **Accessibility pass:** screen-reader labels on canvas tools, keyboard-only use of dialogs and menus, contrast. Basic labels and keyboard shortcuts exist; a full audit hasn't been done.

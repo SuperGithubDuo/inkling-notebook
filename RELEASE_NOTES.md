@@ -16,14 +16,14 @@ The first version of Inkling you can install like any other app. No developer to
 - **Safer quitting:** Inkling saves everything before it closes, and asks before closing if it couldn't. If the window crashes, it offers to reopen, with at most the last moment of writing lost.
 - **Update notices:** Inkling tells you when a new version is out. Signed releases will install updates themselves after you click *Restart to update*.
 - **AI Tutor:**
-  - A new **Inkling beta (cloud)** option: free for testers with an access code, a daily allowance, nothing to download.
+  - **Inkling AI (cloud)** is ready the moment you install: free, no account, no code, nothing to download, with a daily limit on answers.
   - The local Ollama tutor and Google Gemini (adults only, with your own key) remain available.
   - Nothing is sent without your permission.
 - New app icon.
 
 **Known limitations**
 - Every release is tested automatically: on Linux, and on the Windows and macOS machines that build the installers. It hasn’t been tested on real pens and tablets yet: please tell us how yours behaves.
-- The cloud AI allowance is small (roughly 100 answers a day across all testers), and it resets at midnight UTC.
+- The free cloud AI allowance is small: about 10 answers a day on each computer and roughly 100 a day for everyone together. It resets at midnight UTC; when it runs out, your notebooks work as usual.
 - Handwriting isn't searchable yet. Audio recording and sharing aren't available.
 - No iPad, Android or web version.
 

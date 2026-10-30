@@ -151,8 +151,10 @@ jobs:
       - name: Smoke-test the packaged app
         shell: bash
         env:
-          # With a server built in, the test also checks that cloud AI is the default and reachable.
+          # With a server built in, the test also checks that cloud AI is the default, needs no setup,
+          # and answers one tiny real question anonymously (a few Neurons of the free allowance).
           INKLING_EXPECT_BETA_URL: ${{ vars.INKLING_BETA_URL }}
+          INKLING_LIVE_AI_CHECK: '1'
         run: |
           if [ "$RUNNER_OS" = Windows ]; then app=release/win-unpacked/Inkling.exe; else app=release/mac-arm64/Inkling.app/Contents/MacOS/Inkling; fi
           INKLING_PACKAGED_APP="$app" node scripts/ci-run.mjs "packaged app" node tests/e2e/packaged.e2e.mjs

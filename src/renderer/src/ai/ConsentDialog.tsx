@@ -94,7 +94,7 @@ function CloudConsent({ answer, allow }: { answer: (ok: boolean) => Promise<void
             <ShieldCheck size={18} />
           </span>
           <h2 id="consent-title" className="text-[17px] font-semibold">
-            Send notebook content to Inkling’s beta tutor?
+            Send what you ask about to Inkling’s AI?
           </h2>
         </div>
         <div className="space-y-2.5 text-[13.5px] leading-relaxed text-ink-2 select-text">
@@ -104,8 +104,8 @@ function CloudConsent({ answer, allow }: { answer: (ok: boolean) => Promise<void
           </p>
           <p className="rounded-xl border border-line px-3 py-2 text-ink">{CLOUD_DATA_NOTE}</p>
           <p>
-            The beta is free, with a limited number of answers per tester per day. It never switches to paid usage: when the day’s allowance is used up, the
-            tutor stops until midnight UTC. Don’t include sensitive personal information.
+            The AI is free, with a limited number of answers per day. It never costs anything: when the day’s free answers are used up, the tutor pauses
+            until midnight UTC and your notebooks work as usual. Don’t include sensitive personal information.
           </p>
           <p>
             Read{' '}

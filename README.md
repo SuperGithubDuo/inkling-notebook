@@ -1,6 +1,6 @@
 # Inkling
 
-An AI-native handwriting notebook for the desktop, built with Electron, React and TypeScript. Think GoodNotes-style ink, plus notebook organisation, plus an AI tutor that reads your handwriting and writes corrections directly on your pages. For the beta, the tutor runs free in the cloud on Inkling's own small server ([`beta-server/`](beta-server/README.md), Cloudflare Workers AI with the Qwen 3.8 vision model): nothing to download, a personal access code, and a limited number of answers per day. It can also run free and privately on your own computer with [Ollama](https://ollama.com) and a Qwen3-VL vision model, and Google Gemini is an optional alternative for adults.
+An AI-native handwriting notebook for the desktop, built with Electron, React and TypeScript. Think GoodNotes-style ink, plus notebook organisation, plus an AI tutor that reads your handwriting and writes corrections directly on your pages. The tutor runs free in the cloud on Inkling's own small server ([`beta-server/`](beta-server/README.md), Cloudflare Workers AI with the Qwen 3.8 vision model): nothing to set up, no account, and a limited number of answers per day. It can also run free and privately on your own computer with [Ollama](https://ollama.com) and a Qwen3-VL vision model, and Google Gemini is an optional alternative for adults.
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -9,7 +9,7 @@ An AI-native handwriting notebook for the desktop, built with Electron, React an
 | 3 | Rich-text notes, search, links/backlinks, knowledge graph, PDF import/annotation/export | ✅ done |
 | 4 | AI Tutor on Google Gemini (free tier): streaming chat about handwriting, practice mode, previewed corrections on the page | ✅ done |
 | 4.6 | Local AI tutor on Ollama (default; Qwen3-VL), Gemini optional and 18+ only, narrow-window layout | ✅ done (live-model results: see *Local model results*) |
-| 4.7 | Free cloud beta: Inkling beta server on Cloudflare Workers AI (Qwen 3.8 27B), per-tester daily allowances inside the free tier, Ollama and Gemini kept | ✅ built and tested against a fake model; live-model run pending (see *Cloud beta*) |
+| 4.7 | Free cloud AI: Inkling's server on Cloudflare Workers AI (Qwen 3.8 27B), anonymous per-installation and per-network daily allowances inside the free tier, Ollama and Gemini kept | ✅ built; tested against a fake model and the real one |
 | 5 | Advanced AI editing on the canvas, more providers (OpenRouter, Anthropic Claude), handwriting search | planned |
 | 4.8 | Beta release: installers (Windows NSIS, macOS DMG), updates, release workflow, data-safety fixes, daily backups/restore, welcome, About, feedback, privacy | ✅ built; installers and Windows/macOS runs pending the first workflow run (see [`docs/ROADMAP.md`](docs/ROADMAP.md)) |
 | 6 | Signing and notarization, accessibility audit, website | planned |
@@ -22,7 +22,7 @@ Testers install Inkling from the release page; no Node.js, npm or terminal neede
 
 - Node.js **22.13 or later in the 22.x line, 24.x, or 26+** (Node 22 LTS or 24 LTS recommended), with the npm that ships with it. This is the strictest range among the toolchain: Electron 45 and `@electron/get` need ≥ 22.12, pdf.js needs ≥ 22.13, and Vitest 5 doesn't support the odd-numbered 23.x/25.x lines. `package.json` declares it under `engines`. Node 20 is not supported.
 - Windows 10/11, macOS or Linux, with internet access during install (the Electron runtime is about 100 MB).
-- For the AI Tutor, one of: a **beta access code** (cloud beta; nothing to install), or [Ollama](https://ollama.com/download) 0.12.7 or later and a vision model, e.g. `ollama pull qwen3-vl:4b-instruct` (3.3 GB download, ~5.5 GB of memory while answering). Inkling never installs or downloads these itself. A Gemini API key is the optional alternative (adults only).
+- For the AI Tutor, one of: nothing (a release build has Inkling's free cloud AI built in), or [Ollama](https://ollama.com/download) 0.12.7 or later and a vision model, e.g. `ollama pull qwen3-vl:4b-instruct` (3.3 GB download, ~5.5 GB of memory while answering). Inkling never installs or downloads these itself. A Gemini API key is the optional alternative (adults only).
 
 ## Install and run
 
@@ -175,22 +175,21 @@ The data comes from the link index (`graph()`), and the layout is a d3-force sim
 
 The tutor answers through one of three providers, chosen in Settings → AI Tutor. All use the same instructions, structured-output schemas, validation and canvas commands; only the transport differs (`src/main/ai/cloud.ts`, `src/main/ai/ollama.ts`, `src/main/ai/gemini.ts`).
 
-### Cloud beta (default in beta builds)
+### Inkling AI (cloud; the default in release builds)
 
-For beta testers: free, nothing to download, no account. Answers come from **Qwen 3.8 27B** (`@cf/qwen/qwen3.8-27b`, Apache-2.0, with vision) on Cloudflare Workers AI, through Inkling's own small server (a Cloudflare Worker in [`beta-server/`](beta-server/README.md)).
+Free for everyone who installs Inkling, with nothing to set up: no account, access code, API key or download. Answers come from **Qwen 3.8 27B** (`@cf/qwen/qwen3.8-27b`, Apache-2.0, with vision) on Cloudflare Workers AI, through Inkling's own small server (a Cloudflare Worker in [`beta-server/`](beta-server/README.md)), whose address is built into release installers.
 
-**Set up (testers).** The Inkling team sends you an access code (`ink_…`). Open Settings → AI Tutor → **Inkling beta**, paste it and press Save. Inkling checks it with the server before saving, and shows your name and today's allowance. A beta build has the server address built in; otherwise you also paste the address you were given. The first time you ask, Inkling asks permission to send notebook content to the beta server.
+**Set up.** None. Install, open, and ask. The first time you ask, Inkling asks permission to send what you ask about to its AI server.
 
-**It's free, and limited.** Cloudflare gives each account 10,000 *Neurons* a day of Workers AI, reset at midnight UTC. On its Workers Free plan, usage beyond that is refused, never billed. The beta server divides that allowance:
-- Each tester has a daily allowance, 900 Neurons by default, about 6 typical answers. The panel shows roughly how many answers are left.
-- The whole beta stops at 9,000 Neurons a day, before Cloudflare's own limit.
-- When either runs out, the tutor says so plainly and offers a one-click switch to the local Ollama tutor. Inkling never switches by itself and never moves to paid usage.
+**It's free, and limited.** Cloudflare gives each account 10,000 *Neurons* a day of Workers AI, reset at midnight UTC. On its Workers Free plan, usage beyond that is refused, never billed. The server shares it out:
+- about 10 typical answers a day per installation (900 Neurons), 2,700 Neurons per internet connection (a school or office shares this), and 9,000 Neurons for everyone together;
+- one answer at a time per installation, a few a minute.
 
-See *Cloud beta results* for what a typical interaction costs.
+The panel shows roughly how many answers are left. When an allowance runs out, the tutor says so plainly, notebooks work as usual, and it offers a one-click switch to the local Ollama tutor. Inkling never switches by itself and never moves to paid usage.
 
-**What is sent and kept.** The same as for any provider: your question, and an image of your selection or the page's typed/PDF text plus an image of its handwriting. The app sends only the task and the conversation; the server adds Inkling's instructions and limits, so an access code can't be used for anything but the tutor. Cloudflare says it [does not use Workers AI content to train models and does not keep it after answering](https://developers.cloudflare.com/workers-ai/platform/privacy/). The beta server keeps only usage counts per access code, never content. The access code is stored encrypted with the OS keychain (`beta-access.bin`), like a Gemini key. There is no Cloudflare API token in the app or the server: the server reaches Workers AI through its built-in binding.
+**What is sent and kept.** Your question, and an image of your selection or the page's typed/PDF text plus an image of its handwriting. The app sends only the task and the conversation; the server adds Inkling's instructions and limits, so it can't be used as a general AI service. Neither Inkling's server nor Cloudflare keeps the content ([Cloudflare's data usage](https://developers.cloudflare.com/workers-ai/platform/privacy/)). To enforce the limits, the server counts usage per installation (a random ID the app creates) and per network address, stored only as hashes with a salt that changes daily and deleted at the end of each UTC day. There is no credential in the app, and no Cloudflare API token anywhere: the server reaches Workers AI through its built-in binding.
 
-Running the server (deploying, adding testers, limits) is described in [`beta-server/README.md`](beta-server/README.md).
+Running the server (deploying, limits, emergency pause) is described in [`beta-server/README.md`](beta-server/README.md).
 
 ### Local: Ollama (default in regular builds)
 
@@ -277,7 +276,7 @@ Measured on 30 Oct 2026 against the deployed server and the real model. Details:
   - practice set 109
 
   The server's own count matched Cloudflare's to within 0.1 Neuron.
-- **Capacity on the free allowance:** about **110 interactions a day** for the whole beta (9,000-Neuron cap), about 11 per tester at the default allowance.
+- **Capacity on the free allowance:** about **110 interactions a day** for everyone together (9,000-Neuron cap), about 10 per installation.
 <!-- /cloud-beta-results -->
 
 ## Notebook context API
@@ -310,7 +309,7 @@ src/
     ai/         Tutor chat, practice, markup (annotation planning + preview), context building, Markdown/KaTeX rendering
     store/      Zustand store: library, pages, history, selection, tools
     services/   Debounced save queue
-beta-server/    Cloudflare Worker for the free cloud beta: access codes, daily allowance ledger (Durable Object), Workers AI streaming
+beta-server/    Cloudflare Worker for the free cloud AI: anonymous daily allowance ledger (Durable Object), Workers AI streaming
 tests/
   unit/         vitest
   e2e/          Playwright-driven Electron acceptance tests
@@ -356,7 +355,7 @@ useStore.getState().run(
 
 ## Known limitations
 
-- The cloud beta's free allowance is small: about 110 typical interactions a day for all testers together (measured; see *Cloud beta results*). It is shared through one Cloudflare account and resets at midnight UTC, which is the afternoon or evening in the Americas.
+- The cloud AI's free allowance is small: about 110 typical interactions a day for everyone together (measured; see *Cloud beta results*). It is shared through one Cloudflare account and resets at midnight UTC, which is the afternoon or evening in the Americas.
 - The cloud beta's model has no JSON mode on Workers AI, so practice sets, answer checks and markups rely on the instructions plus Inkling's validation: an answer in the wrong format is rejected with "Try again" and still costs allowance.
 - The beta server can only declare, not verify, that its Cloudflare account is on the Workers Free plan (`ACCOUNT_PLAN`). On a Workers Paid account, usage beyond the free allowance would be billed, though the server's own cap still stops at 9,000 Neurons a day.
 - The local tutor's quality and speed depend on the model and the computer. Small models (2B) misread handwriting more often; see *Local model results* for what has actually been measured.

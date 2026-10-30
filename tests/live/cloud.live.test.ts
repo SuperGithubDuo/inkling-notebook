@@ -1,14 +1,17 @@
 /**
- * Optional live test of the cloud beta against the REAL model on Cloudflare
+ * Optional live test of Inkling's cloud AI against the REAL model on Cloudflare
  * Workers AI (@cf/qwen/qwen3.8-27b) — no mocks. It spends real free
  * allowance: a full run uses roughly 2,000–3,000 of the account's 10,000
  * daily Neurons. Two ways to run it:
  *
- *   1. Against the deployed beta server (what testers use):
+ *   1. Against the deployed AI server (what users get), anonymously like the app:
  *        INKLING_BETA_URL=https://inkling-ai-beta.<you>.workers.dev \
- *        INKLING_BETA_TOKEN=ink_… npm run test:live:cloud
+ *        INKLING_LIVE_CLOUD=1 npm run test:live:cloud
+ *      A full run needs more than one installation's daily allowance, so the
+ *      test starts a fresh installation when the first one's is used up (and
+ *      records that the per-installation limit was hit).
  *
- *   2. Without deploying: the beta server code runs on this computer and
+ *   2. Without deploying: the AI server code runs on this computer and
  *      reaches Workers AI over Cloudflare's REST API (needs an API token with
  *      "Workers AI: Read" permission, on a Workers Free account):
  *        CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… npm run test:live:cloud
@@ -18,7 +21,7 @@
  * Skipped (not failed) without either. Runs the same handwriting scenarios as
  * the local-model test through Inkling's AiService + CloudProvider, and
  * records each answer's latency, tokens and Neurons, then estimates how many
- * tester interactions the free allowance supports. Report:
+ * interactions the free allowance supports. Report:
  * test-results/live-cloud-qwen3.8-27b.md (and .json).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -29,7 +32,7 @@ import { AiConfig, type SecretCipher } from '../../src/main/ai/config'
 import { AiService } from '../../src/main/ai/service'
 import { GeminiProvider } from '../../src/main/ai/gemini'
 import { OllamaProvider } from '../../src/main/ai/ollama'
-import { CLOUD_MODEL, type AiEvent, type AiRequest, type CloudQuota } from '../../src/shared/ai'
+import { CLOUD_MODEL, aiReady, type AiEvent, type AiRequest, type CloudQuota } from '../../src/shared/ai'
 import { parseTaskResult } from '../../src/shared/tutor'
 import { taskSpec } from '../../src/main/ai/prompts'
 import { registerScenarios, img, selection, type Run } from './scenarios'
@@ -39,9 +42,9 @@ import { workersAiRest } from '../support/workersAiRest.mjs'
 const root = join(import.meta.dirname, '../..')
 const env = process.env
 const direct = !!(env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN)
-const deployed = !!(env.INKLING_BETA_URL && env.INKLING_BETA_TOKEN)
+const deployed = !!env.INKLING_BETA_URL && env.INKLING_LIVE_CLOUD === '1'
 const enabled = deployed || direct
-if (!enabled) console.log('\n  Live cloud tests skipped: set INKLING_BETA_URL + INKLING_BETA_TOKEN, or CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (see the comment at the top of this file).\n')
+if (!enabled) console.log('\n  Live cloud tests skipped: set INKLING_BETA_URL + INKLING_LIVE_CLOUD=1, or CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (see the comment at the top of this file).\n')
 
 const memoryCipher: SecretCipher = {
   isAsyncEncryptionAvailable: async () => false,
@@ -67,35 +70,17 @@ const probes: Probe[] = []
 let quotaBefore: CloudQuota | null = null
 let quotaAfter: CloudQuota | null = null
 let mode = ''
+let installations = 0
+let installLimitHits = 0
 
-describe.skipIf(!enabled)(`live cloud beta, ${CLOUD_MODEL}`, () => {
+describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
   let server: BetaServer | null = null
   let service: AiService
+  let url = ''
   const events: AiEvent[] = []
 
-  beforeAll(async () => {
-    let url = env.INKLING_BETA_URL ?? ''
-    let token = env.INKLING_BETA_TOKEN ?? ''
-    // The settings probe calls Workers AI directly, so it needs account credentials in either mode.
-    if (env.INKLING_LIVE_PROBE === '1' && direct) await probe(workersAiRest({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN }))
-    if (!deployed) {
-      const ai = workersAiRest({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN })
-      server = await startBetaServer({
-        ai,
-        // The whole test may use at most this much of today's allowance.
-        globalDailyNeurons: Number(env.INKLING_LIVE_BUDGET ?? 4000),
-        testerDailyNeurons: Number(env.INKLING_LIVE_BUDGET ?? 4000),
-        perMinute: 30,
-        reasoningEffort: env.INKLING_LIVE_REASONING ?? 'low',
-        disableThinking: env.INKLING_LIVE_THINKING !== 'on',
-        structured: env.INKLING_LIVE_STRUCTURED === 'json_schema' ? 'json_schema' : 'prompt'
-      })
-      url = server.url
-      token = (await server.addTester('live test')).accessCode
-      mode = `beta server code on this computer → Workers AI REST API (reasoning_effort=${server.config.reasoningEffort || 'unset'}, enable_thinking=${server.config.disableThinking ? 'false' : 'default'}, structured=${server.config.structured})`
-    } else {
-      mode = `deployed beta server ${url}`
-    }
+  /** A freshly installed app: new data folder, new installation ID, no credentials. */
+  const freshInstall = async (): Promise<void> => {
     const config = new AiConfig(await mkdtemp(join(tmpdir(), 'inkling-live-cloud-')), memoryCipher, { builtInCloudUrl: url, defaultProvider: 'cloud' })
     await config.load()
     service = new AiService({
@@ -105,11 +90,40 @@ describe.skipIf(!enabled)(`live cloud beta, ${CLOUD_MODEL}`, () => {
       emit: (e) => events.push(e),
       limits: { duplicateWindowMs: 0, minIntervalMs: 0, perMinute: 100 }
     })
-    const access = await service.setBetaAccess(token, null)
-    if ('error' in access) throw new Error(`Beta access refused: ${access.error.message}`)
+    installations++
+    const s = service.status()
+    if (s.provider !== 'cloud' || !aiReady(s)) throw new Error(`A fresh install is not ready on the cloud AI: ${JSON.stringify(s)}`)
+    const t = await service.test()
+    if (!t.ok) throw new Error(`Anonymous status check failed: ${JSON.stringify(t)}`)
     await service.setConsent(true)
-    quotaBefore = access.cloud.quota
-    console.log(`  ${mode}; tester allowance used before: ${quotaBefore?.testerUsed ?? '?'} / ${quotaBefore?.testerLimit ?? '?'}`)
+  }
+
+  beforeAll(async () => {
+    url = env.INKLING_BETA_URL ?? ''
+    // The settings probe calls Workers AI directly, so it needs account credentials in either mode.
+    if (env.INKLING_LIVE_PROBE === '1' && direct) await probe(workersAiRest({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN }))
+    if (!deployed) {
+      const ai = workersAiRest({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN })
+      server = await startBetaServer({
+        ai,
+        // The whole test may use at most this much of today's allowance.
+        globalDailyNeurons: Number(env.INKLING_LIVE_BUDGET ?? 4000),
+        installDailyNeurons: Number(env.INKLING_LIVE_BUDGET ?? 4000),
+        networkDailyNeurons: Number(env.INKLING_LIVE_BUDGET ?? 4000),
+        installPerMinute: 30,
+        networkPerMinute: 30,
+        reasoningEffort: env.INKLING_LIVE_REASONING ?? 'low',
+        disableThinking: env.INKLING_LIVE_THINKING !== 'on',
+        structured: env.INKLING_LIVE_STRUCTURED === 'json_schema' ? 'json_schema' : 'prompt'
+      })
+      url = server.url
+      mode = `AI server code on this computer → Workers AI REST API (reasoning_effort=${server.config.reasoningEffort || 'unset'}, enable_thinking=${server.config.disableThinking ? 'false' : 'default'}, structured=${server.config.structured})`
+    } else {
+      mode = `deployed AI server ${url}, anonymous (no code or key)`
+    }
+    await freshInstall()
+    quotaBefore = service.status().cloud.quota
+    console.log(`  ${mode}; service-wide use before: ${quotaBefore?.globalUsed ?? '?'} / ${quotaBefore?.globalLimit ?? '?'}`)
   }, 300_000)
 
   afterAll(async () => {
@@ -126,16 +140,27 @@ describe.skipIf(!enabled)(`live cloud beta, ${CLOUD_MODEL}`, () => {
 
   const run = async (scenario: string, request: AiRequest): Promise<Run> => {
     const started = Date.now()
-    // The beta paces requests; wait out a pause rather than fail the scenario.
-    let r = service.start(request)
-    for (let i = 0; 'error' in r && (r.error.code === 'rate_limited' || r.error.code === 'busy') && i < 20; i++) {
-      await new Promise((res) => setTimeout(res, ((('error' in r && r.error.retryAfter) || 3) as number) * 1000))
-      r = service.start(request)
-    }
-    if ('error' in r) throw new Error(r.error.message)
-    const id = r.requestId
     let end: AiEvent | undefined
-    while (!(end = events.find((e) => e.requestId === id && e.type !== 'delta'))) await new Promise((res) => setTimeout(res, 50))
+    let id = ''
+    for (let attempt = 0; ; attempt++) {
+      // The server paces requests; wait out a pause rather than fail the scenario.
+      let r = service.start(request)
+      for (let i = 0; 'error' in r && (r.error.code === 'rate_limited' || r.error.code === 'busy') && i < 20; i++) {
+        await new Promise((res) => setTimeout(res, ((('error' in r && r.error.retryAfter) || 3) as number) * 1000))
+        r = service.start(request)
+      }
+      if ('error' in r) throw new Error(r.error.message)
+      id = r.requestId
+      while (!(end = events.find((e) => e.requestId === id && e.type !== 'delta'))) await new Promise((res) => setTimeout(res, 50))
+      // This installation's day is used up: carry on as a newly installed copy (the network and global limits still apply).
+      if (end.type === 'error' && end.error.code === 'daily_quota' && /on this computer/.test(end.error.message) && attempt < 3) {
+        installLimitHits++
+        console.log(`  installation ${installations} reached its daily allowance (${service.status().cloud.quota?.installUsed ?? '?'} Neurons); continuing as a fresh install`)
+        await freshInstall()
+        continue
+      }
+      break
+    }
     const chunks = events.filter((e) => e.requestId === id && e.type === 'delta').length
     const result: Run = {
       scenario,
@@ -214,7 +239,7 @@ async function probe(ai: ReturnType<typeof workersAiRest>): Promise<void> {
 function report(): string {
   const s = (ms?: number): string => (ms === undefined ? '–' : `${(ms / 1000).toFixed(1)} s`)
   const mean = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN)
-  const lines = [`# Live cloud-beta results: ${CLOUD_MODEL}`, '', `${mode}, ${new Date().toISOString()}. Images: tests/fixtures/handwriting/ (as Inkling sends them).`, '']
+  const lines = [`# Live cloud AI results: ${CLOUD_MODEL}`, '', `${mode}, ${new Date().toISOString()}. Images: tests/fixtures/handwriting/ (as Inkling sends them).`, '']
   if (probes.length) {
     lines.push('## Model settings probe (one small check request each)', '', '| Settings | Result | Output tokens | Reasoning chars | Valid JSON | Neurons | Time |', '|---|---|---|---|---|---|---|')
     for (const p of probes) lines.push(`| ${p.name} | ${p.ok ? 'ok' : `error: ${p.error}`} | ${p.usage?.completion_tokens ?? '–'} | ${p.reasoningChars ?? '–'} | ${p.validJson === undefined ? '–' : p.validJson ? 'yes' : 'no'} | ${p.neurons?.toFixed(1) ?? '–'} | ${s(p.ms)} |`)
@@ -232,7 +257,7 @@ function report(): string {
   lines.push('', '## Allowance', '')
   lines.push(`- Answers: ${done.length} of ${runs.length} succeeded; checks passed: ${allChecks.filter((c) => c.pass).length} of ${allChecks.length}.`)
   lines.push(`- Neurons used by this run (from the model’s token counts × Cloudflare’s published rates): **${total.toFixed(0)}**.`)
-  if (quotaBefore && quotaAfter) lines.push(`- Server ledger before → after: ${quotaBefore.testerUsed} → ${quotaAfter.testerUsed} (tester), ${quotaBefore.globalUsed} → ${quotaAfter.globalUsed} (beta).`)
+  if (quotaBefore && quotaAfter) lines.push(`- Server ledger, whole service, before → after: ${quotaBefore.globalUsed} → ${quotaAfter.globalUsed} of ${quotaAfter.globalLimit}. Installations used: ${installations}; per-installation limit reached ${installLimitHits} time(s).`)
   lines.push('- Compare with the Cloudflare dashboard (Workers AI → Neurons used today) before and after the run.', '')
   lines.push('| Interaction | Answers | Mean Neurons | Mean first text | Mean total |', '|---|---|---|---|---|')
   for (const t of ['chat', 'annotate', 'practice', 'check']) {
@@ -240,13 +265,13 @@ function report(): string {
     if (!rs.length) continue
     lines.push(`| ${t} | ${rs.length} | ${mean(byTask(t)).toFixed(1)} | ${s(mean(rs.map((r) => r.firstTokenMs ?? r.totalMs)))} | ${s(mean(rs.map((r) => r.totalMs)))} |`)
   }
-  // A tester session as the beta expects it: mostly questions, some markups, the odd practice set.
+  // A typical session: mostly questions, some markups, the odd practice set.
   const mix = { chat: 0.6, annotate: 0.25, practice: 0.05, check: 0.1 }
   const blended = Object.entries(mix).reduce((a, [t, w]) => a + (Number.isFinite(mean(byTask(t))) ? mean(byTask(t)) * w : 0), 0) / Object.entries(mix).reduce((a, [t, w]) => a + (Number.isFinite(mean(byTask(t))) ? w : 0), 0)
   if (Number.isFinite(blended)) {
     lines.push('', `Blended interaction (60% chat, 25% markup, 10% answer check, 5% practice set): **${blended.toFixed(0)} Neurons**.`)
-    lines.push(`- Cloudflare’s free 10,000 Neurons a day ≈ **${Math.floor(10_000 / blended)} interactions** a day for the whole beta; the server’s 9,000 cap ≈ **${Math.floor(9000 / blended)}**.`)
-    lines.push(`- A 900-Neuron tester allowance ≈ ${Math.floor(900 / blended)} interactions a day each, so about ${Math.floor(9000 / 900)} testers can use their full allowance on the same day.`)
+    lines.push(`- Cloudflare’s free 10,000 Neurons a day ≈ **${Math.floor(10_000 / blended)} interactions** a day for everyone; the server’s 9,000 cap ≈ **${Math.floor(9000 / blended)}**.`)
+    lines.push(`- One installation’s 900 Neurons ≈ ${Math.floor(900 / blended)} interactions a day, so about ${Math.floor(9000 / 900)} people can use their full allowance on the same day.`)
   }
   for (const r of runs) {
     lines.push('', `## ${r.scenario} · ${r.task}`, '')

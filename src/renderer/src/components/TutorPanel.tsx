@@ -146,7 +146,7 @@ function ProviderNote() {
     const q = status.cloud.quota
     return (
       <span data-testid="ai-provider-note">
-        Sent to Inkling’s beta server only when you ask.{q ? ` About ${q.approxAnswersLeft} answer${q.approxAnswersLeft === 1 ? '' : 's'} left today.` : ''}
+        Sent to Inkling’s AI server only when you ask.{q ? ` About ${q.approxAnswersLeft} answer${q.approxAnswersLeft === 1 ? '' : 's'} left today.` : ''}
       </span>
     )
   }
@@ -163,17 +163,17 @@ export function AiStatusCard({ onOpenSettings, compact }: { onOpenSettings: () =
     return (
       <p data-testid="ai-status" data-state="ready" className="mt-4 flex items-center justify-center gap-1.5 text-[12px] text-ink-3">
         <span className="h-1.5 w-1.5 rounded-full bg-[#2fae66]" />
-        {local ? `On this computer · ${modelLabel(status!.model)}` : cloud ? `Inkling beta · ${modelLabel(status!.model)} · free, limited daily` : `Connected · ${modelLabel(status!.model)} · free tier`}
+        {local ? `On this computer · ${modelLabel(status!.model)}` : cloud ? `Inkling AI · ${modelLabel(status!.model)} · free, limited daily` : `Connected · ${modelLabel(status!.model)} · free tier`}
       </p>
     )
   }
   let title: string
   let body: string
   if (cloud) {
-    title = ready ? `Inkling beta · ${modelLabel(status!.model)}` : 'Set up the AI Tutor'
+    title = ready ? `Inkling AI · ${modelLabel(status!.model)}` : 'Choose an AI for the tutor'
     body = ready
-      ? 'Free for beta testers, with a daily allowance. Only what you ask about is sent.'
-      : 'Enter the beta access code the Inkling team sent you in AI settings. Nothing to download. Or use a local model with Ollama.'
+      ? 'Free and ready to use, with a daily limit. Only what you ask about is sent, after you allow it.'
+      : 'This version of Inkling has no cloud AI. Use the tutor on this computer (Ollama) in AI settings.'
   } else if (local) {
     const missing = status?.models.find((m) => m.id === status.model)?.status === 'missing'
     title = ready ? `On this computer · ${modelLabel(status!.model)}` : status?.ollama.running === false ? 'Start Ollama to use the tutor' : missing ? `Install ${modelLabel(status!.model)}` : 'Set up the AI Tutor'

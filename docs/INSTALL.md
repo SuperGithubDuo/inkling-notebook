@@ -31,7 +31,7 @@ To uninstall, drag Inkling from Applications to the Bin. Your notebooks stay in 
 ## The AI Tutor (beta)
 
 The tutor is optional. Everything else works without it.
-- **Inkling beta (cloud).** If you received a beta access code, paste it in *Settings → AI Tutor → Inkling beta*. Answers are free, with a daily limit.
+- **Inkling AI (cloud), the default.** Ready as soon as Inkling is installed: no account, code or key. Answers are free, with a daily limit (about 10 on each computer). The first time you ask, Inkling asks your permission to send what you ask about.
 - **Ollama.** Runs a model on your own computer. Free and private, but it's a 2–6 GB download and needs a reasonably powerful computer.
 
 Nothing from your notebook is sent anywhere until you agree and ask a question. *Help → Privacy* explains what is sent.

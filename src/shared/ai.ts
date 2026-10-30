@@ -11,39 +11,33 @@ import { z } from 'zod'
 
 /**
  * Where answers come from.
- * - cloud: Inkling's free beta server (Cloudflare Workers AI, Qwen 3.8). No
- *   download; each tester has an access code and a small daily allowance.
- * - ollama: a vision model on this computer. Free, private, unlimited, but
- *   needs a few GB of download and memory.
+ * - cloud: Inkling's free AI server (Cloudflare Workers AI, Qwen 3.8). Works
+ *   right away: no download, account, code or key; a daily allowance applies.
+ * - ollama: a vision model on this computer. Free, private, offline, no
+ *   limits, but needs a few GB of download and memory.
  * - gemini: optional, with the user's own Google key; adults only.
- * A build made with a beta server address (INKLING_BETA_URL) starts on the
- * cloud beta; otherwise on Ollama. A saved choice is always kept.
+ * A build made with the server address (MAIN_VITE_INKLING_BETA_URL) starts on
+ * the cloud; otherwise on Ollama. A saved choice is always kept.
  */
 export const providerIdSchema = z.enum(['cloud', 'ollama', 'gemini'])
 export type AiProviderId = z.infer<typeof providerIdSchema>
 export const DEFAULT_PROVIDER: AiProviderId = 'ollama'
 
 export const PROVIDERS: Record<AiProviderId, { label: string; local: boolean; description: string }> = {
-  cloud: { label: 'Inkling beta (cloud)', local: false, description: 'Free for beta testers, nothing to download. Needs a beta access code; limited answers per day.' },
+  cloud: { label: 'Inkling AI (cloud)', local: false, description: 'Free and ready to use: nothing to download, no account. A daily limit on answers applies.' },
   ollama: { label: 'Ollama (on this computer)', local: true, description: 'Free and private: a vision model runs on this computer. No account or API key.' },
   gemini: { label: 'Google Gemini', local: false, description: 'Optional cloud models. Requires a Google API key, and Google only permits users who are 18 or older.' }
 }
 
-/** The model behind the cloud beta. The server decides; this is what it is configured with. */
+/** The model behind the cloud AI. The server decides; this is what it is configured with. */
 export const CLOUD_MODEL = '@cf/qwen/qwen3.8-27b'
 export const CLOUD_MODEL_LABEL = 'Qwen 3.8 27B (Cloudflare Workers AI)'
-/** What the cloud beta does with notebook content, shown wherever it can be chosen. */
+/** What the cloud AI does with notebook content, shown wherever it can be chosen. */
 export const CLOUD_DATA_NOTE =
-  'Your question and an image of what you selected go to Inkling’s beta server and are answered by Cloudflare Workers AI. Cloudflare says it does not use this content to train models or keep it after answering. Inkling’s server keeps only usage counts, not your content.'
+  'Your question and an image of what you selected go to Inkling’s AI server and are answered by Cloudflare Workers AI. Neither keeps your content: Cloudflare says it does not use it to train models or store it after answering, and Inkling’s server never stores or logs it. To share out the free daily allowance, the server counts answers per installation (a random ID this app made) and per internet connection, in scrambled form that is deleted every day.'
 export const CLOUD_TERMS_URL = 'https://developers.cloudflare.com/workers-ai/platform/privacy/'
 
-/** A beta access code: `ink_` and 32 URL-safe characters (format only; the server decides validity). */
-export const betaTokenSchema = z
-  .string()
-  .trim()
-  .regex(/^ink_[A-Za-z0-9_-]{32}$/, 'That does not look like an Inkling beta access code (it starts with ink_).')
-
-/** The beta server address: https, or http on this computer (for testing). */
+/** The AI server address: https, or http on this computer (for testing). */
 export const betaUrlSchema = z
   .string()
   .trim()
@@ -120,8 +114,11 @@ export const modelLabel = (id: string): string =>
 
 /** Version of the data-use notice. Raising it asks the user to agree again. */
 export const CONSENT_VERSION = 2
-/** Version of the cloud beta's data notice (CLOUD_DATA_NOTE). */
-export const CLOUD_CONSENT_VERSION = 1
+/** Version of the cloud AI's data notice (CLOUD_DATA_NOTE). 2: public access, anonymous IDs. */
+export const CLOUD_CONSENT_VERSION = 2
+
+/** This installation's anonymous ID for the cloud AI's fair-use limits (not secret, not an account). */
+export const installIdSchema = z.string().regex(/^inst_[A-Za-z0-9_-]{22,64}$/)
 
 // ---------------------------------------------------------------- requests
 
@@ -183,7 +180,7 @@ export type AiErrorCode =
   | 'canceled'
   | 'bad_response'
   | 'offline' // the local Ollama server is not running
-  | 'beta_closed' // the cloud beta is paused or this access code was revoked
+  | 'beta_closed' // the cloud AI is paused by its operator
   | 'unknown'
 
 export interface AiError {
@@ -225,17 +222,21 @@ export interface OllamaState {
 }
 
 /**
- * The cloud beta allowance, as the server last reported it. Neurons are
+ * The cloud AI allowance, as the server last reported it. Neurons are
  * Cloudflare's unit of Workers AI usage; the UI shows them as a share of the
  * day and as an approximate number of answers.
  */
 export interface CloudQuota {
-  testerUsed: number
-  testerLimit: number
-  /** The whole beta's use today, against its cap (kept below Cloudflare's free 10,000). */
+  /** This installation's use today. */
+  installUsed: number
+  installLimit: number
+  /** Use today from this internet connection (shared with others on it). */
+  networkUsed: number
+  networkLimit: number
+  /** Everyone's use today, against the service's cap (kept below Cloudflare's free 10,000). */
   globalUsed: number
   globalLimit: number
-  /** Rough number of typical answers left today for this tester. */
+  /** Rough number of typical answers left today here. */
   approxAnswersLeft: number
   /** When the allowance resets (00:00 UTC, like Cloudflare's own). */
   resetAt: string
@@ -245,13 +246,8 @@ export interface CloudState {
   url: string | null
   /** Whether the server address came with this build. */
   urlFromBuild: boolean
-  hasToken: boolean
-  tokenHint: string | null
-  tokenProtection: KeyProtection | null
   consented: boolean
   quota: CloudQuota | null
-  /** Tester name the server knows this code by. */
-  tester: string | null
   checkedAt: string | null
 }
 
@@ -285,7 +281,7 @@ export interface AiStatus {
 /** Can the tutor be asked something right now (as far as the app knows)? */
 export function aiReady(s: AiStatus): boolean {
   if (s.provider === 'gemini') return s.hasKey && s.consented
-  if (s.provider === 'cloud') return !!s.cloud.url && s.cloud.hasToken
+  if (s.provider === 'cloud') return !!s.cloud.url
   return s.ollama.running !== false && s.models.find((m) => m.id === s.model)?.status !== 'missing'
 }
 
@@ -300,7 +296,7 @@ export interface AiUsage {
   firstTokenMs?: number
   /** Milliseconds from sending to the complete answer. */
   totalMs?: number
-  /** Cloud beta: Workers AI Neurons this answer used (from the model's token counts). */
+  /** Cloud AI: Workers AI Neurons this answer used (from the model's token counts). */
   neurons?: number
 }
 

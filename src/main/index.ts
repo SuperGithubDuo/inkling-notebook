@@ -9,7 +9,7 @@ import { IMAGE_MIME, MAX_IMAGE_BYTES, MAX_PDF_BYTES, Storage } from './storage'
 import { exportMarkdownWithImages, importMarkdownImages } from './markdownFiles'
 import { SearchIndex } from './searchIndex'
 import type { Library } from '@shared/schema'
-import { aiRequestSchema, apiKeySchema, betaTokenSchema, betaUrlSchema, providerIdSchema } from '@shared/ai'
+import { aiRequestSchema, apiKeySchema, betaUrlSchema, providerIdSchema } from '@shared/ai'
 import { AiConfig } from './ai/config'
 import { AiService } from './ai/service'
 import { GeminiProvider } from './ai/gemini'
@@ -106,7 +106,7 @@ const testHooks = process.env.INKLING_TEST_HOOKS === '1'
 const geminiBaseUrl = testHooks ? process.env.INKLING_GEMINI_BASE_URL : undefined
 // ...and Ollama at a fake on another loopback port. Always loopback: OllamaProvider refuses anything else.
 const ollamaBaseUrl = testHooks ? process.env.INKLING_OLLAMA_URL : undefined
-// The cloud beta server: set when building a beta (MAIN_VITE_INKLING_BETA_URL), or with INKLING_BETA_URL when running.
+// The cloud AI server: set when building (MAIN_VITE_INKLING_BETA_URL); INKLING_BETA_URL overrides it when running (tests, development).
 const builtInBetaUrl = betaUrlSchema.safeParse(process.env.INKLING_BETA_URL ?? import.meta.env.MAIN_VITE_INKLING_BETA_URL ?? '').data ?? null
 const aiConfig = new AiConfig(configDir, safeStorage, { builtInCloudUrl: builtInBetaUrl, defaultProvider: builtInBetaUrl ? 'cloud' : 'ollama' })
 // Acceptance tests send many requests in a few seconds; they may relax the
@@ -535,23 +535,6 @@ function registerIpc(): void {
     return ai.setKey(key.data)
   })
   handle(IPC.aiClearKey, z.tuple([]), async () => ai.clearKey())
-  // The access code is checked with the beta server before it is saved; only its last 4 characters come back.
-  handle(IPC.aiSetBetaAccess, z.tuple([z.string().max(200), z.string().max(300).nullable()]), async (rawToken, rawUrl) => {
-    await aiReady
-    const token = betaTokenSchema.safeParse(rawToken)
-    if (!token.success) return { error: { code: 'invalid_key' as const, message: token.error.issues[0]?.message ?? 'Invalid access code' } }
-    let url: string | null = null
-    if (rawUrl !== null && rawUrl.trim()) {
-      const parsed = betaUrlSchema.safeParse(rawUrl)
-      if (!parsed.success) return { error: { code: 'bad_request' as const, message: parsed.error.issues[0]?.message ?? 'Invalid server address' } }
-      url = parsed.data
-    }
-    return ai.setBetaAccess(token.data, url)
-  })
-  handle(IPC.aiClearBetaAccess, z.tuple([]), async () => {
-    await aiReady
-    return ai.clearBetaAccess()
-  })
   // The model name is validated against the active provider (Gemini's two free models, or an Ollama name).
   handle(IPC.aiSetModel, z.tuple([z.string().min(1).max(120)]), async (model) => {
     await aiReady

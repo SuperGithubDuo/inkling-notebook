@@ -1,0 +1,41 @@
+name: AI server emergency switch
+
+# Pauses or resumes ALL answers from Inkling's free AI server, for the operator
+# only (it needs the INKLING_ADMIN_TOKEN secret, which never leaves GitHub).
+# While paused, the app says the AI is paused for maintenance and notebooks
+# work as usual. Same as `npm run admin -- pause|resume` in beta-server/.
+#
+# Start it by pushing (creating) the branch `ops/pause` or `ops/resume` from
+# any branch. Delete the branch afterwards so it can be pushed again.
+
+on:
+  push:
+    branches: ['ops/pause', 'ops/resume']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-server-ops
+  cancel-in-progress: false
+
+jobs:
+  switch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Pause or resume
+        shell: bash
+        env:
+          URL: ${{ vars.INKLING_BETA_URL }}
+          INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+        run: |
+          [ -n "$URL" ] || { echo "::error title=AI server switch::Set the repository variable INKLING_BETA_URL first."; exit 1; }
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          [ ${#ADMIN} -ge 32 ] || { echo "::error title=AI server switch::The INKLING_ADMIN_TOKEN secret is missing or too short."; exit 1; }
+          if [ "$GITHUB_REF_NAME" = ops/pause ]; then paused=true; else paused=false; fi
+          code=$(curl -sS -o /tmp/res.json -w '%{http_code}' -X POST "$URL/admin/pause" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d "{\"paused\":$paused}")
+          [ "$code" = 200 ] || { echo "::error title=AI server switch::The server answered $code."; exit 1; }
+          now=$(curl -sS "$URL/v1/status" -H 'x-inkling-install: inst_operatorstatuscheck000000' | jq -r .paused)
+          [ "$now" = "$paused" ] || { echo "::error title=AI server switch::Asked for paused=$paused but the server reports $now."; exit 1; }
+          echo "::notice title=AI server switch::AI answers are now $([ "$paused" = true ] && echo PAUSED || echo ON) at $URL"

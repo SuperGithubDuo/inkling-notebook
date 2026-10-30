@@ -41,6 +41,6 @@ For each device you have (Surface Pen, Wacom tablet, Apple Pencil via Sidecar, a
 
 ## 5. AI Tutor
 
-- [ ] With the cloud beta code: ask about handwritten algebra, and get a correct answer. *Show this on my page* previews marks, *Add* applies them, and undo removes them.
+- [ ] On a fresh install with no setup (cloud AI is the default): ask about handwritten algebra, and get a correct answer. *Show this on my page* previews marks, *Add* applies them, and undo removes them.
 - [ ] Without any AI set up: the tutor shows how to set it up, and everything else works.
 - [ ] Turn off Wi-Fi and ask: a clear "couldn't reach" message, and the notebook keeps working.
