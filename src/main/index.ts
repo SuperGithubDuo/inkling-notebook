@@ -216,6 +216,10 @@ function createWindow(): void {
   let closing = false
   win.on('close', (event) => {
     if (closing || win.webContents.isDestroyed()) return
+    // Holding the window open to save also cancels a quit in progress (⌘Q, Quit from the menu);
+    // remember it, so the app still quits once saving is done. On macOS closing the last window
+    // doesn't quit by itself, so without this ⌘Q left Inkling running with no window.
+    const quitting = quitRequested
     event.preventDefault()
     void (async () => {
       const result = await flushRenderer(win)
@@ -229,11 +233,15 @@ function createWindow(): void {
           defaultId: 0,
           cancelId: 2
         })
-        if (response === 0) return win.close()
-        if (response === 2) return
+        if (response === 0) return quitting ? app.quit() : win.close()
+        if (response === 2) {
+          quitRequested = false
+          return
+        }
       }
       closing = true
       if (!win.isDestroyed()) win.close()
+      if (quitting) app.quit()
     })()
   })
 
@@ -266,6 +274,9 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
 }
+
+/** Set while the app is quitting (⌘Q, menu Quit, updater, tests), so a window that holds the quit to save can resume it. */
+let quitRequested = false
 
 /** Asks the renderer to write every pending edit; resolves with whether it all reached the disk. */
 function flushRenderer(win: BrowserWindow, timeoutMs = 10_000): Promise<FlushResult> {
@@ -669,6 +680,10 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  quitRequested = true
 })
 
 app.on('window-all-closed', () => {

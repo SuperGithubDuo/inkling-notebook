@@ -5,8 +5,11 @@
  * (the checks API) without opening the log.
  *
  *   node scripts/ci-run.mjs "<label>" <command…>
+ *
+ * A command that runs longer than CI_RUN_TIMEOUT_MIN minutes (default 20) is
+ * stopped and reported the same way, so a hang shows where it hung.
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 
 const [label, ...cmd] = process.argv.slice(2)
 if (!label || !cmd.length) {
@@ -20,10 +23,31 @@ const keep = (chunk) => {
     if (tail.length > 400) tail.shift()
   }
 }
-const child = spawn(cmd.join(' '), { shell: true, stdio: ['inherit', 'pipe', 'pipe'] })
+const win = process.platform === 'win32'
+// One argument is a shell command line; several are arguments, quoted where needed.
+const quote = (a) => (/[\s"'()$`&|<>;]/.test(a) ? `"${a.replace(/(["\\$`])/g, '\\$1')}"` : a)
+const line = cmd.length === 1 ? cmd[0] : cmd.map(quote).join(' ')
+const child = spawn(line, { shell: true, stdio: ['inherit', 'pipe', 'pipe'], detached: !win })
+let timedOut = false
+const limitMin = Number(process.env.CI_RUN_TIMEOUT_MIN) || 20
+const timer = setTimeout(() => {
+  timedOut = true
+  console.log(`\n[ci-run] ${label}: no result after ${limitMin} minutes; stopping it.`)
+  // The whole tree: Electron and its helpers too.
+  if (win) spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+  else {
+    try {
+      process.kill(-child.pid, 'SIGKILL')
+    } catch {
+      child.kill('SIGKILL')
+    }
+  }
+}, limitMin * 60_000)
 child.stdout.on('data', (d) => (process.stdout.write(d), keep(d)))
 child.stderr.on('data', (d) => (process.stderr.write(d), keep(d)))
-child.on('close', (code) => {
+child.on('close', (exitCode) => {
+  clearTimeout(timer)
+  const code = timedOut ? 124 : exitCode
   if (code === 0) {
     // Evidence of what passed, readable from the checks API.
     const passed = tail.filter((l) => /^\s*✓/.test(l)).map((l) => l.trim())
@@ -35,7 +59,7 @@ child.on('close', (code) => {
   const clean = tail.map((l) => l.replace(/\x1b\[[0-9;]*m/g, '')).filter((l) => l.trim() && !/dbus|NODE_OPTION|DevTools listening/.test(l))
   // The most telling lines first (assertions, errors), then the last lines in order.
   const key = clean.filter((l) => /FAIL|Error|✗|×|assert|expected|Timeout|ENOENT|EPERM|cannot|⨯/i.test(l)).slice(-25)
-  console.log(`::error title=${label} failed (exit ${code})::${esc(key.join('\n') || '(no error lines)')}`)
+  console.log(`::error title=${label} ${timedOut ? `timed out after ${limitMin} min` : `failed (exit ${code})`}::${esc(key.join('\n') || '(no error lines)')}`)
   console.log(`::error title=${label}: last output::${esc(clean.slice(-60).join('\n'))}`)
   process.exit(code ?? 1)
 })

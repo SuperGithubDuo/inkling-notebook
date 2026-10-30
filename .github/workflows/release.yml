@@ -85,7 +85,7 @@ jobs:
       matrix:
         os: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
       # The cloud AI beta server built into the app, and where feedback goes (repository variables, not secrets).
       MAIN_VITE_INKLING_BETA_URL: ${{ vars.INKLING_BETA_URL }}
@@ -182,7 +182,7 @@ jobs:
       matrix:
         os: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
