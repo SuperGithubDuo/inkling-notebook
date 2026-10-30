@@ -21,11 +21,12 @@ Bugs found and fixed by these runs:
 1. **macOS:** ⌘Q left Inkling running with no window. Saving cancelled the quit; the quit is now resumed after saving.
 2. **Windows:** reopening right after a crash did nothing, because the dying copy still held the single-instance lock. The lock is now retried for up to 4 s.
 
+**30 Oct, AI-enabled Windows build (run 41001881995).** The Windows installer has the beta server address built in. The installed app defaults to cloud AI, asks for an access code rather than Ollama, and reached the real server. Install, update, uninstall and reinstall all kept notebooks, and all acceptance suites passed.
+
 ## ⚠️ Not verified yet
 
 | Item | Why | How to verify |
 |---|---|---|
-| An installer **with cloud AI built in** | Needs the deployed server's address | Set the repository variable `INKLING_BETA_URL`, then push `build/windows` |
 | Real pens, touch screens, trackpads, display scaling (125%/150%), multiple monitors | CI machines have no such hardware | `docs/DEVICE-TESTING.md` on a real Windows PC with a pen and a real Mac |
 | Windows 10, Windows on ARM (via x64 emulation), Intel Macs, macOS 12–14 | CI used Windows Server 2022 and macOS 15 on Apple silicon | Testers on those systems |
 | Security prompts on first open (SmartScreen, Gatekeeper "Open Anyway") | Only appear for downloaded files on real machines | Download the artifact on a real PC and Mac and follow `INSTALL.md` |
