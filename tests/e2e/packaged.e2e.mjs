@@ -31,7 +31,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // A fresh profile. On Linux the config home is redirected; on Windows APPDATA; on macOS the runner is fresh.
 const env = { ...process.env, XDG_CONFIG_HOME: join(home, 'config'), APPDATA: join(home, 'AppData', 'Roaming'), INKLING_DISABLE_UPDATES: '1' }
-for (const k of ['NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'INKLING_DATA_DIR', 'INKLING_TEST_HOOKS', 'INKLING_SKIP_WELCOME', 'ELECTRON_RENDERER_URL']) delete env[k]
+// INKLING_BETA_URL is removed too: the server address must come from the build itself.
+for (const k of ['NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'INKLING_DATA_DIR', 'INKLING_TEST_HOOKS', 'INKLING_SKIP_WELCOME', 'ELECTRON_RENDERER_URL', 'INKLING_BETA_URL']) delete env[k]
+/** Set when the build has the cloud AI server built in: the address it must contain. */
+const expectBetaUrl = process.env.INKLING_EXPECT_BETA_URL || null
 
 let app, win
 async function launch() {
@@ -68,6 +71,23 @@ try {
   await win.screenshot({ path: join(shots, 'packaged-first-launch.png') })
   await win.getByRole('button', { name: 'Skip' }).click()
   step(`starts as installed Inkling ${facts.version}, data in ${facts.userData}, welcome shown, no developer menu`)
+
+  if (expectBetaUrl) {
+    // A fresh install uses the cloud beta built into it; no Ollama, no key, nothing to download.
+    const ai = await win.evaluate(() => window.inkling.ai.status())
+    assert.equal(ai.provider, 'cloud', 'cloud AI is the default provider')
+    assert.equal(ai.cloud.url, expectBetaUrl, 'the beta server address is built in')
+    assert.equal(ai.cloud.urlFromBuild, true, 'the address comes from the build, not the environment')
+    assert.equal(ai.local, false)
+    const card = (await win.locator('[data-testid="ai-status"]').first().textContent()) ?? ''
+    assert.match(card, /beta access code/i, 'the tutor asks for a beta access code')
+    assert.doesNotMatch(card, /Start Ollama|Install Qwen/i, 'the tutor does not ask for Ollama')
+    // The installed app reaches the real server: a made-up code is refused by it (no model call, nothing charged).
+    const probe = await win.evaluate(() => window.inkling.ai.setBetaAccess('ink_' + 'Q'.repeat(32), null))
+    assert.equal(probe?.error?.code, 'invalid_key', `the beta server answered: ${JSON.stringify(probe)}`)
+    await win.screenshot({ path: join(shots, 'packaged-cloud-default.png') })
+    step(`cloud AI is the default, with ${ai.cloud.url} built in; the installed app reached it (a made-up code was refused); no Ollama needed`)
+  }
 
   // Handwriting.
   await win.click('[data-testid="tool-pen"]')

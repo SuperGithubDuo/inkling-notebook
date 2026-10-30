@@ -1,0 +1,64 @@
+name: Add beta tester
+
+# Creates one revocable beta access code on the deployed beta server, using
+# the admin API (the same call as `npm run admin -- add` in beta-server/).
+#
+# Start it by pushing a branch named admin/add-tester/<tester-name>, e.g.
+# admin/add-tester/qiao. One code per push.
+#
+# The code never appears in plain text: it is masked in the log and only
+# published ENCRYPTED with your INKLING_ADMIN_TOKEN secret (AES-256, PBKDF2),
+# so only someone who knows that token can read it. Decrypt it with:
+#
+#   read -rs -p "Admin token: " T && export T && echo
+#   echo '<ciphertext>' | openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -a -A -pass env:T
+#
+# (Git Bash on Windows, Terminal on macOS/Linux.) Revoke a code with
+# `npm run admin -- revoke <id>` (beta-server/README.md).
+
+on:
+  push:
+    branches: ['admin/add-tester/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-tester
+  cancel-in-progress: false
+
+jobs:
+  add:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Create the access code
+        shell: bash
+        env:
+          URL: ${{ vars.INKLING_BETA_URL }}
+          INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+        run: |
+          [ -n "$URL" ] || { echo "::error title=Add tester::Set the repository variable INKLING_BETA_URL first."; exit 1; }
+          [ ${#INKLING_ADMIN_TOKEN} -ge 32 ] || { echo "::error title=Add tester::The INKLING_ADMIN_TOKEN secret is missing or too short."; exit 1; }
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          name=${GITHUB_REF_NAME#admin/add-tester/}
+          name=$(printf '%s' "$name" | tr -c 'A-Za-z0-9 ._()-' ' ' | cut -c1-60)
+          body=$(jq -n --arg name "$name" '{name: $name}')
+          res=$(curl -sS -X POST "$URL/admin/testers" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d "$body")
+          code=$(printf '%s' "$res" | jq -r '.accessCode // empty')
+          if [ -z "$code" ]; then
+            echo "::error title=Add tester::The server did not create a code: $(printf '%s' "$res" | jq -c '.error // "unexpected answer"')"
+            exit 1
+          fi
+          echo "::add-mask::$code"
+          id=$(printf '%s' "$res" | jq -r .id)
+          allowance=$(printf '%s' "$res" | jq -r .dailyNeurons)
+          export T="$ADMIN"
+          cipher=$(printf '%s' "$code" | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -salt -a -A -pass env:T)
+          unset T code res
+          # Check the ciphertext decrypts back to a well-formed code before publishing it.
+          check=$(printf '%s' "$cipher" | T="$ADMIN" openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -a -A -pass env:T)
+          echo "::add-mask::$check"
+          [[ "$check" =~ ^ink_[A-Za-z0-9_-]{32}$ ]] || { echo "::error title=Add tester::Encryption self-check failed"; exit 1; }
+          echo "::notice title=Beta tester added::Tester \"$name\" (id $id), $allowance Neurons a day. Server: $URL"
+          echo "::notice title=Encrypted access code (decrypt with your INKLING_ADMIN_TOKEN)::$cipher"

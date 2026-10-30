@@ -127,6 +127,15 @@ jobs:
           if [ "$signed" = yes ]; then echo "::notice title=Signing::Signed build"; else echo "::warning title=Signing::Unsigned build: for testers only (security prompts on first open)"; fi
           if [ -n "$MAIN_VITE_INKLING_BETA_URL" ]; then echo "::notice title=Cloud AI::Built with the beta server $MAIN_VITE_INKLING_BETA_URL"; else echo "::warning title=Cloud AI::No INKLING_BETA_URL variable: this build has no cloud AI server built in"; fi
       - run: node scripts/ci-run.mjs build npm run build
+      - name: Check the cloud AI server address is built in
+        if: vars.INKLING_BETA_URL != ''
+        shell: bash
+        run: |
+          if grep -qF "$MAIN_VITE_INKLING_BETA_URL" out/main/index.js; then
+            echo "::notice title=Cloud AI address built in::out/main/index.js contains $MAIN_VITE_INKLING_BETA_URL"
+          else
+            echo "::error title=Cloud AI address missing::The build does not contain $MAIN_VITE_INKLING_BETA_URL"; exit 1
+          fi
       - run: node scripts/ci-run.mjs "licence notices" node scripts/notices.mjs
       - name: Build installers
         shell: bash
@@ -141,11 +150,16 @@ jobs:
           ls -la release
       - name: Smoke-test the packaged app
         shell: bash
+        env:
+          # With a server built in, the test also checks that cloud AI is the default and reachable.
+          INKLING_EXPECT_BETA_URL: ${{ vars.INKLING_BETA_URL }}
         run: |
           if [ "$RUNNER_OS" = Windows ]; then app=release/win-unpacked/Inkling.exe; else app=release/mac-arm64/Inkling.app/Contents/MacOS/Inkling; fi
           INKLING_PACKAGED_APP="$app" node scripts/ci-run.mjs "packaged app" node tests/e2e/packaged.e2e.mjs
       - name: Install, update, uninstall, reinstall (notebooks must survive)
         shell: bash
+        env:
+          INKLING_EXPECT_BETA_URL: ${{ vars.INKLING_BETA_URL }}
         run: |
           # A second build with a higher version stands in for "the next update".
           next="$(node -p "require('./package.json').version").ci${GITHUB_RUN_NUMBER}"
@@ -157,6 +171,24 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then rm -rf "$APPDATA/Inkling"; a=$(ls release/Inkling-Setup-*.exe | head -1); b=$(ls release-next/Inkling-Setup-*.exe | head -1)
           else rm -rf "$HOME/Library/Application Support/Inkling"; a=$(ls release/Inkling-*-arm64.dmg | head -1); b=$(ls release-next/Inkling-*-arm64.dmg | head -1); fi
           node scripts/ci-run.mjs "installer lifecycle" node tests/e2e/installer.e2e.mjs "$a" "$b"
+      # The installer on its own, so testers download just the .exe (or .dmg).
+      - name: Upload the installer
+        id: installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Inkling-${{ runner.os }}-installer
+          path: |
+            release/Inkling-Setup-*.exe
+            release/Inkling-*.dmg
+          if-no-files-found: error
+      - name: Report the download link
+        shell: bash
+        env:
+          LINK: ${{ steps.installer.outputs.artifact-url }}
+        run: |
+          hash() { if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
+          sums=$(cd release && for f in Inkling-Setup-*.exe Inkling-*.dmg; do if [ -f "$f" ]; then echo "$f SHA-256 $(hash "$f")"; fi; done)
+          echo "::notice title=Installer download (${{ runner.os }})::$LINK%0A$(echo "$sums" | sed ':a;N;$!ba;s/\n/%0A/g')"
       - uses: actions/upload-artifact@v4
         with:
           name: inkling-${{ runner.os }}
