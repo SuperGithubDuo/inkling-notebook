@@ -200,11 +200,14 @@ jobs:
             url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/limits-deploy.log | head -1)
           }
           # Ready once the admin API answers with the limits just deployed (a new version takes a moment to reach every location).
+          # Old and new versions overlap for a while, so wait for 6 matching answers in a row.
           ready() {
-            for i in $(seq 1 45); do
+            ok=0
+            for i in $(seq 1 90); do
               got=$(curl -sS "$url/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c "[.limits.networkDailyNeurons, .limits.globalDailyNeurons, .limits.installPerMinute]" 2>/dev/null || true)
-              [ "$got" = "$1" ] && { sleep 10; return 0; }
-              sleep 4
+              if [ "$got" = "$1" ]; then ok=$((ok + 1)); else ok=0; fi
+              [ $ok -ge 6 ] && { sleep 15; return 0; }
+              sleep 3
             done
             echo "::error title=Temporary server::$url did not start serving limits $1 (got $got)"; exit 1
           }
