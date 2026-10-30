@@ -157,9 +157,11 @@ jobs:
           curl -sS -X POST "$URL/admin/pause" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"paused":false}' >/dev/null
           node scripts/abuse-check.mjs security "$URL"
           echo "::notice title=AI server today::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN")"
+          echo "day_start=$(date -u +%Y-%m-%dT00:00:00Z)" >> "$GITHUB_ENV"
 
       - name: Live test against the real model (anonymous, as a fresh install)
-        if: github.event_name == 'push' || inputs.live_test
+        # "[skip live]" in the commit message skips only this step (~1,000 Neurons), e.g. to re-run the limit checks.
+        if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip live]')) || inputs.live_test
         shell: bash
         env:
           URL: ${{ steps.deploy.outputs.url }}
@@ -204,7 +206,7 @@ jobs:
           ready() {
             ok=0
             for i in $(seq 1 90); do
-              got=$(curl -sS "$url/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c "[.limits.networkDailyNeurons, .limits.globalDailyNeurons, .limits.installPerMinute]" 2>/dev/null || true)
+              got=$(curl -sS "$url/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c "[.limits.networkDailyNeurons, .limits.globalDailyNeurons, .limits.installPerMinute, .limits.typicalNeuronsPerAnswer]" 2>/dev/null || true)
               if [ "$got" = "$1" ]; then ok=$((ok + 1)); else ok=0; fi
               [ $ok -ge 6 ] && { sleep 15; return 0; }
               sleep 3
@@ -212,18 +214,22 @@ jobs:
             echo "::error title=Temporary server::$url did not start serving limits $1 (got $got)"; exit 1
           }
           fail=0
-          deploy --var INSTALL_DAILY_NEURONS:120 --var NETWORK_DAILY_NEURONS:100000 --var NETWORK_PER_MINUTE:6 --var GLOBAL_DAILY_NEURONS:1500
+          # TYPICAL_NEURONS_PER_ANSWER (display only) marks each version, so `ready` can tell them apart:
+          # a version change restarts the ledger object and with it the in-memory per-minute counts.
+          stage1=(--var INSTALL_DAILY_NEURONS:120 --var NETWORK_DAILY_NEURONS:100000 --var NETWORK_PER_MINUTE:6 --var GLOBAL_DAILY_NEURONS:1500)
+          deploy "${stage1[@]}" --var TYPICAL_NEURONS_PER_ANSWER:89
           printf '%s' "$ADMIN" | npx wrangler secret put ADMIN_TOKEN --name "$NAME" > /dev/null 2>&1
-          ready '[100000,1500,6]'
+          deploy "${stage1[@]}" --var TYPICAL_NEURONS_PER_ANSWER:91
+          ready '[100000,1500,6,91]'
           echo "::notice title=Temporary server::$url"
           node ../scripts/abuse-check.mjs limits "$url" 1 || fail=1
-          deploy --var NETWORK_DAILY_NEURONS:300 --var NETWORK_PER_MINUTE:100 --var GLOBAL_DAILY_NEURONS:1500 --var INSTALL_PER_MINUTE:2
-          ready '[300,1500,2]'
+          deploy --var NETWORK_DAILY_NEURONS:300 --var NETWORK_PER_MINUTE:100 --var GLOBAL_DAILY_NEURONS:1500 --var INSTALL_PER_MINUTE:2 --var TYPICAL_NEURONS_PER_ANSWER:92
+          ready '[300,1500,2,92]'
           node ../scripts/abuse-check.mjs limits "$url" 2 || fail=1
           used=$(curl -sS "$url/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -r .globalUsed)
           cap=$((used + 400))
-          deploy --var NETWORK_DAILY_NEURONS:100000 --var NETWORK_PER_MINUTE:100 --var GLOBAL_DAILY_NEURONS:$cap
-          ready "[100000,$cap,6]"
+          deploy --var NETWORK_DAILY_NEURONS:100000 --var NETWORK_PER_MINUTE:100 --var GLOBAL_DAILY_NEURONS:$cap --var TYPICAL_NEURONS_PER_ANSWER:93
+          ready "[100000,$cap,6,93]"
           node ../scripts/abuse-check.mjs limits "$url" 3 || fail=1
           exit $fail
 
