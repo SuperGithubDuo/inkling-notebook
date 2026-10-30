@@ -116,7 +116,15 @@ jobs:
         working-directory: beta-server
         shell: bash
         run: |
-          node ../scripts/ci-run.mjs "wrangler deploy" npx wrangler deploy 2>&1 | tee /tmp/deploy.log
+          # Cloudflare's API occasionally fails with a transient internal error (code 10500): try up to 3 times.
+          for attempt in 1 2 3; do
+            if node ../scripts/ci-run.mjs "wrangler deploy" npx wrangler deploy > /tmp/deploy.log 2>&1; then break; fi
+            cat /tmp/deploy.log
+            [ $attempt = 3 ] && exit 1
+            echo "::warning title=wrangler deploy::attempt $attempt failed; retrying in 20 s"
+            sleep 20
+          done
+          cat /tmp/deploy.log
           url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
           [ -n "$url" ] || { echo "::error title=Deploy::Deployed, but no workers.dev address was printed. Open Workers & Pages in the Cloudflare dashboard once to create your workers.dev subdomain."; exit 1; }
           # Trailing whitespace from pasting the secret would make the token unusable in a header.
@@ -183,7 +191,11 @@ jobs:
           # Same code and model as production; separate ledger; only the limits differ.
           common=(--name "$NAME" --var NETWORK_CONCURRENT:20 --var GLOBAL_CONCURRENT:20)
           deploy() {
-            npx wrangler deploy "${common[@]}" "$@" > /tmp/limits-deploy.log 2>&1 || { echo "::error title=Temporary server::$(tail -5 /tmp/limits-deploy.log | tr '\n' ' ')"; exit 1; }
+            for attempt in 1 2 3; do
+              npx wrangler deploy "${common[@]}" "$@" > /tmp/limits-deploy.log 2>&1 && break
+              [ $attempt = 3 ] && { echo "::error title=Temporary server::$(tail -5 /tmp/limits-deploy.log | tr '\n' ' ')"; exit 1; }
+              sleep 20
+            done
             url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/limits-deploy.log | head -1)
           }
           ready() {
