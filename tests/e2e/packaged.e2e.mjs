@@ -94,10 +94,13 @@ try {
       const end = await win.evaluate(
         () =>
           new Promise((resolve) => {
+            let pushed = null
             const off = window.inkling.ai.onEvent((e) => {
-              if (e.type !== 'delta') {
+              // The allowance the server reports arrives as a status push before the answer itself.
+              if (e.type === 'status') pushed = e.status.cloud.quota
+              else if (e.type !== 'delta') {
                 off()
-                resolve(e)
+                resolve({ ...e, pushed })
               }
             })
             window.inkling.ai.start({ task: 'chat', turns: [{ role: 'user', parts: [{ text: 'What is 7 × 8? Answer with the number only.' }] }] }).then((r) => {
@@ -110,7 +113,9 @@ try {
       )
       assert.equal(end.type, 'done', `the real model answered: ${JSON.stringify(end)}`)
       assert.match(end.text, /56/)
-      answered = `answered “${end.text.trim().slice(0, 40)}” (${Math.round(end.usage?.neurons ?? 0)} Neurons)`
+      // Beta 1 QA: the count shown didn't change until a restart. The server's new figures must reach the window with the answer.
+      assert.ok(end.pushed && end.pushed.installUsed > 0, `the server's allowance reached the window with the answer: ${JSON.stringify(end.pushed)}`)
+      answered = `answered “${end.text.trim().slice(0, 40)}” (${Math.round(end.usage?.neurons ?? 0)} Neurons); window told ${end.pushed.approxAnswersLeft} answers left`
     }
     await win.screenshot({ path: join(shots, 'packaged-cloud-default.png') })
     step(`cloud AI is the default and ready with no code or key, ${ai.cloud.url} built in; status check OK (${quota.approxAnswersLeft} answers left here); real question: ${answered}`)
