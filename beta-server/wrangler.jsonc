@@ -23,7 +23,7 @@
     "GLOBAL_DAILY_NEURONS": "9000",
     "TESTER_DAILY_NEURONS": "900",
     "PER_MINUTE": "6",
-    "TYPICAL_NEURONS_PER_ANSWER": "150",
+    "TYPICAL_NEURONS_PER_ANSWER": "90",
     // Cloudflare's published price for @cf/qwen/qwen3.8-27b, in Neurons per million tokens.
     "INPUT_NEURONS_PER_M": "40909",
     "OUTPUT_NEURONS_PER_M": "290909",

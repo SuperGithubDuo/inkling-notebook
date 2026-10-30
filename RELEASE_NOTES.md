@@ -23,7 +23,7 @@ The first version of Inkling you can install like any other app. No developer to
 
 **Known limitations**
 - Every release is tested automatically: on Linux, and on the Windows and macOS machines that build the installers. It hasn’t been tested on real pens and tablets yet: please tell us how yours behaves.
-- The cloud AI allowance is small (roughly 75 answers a day across all testers), and it resets at midnight UTC.
+- The cloud AI allowance is small (roughly 100 answers a day across all testers), and it resets at midnight UTC.
 - Handwriting isn't searchable yet. Audio recording and sharing aren't available.
 - No iPad, Android or web version.
 

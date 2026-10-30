@@ -25,7 +25,6 @@ Bugs found and fixed by these runs:
 
 | Item | Why | How to verify |
 |---|---|---|
-| **Cloud AI against the real model** (answer quality, speed, Neurons per answer, server CPU time on Cloudflare) | Needs your Cloudflare account; the deploy workflow is ready and stops at "Missing secrets" | Add the 3 secrets ([beta-server/README.md](../beta-server/README.md#deploy)), then push `deploy/beta-server` |
 | An installer **with cloud AI built in** | Needs the deployed server's address | Set the repository variable `INKLING_BETA_URL`, then push `build/windows` |
 | Real pens, touch screens, trackpads, display scaling (125%/150%), multiple monitors | CI machines have no such hardware | `docs/DEVICE-TESTING.md` on a real Windows PC with a pen and a real Mac |
 | Windows 10, Windows on ARM (via x64 emulation), Intel Macs, macOS 12–14 | CI used Windows Server 2022 and macOS 15 on Apple silicon | Testers on those systems |
@@ -36,7 +35,7 @@ Bugs found and fixed by these runs:
 
 | # | Blocker | Owner |
 |---|---|---|
-| 1 | Deploy the cloud AI server and pass the real-model test (quality, CPU time, cost per answer) | You add the secrets; then I run it and read the results |
+| 1 | ~~Deploy the cloud AI server and pass the real-model test~~ **Done 30 Oct:** 50/50 checks, 82 Neurons per interaction, Workers Free confirmed (`docs/live-results/cloud-qwen3.8-27b.md`) | – |
 | 2 | Hands-on install and pen test on one real Windows PC and one real Mac | You or a trusted tester |
 | 3 | Decide the beta's age policy (18+ is simplest; under 18 needs parental/school consent wording), and have counsel review `docs/PRIVACY.md` | You |
 | 4 | Feedback channel testers can use without a GitHub account (`INKLING_FEEDBACK_URL`: an email or form) | You |
@@ -44,7 +43,7 @@ Bugs found and fixed by these runs:
 
 **Accepted for the beta, not blockers:**
 - Unsigned installers (security prompts, explained in `INSTALL.md`), and no in-app self-update on macOS until signed.
-- A small AI allowance: about 75 answers a day across all testers (estimate, to be replaced by measured numbers).
+- A small AI allowance: about 110 interactions a day across all testers (measured).
 - No moderation model on AI answers.
 - `workers.dev` request floods could use up the free daily request limit. The result is an outage, not a cost.
 
@@ -54,10 +53,10 @@ Bugs found and fixed by these runs:
 |---|---|
 | Provider terms suit a student app: no age minimum in Cloudflare's agreement; no training on content; no retention by default; Qwen weights Apache-2.0 | ✅ reviewed 29 Oct (see `docs/AI.md`). Our own age policy is still to decide (blocker 3). |
 | No paid usage possible | ✅ by design: the deploy workflow refuses a Workers Paid account unless you confirm it; the server refuses to run without `ACCOUNT_PLAN=free`; the server caps the day at 9,000 Neurons; Cloudflare's Free plan errors instead of billing. |
-| Cost | $0 on Workers Free. If moved to Paid later: $0.011 per 1,000 Neurons, about $1 per 750 answers at the estimated 120 Neurons each. |
-| Usage limits | 900 Neurons per tester per day (about 6 answers; adjustable per tester), 6 requests a minute, 1 answer at a time, 9,000 for the whole beta, reset 00:00 UTC. |
+| Cost | $0 on Workers Free (no subscriptions on the account before and after the test). If moved to Paid later: $0.011 per 1,000 Neurons, about $1 per 1,100 interactions at the measured 82 Neurons each. |
+| Usage limits | 900 Neurons per tester per day (about 11 interactions; adjustable per tester), 6 requests a minute, 1 answer at a time, 9,000 for the whole beta, reset 00:00 UTC. |
 | Security | Codes stored hashed; no Cloudflare token in the app or server; admin API returns 404 without the admin token; server owns prompts and output caps; request size and image limits. The deploy workflow re-checks the 401 and 404 responses after every deploy. |
-| Real-model quality, speed, cost per answer | ⚠️ pending the deploy (blocker 1) |
+| Real-model quality, speed, cost per answer | ✅ 30 Oct: 13/13 answers and 50/50 checks (handwriting reading, maths, annotation placement); first words about 0.5 s (17 s when the model is cold), answers 2–15 s; 82 Neurons per typical interaction, matching Cloudflare's own count |
 
 ## Exact steps to a Windows tester build with working AI
 

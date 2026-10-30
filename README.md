@@ -260,19 +260,24 @@ Measured with real models in Ollama 0.40.13 on a slow machine (2 CPU cores, 8 GB
 ### Cloud beta results
 
 <!-- cloud-beta-results -->
-**Not yet measured against the real model.** The cloud-beta code is tested end to end against the real server code with a fake model (unit and Electron acceptance tests), but this development environment cannot reach Cloudflare. `npm run test:live:cloud` runs the same handwriting scenarios against the real model and writes a report with each answer's correctness, latency, tokens and Neurons. It can run against the deployed server, or run the server code locally against the Workers AI REST API.
+Measured on 30 Oct 2026 against the deployed server and the real model. Details: [`docs/live-results/cloud-qwen3.8-27b.md`](docs/live-results/cloud-qwen3.8-27b.md).
 
-Until then, the expected cost per interaction is estimated from Cloudflare's published rates for the model (40,909 Neurons per million input tokens and 290,909 per million output tokens) and the token counts measured for the same scenarios with Qwen3-VL 4B, which uses the same tokenizer family:
+- **Correctness: 13 of 13 answers, 50 of 50 checks.**
+  - Read all three handwritten lines of the algebra mistake, found it (roots −2 and −3), and put the ✗ and correction on the right line.
+  - Recognised correct work without crossing anything out.
+  - Named all four forces in the free-body diagram.
+  - Answered from a note and a PDF (20 m/s, 80 m).
+  - Generated and checked practice problems.
+  - Every structured answer validated the first time.
+- **Speed:** first words in about 0.5 s (16.7 s on the very first request while the model warmed up). Answers complete in 2–10 s; a markup takes about 7 s, a two-problem practice set about 15 s.
+- **Cost:** a typical interaction uses **about 82 Neurons**:
+  - chat 70
+  - markup 123
+  - answer check 32
+  - practice set 109
 
-| Interaction | Tokens in / out | Neurons |
-|---|---|---|
-| Question about a handwriting selection | ~1,300 / ~250 | ~125 |
-| Question about a note or PDF text | ~350 / ~200 | ~70 |
-| On-page markup (with schema in the instructions) | ~1,700 / ~270 | ~150 |
-| Answer check | ~500 / ~120 | ~55 |
-| Practice set (3 problems) | ~600 / ~900 | ~285 |
-
-A typical mix (60% questions, 25% markups, 10% checks, 5% practice sets) costs about **120 Neurons an interaction**. That makes about **75 interactions a day for the whole beta** under the 9,000 cap: for example 10 testers × 7, or 25 testers × 3. This assumes the model's hidden reasoning stays short with `reasoning_effort: low` and thinking off. If it doesn't, output tokens and costs rise, which is what the live run will show.
+  The server's own count matched Cloudflare's to within 0.1 Neuron.
+- **Capacity on the free allowance:** about **110 interactions a day** for the whole beta (9,000-Neuron cap), about 11 per tester at the default allowance.
 <!-- /cloud-beta-results -->
 
 ## Notebook context API
@@ -351,7 +356,7 @@ useStore.getState().run(
 
 ## Known limitations
 
-- The cloud beta's free allowance is small: about 75 typical interactions a day for all testers together (estimated; see *Cloud beta results*). It is shared through one Cloudflare account and resets at midnight UTC, which is the afternoon or evening in the Americas. The live-model run that measures real costs, quality and speed is still to be done.
+- The cloud beta's free allowance is small: about 110 typical interactions a day for all testers together (measured; see *Cloud beta results*). It is shared through one Cloudflare account and resets at midnight UTC, which is the afternoon or evening in the Americas.
 - The cloud beta's model has no JSON mode on Workers AI, so practice sets, answer checks and markups rely on the instructions plus Inkling's validation: an answer in the wrong format is rejected with "Try again" and still costs allowance.
 - The beta server can only declare, not verify, that its Cloudflare account is on the Workers Free plan (`ACCOUNT_PLAN`). On a Workers Paid account, usage beyond the free allowance would be billed, though the server's own cap still stops at 9,000 Neurons a day.
 - The local tutor's quality and speed depend on the model and the computer. Small models (2B) misread handwriting more often; see *Local model results* for what has actually been measured.
