@@ -16,12 +16,16 @@ Status as of 31 Oct 2026, 01:00 UTC, on branch `beta-release`, commit `4ea46be` 
 | Server redeploy: security 21/22, limits 5/13, plan Workers Free, Cloudflare count 1,648 Neurons | ❌ same cause |
 | `INKLING_FEEDBACK_URL` | ⚠️ not set: *Send Feedback* opens a GitHub issue |
 
-**Cause:** just after 00:00 UTC one Workers AI error was classified as "Cloudflare's free allocation used up", and the server latched that for the rest of the UTC day (global limit pinned at 1,330 Neurons) although Cloudflare had counted only 1,648 of 10,000. One error can close the AI for every tester for up to 24 h. Fix on branch `fix/upstream-exhausted-retry` (`c005cf5`: 15-minute stop then retry; only 4006 counts; unit tests), **not merged or deployed**. The latch clears at 00:00 UTC on 1 Nov either way.
+**Cause:** just after 00:00 UTC Workers AI refused a request as "free allocation used up", and the server latched that for the rest of the UTC day (global limit pinned at 1,330 Neurons) although Cloudflare's own count for 31 Oct was only 1,648 of 10,000 Neurons.
+
+**Fix deployed 31 Oct 00:5x UTC** (`61e0973` + `864dc1e` on `beta-release`, approved): an allocation error now stops answers for 15 minutes, answered as its own refusal (`503 server`, scope `upstream_unavailable`, the real retry time, "briefly unavailable from its provider. Try again in about N minutes") instead of a daily quota until midnight; the app keeps no pause for it and the next try after recovery is answered without a restart; Inkling's allowance is reported unpinned meanwhile; a genuinely used-up Inkling allowance is unchanged (`daily_quota` until the UTC reset); only `4006` / "daily free allocation" count. Unit tests 226/226 (regressions fail on the old code).
+
+**Cloudflare is still refusing.** In the post-deploy run (41152494794) every real request, on production and on the separate temporary limits server, got the strict `4006` refusal; Cloudflare's count rose by 2 requests and 0 Neurons. So Workers AI itself is withholding the account's free allocation, not a misread error. Likely cause: the previous UTC day's heavy test usage (production plus temporary limits servers share the account's 10,000) with Cloudflare's reset lagging 00:00 UTC; unconfirmed. Live inference, the limit checks and the packaged/lifecycle tests can only pass once Cloudflare answers again; the server now retries automatically every 15 minutes.
 
 **Usage monitor:** push `ops/summary` (read-only; `docs/RELEASING.md`). Tested: "1330 of 9000 Neurons used (14%), 19 answers, 6 installations, 3 networks, paused=false".
 
 ### Must fix before inviting testers
-1. **AI server latch** (above): approve and deploy the fix (or accept the risk), then re-run `deploy/beta-server` and `build/draft-release`; both must be green (packaged real answer on Windows and macOS, installer lifecycle, limits 13/13, security).
+1. **Green verification once Cloudflare answers again:** re-run `deploy/beta-server` (security, live model, limits 13/13, plan) and then `build/draft-release` (packaged real answer on Windows and macOS, installer lifecycle). Then find out from Cloudflare's dashboard why the allocation was withheld, and keep test runs from using the testers' daily allowance.
 2. **Feedback form** (`docs/FEEDBACK-FORM.md`): create it, set `INKLING_FEEDBACK_URL`, rebuild the draft; annotation *Feedback link built in*.
 3. **Age policy** for the beta (18+ is simplest; under-18 or school use needs parental/school consent wording and counsel). State it in the invitation.
 4. **Privacy notice:** `docs/PRIVACY.md` is a draft with placeholders (who we are, contact, children). Testers need at least a named contact and the age rule; counsel before any students.
