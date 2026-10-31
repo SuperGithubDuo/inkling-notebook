@@ -54,7 +54,7 @@ Whatever tool you use, the form must open and submit **without signing in**:
 The app reads the address at **build time**, so the installers must be rebuilt after it is set:
 
 1. GitHub → repository **Settings → Secrets and variables → Actions → Variables → New repository variable**: name `INKLING_FEEDBACK_URL`, value the form's https link (or a `mailto:` address).
-2. Rebuild the draft release: `git push origin origin/beta-release:refs/heads/build/draft-release --force` (see `docs/RELEASING.md`). The new installers replace the old ones in the draft, so the checksums change; update them in the release notes.
+2. Rebuild the draft release: `git push origin origin/beta-release:refs/heads/build/draft-release --force` (see `docs/RELEASING.md`). The new installers replace the old ones in the draft, so the checksums change; the workflow rewrites the draft's notes with the new checksums and the form link.
 3. In the run's annotations, **Feedback link built in** must name your form (a **Feedback link** warning means the variable wasn't set).
 4. Check by hand: *Help → Send Feedback or Report a Problem* opens the form in the browser.
 

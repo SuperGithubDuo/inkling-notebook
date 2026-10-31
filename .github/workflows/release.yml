@@ -59,6 +59,34 @@ jobs:
           if [ "$draft" = yes ]; then echo "publish=always" >> "$GITHUB_OUTPUT"; else echo "publish=never" >> "$GITHUB_OUTPUT"; fi
           echo "Building for: $m"
 
+  # Draft builds: create the draft release once, before both installer jobs upload to it
+  # (two jobs creating it at the same time would make two drafts). Never publishes.
+  draft:
+    name: Draft release
+    needs: plan
+    if: needs.plan.outputs.publish == 'always'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - shell: bash
+        run: |
+          ver=$(node -p "require('./package.json').version")
+          tag="v$ver"
+          state=$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo none)
+          if [ "$state" = false ]; then echo "::error title=Draft release::$tag is already PUBLISHED; refusing to change it. Bump the version."; exit 1; fi
+          if [ "$state" = true ]; then
+            gh release edit "$tag" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --notes "Draft: installers are being rebuilt and tested from $GITHUB_SHA. Not published."
+            echo "::notice title=Draft release::Uploading to the existing draft $tag, now targeting $GITHUB_SHA"
+          else
+            pre=(); case "$ver" in *-*) pre=(--prerelease) ;; esac
+            gh release create "$tag" -R "$GITHUB_REPOSITORY" --draft "${pre[@]}" --target "$GITHUB_SHA" \
+              --title "Inkling $ver" --notes "Draft: installers are being built and tested. Not published."
+            echo "::notice title=Draft release::Created the draft $tag at $GITHUB_SHA (no git tag until it is published)"
+          fi
+
   checks:
     name: Checks (Linux)
     runs-on: ubuntu-24.04
@@ -82,7 +110,8 @@ jobs:
 
   installers:
     name: Installer (${{ matrix.os }})
-    needs: plan
+    needs: [plan, draft]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.draft.result == 'success' || needs.draft.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
@@ -264,3 +293,45 @@ jobs:
           name: test-results-acceptance-${{ runner.os }}
           path: test-results
           if-no-files-found: ignore
+
+  # Draft builds: once every job has passed, check the draft's files and write its notes
+  # (from .github/release-notes.md, with the checksums filled in). If anything failed, the
+  # draft says DO NOT PUBLISH instead. Never publishes.
+  release-notes:
+    name: Draft release notes
+    needs: [plan, draft, checks, installers, acceptance]
+    if: ${{ always() && needs.plan.outputs.publish == 'always' && needs.draft.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      FEEDBACK_URL: ${{ vars.INKLING_FEEDBACK_URL }}
+      ALL_PASSED: ${{ needs.checks.result == 'success' && needs.installers.result == 'success' && needs.acceptance.result == 'success' }}
+    steps:
+      - uses: actions/checkout@v5
+      - shell: bash
+        run: |
+          ver=$(node -p "require('./package.json').version"); tag="v$ver"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ "$ALL_PASSED" != true ]; then
+            gh release edit "$tag" -R "$GITHUB_REPOSITORY" --notes "**DO NOT PUBLISH.** A build or test failed in $run_url. Fix it and push build/draft-release again."
+            echo "::error title=Draft release::Tests failed; the draft $tag is marked DO NOT PUBLISH"; exit 1
+          fi
+          # Every file must carry this version (latest*.yml excepted), and the three installers must be there.
+          names=$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | sort)
+          echo "$names"
+          bad=$(echo "$names" | grep -v -e "^latest.*\.yml$" | grep -vF -- "-$ver-" || true)
+          [ -z "$bad" ] || { echo "::error title=Release files::Files without version $ver: $bad"; exit 1; }
+          for f in "Inkling-Setup-$ver-x64.exe" "Inkling-$ver-arm64.dmg" "Inkling-$ver-x64.dmg" "Inkling-$ver-SHA256SUMS-Windows.txt" "Inkling-$ver-SHA256SUMS-macOS.txt" latest.yml latest-mac.yml; do
+            echo "$names" | grep -qxF "$f" || { echo "::error title=Release files::$f is missing from the draft"; exit 1; }
+          done
+          mkdir -p /tmp/sums && gh release download "$tag" -R "$GITHUB_REPOSITORY" -p "*SHA256SUMS*" -D /tmp/sums --clobber
+          sums=$(cat /tmp/sums/*.txt)
+          if [ -n "$FEEDBACK_URL" ]; then fb="$FEEDBACK_URL"; else fb="*(feedback form link to be added)*"; echo "::warning title=Draft release::No INKLING_FEEDBACK_URL: the notes and the app have no feedback form yet"; fi
+          VER="$ver" SUMS="$sums" FB="$fb" SHA="$GITHUB_SHA" RUN="$run_url" node -e '
+            const fs = require("fs"); let t = fs.readFileSync(".github/release-notes.md", "utf8");
+            for (const [k, v] of Object.entries({ VERSION: process.env.VER, SHA256SUMS: process.env.SUMS, FEEDBACK: process.env.FB, COMMIT: process.env.SHA, RUN: process.env.RUN }))
+              t = t.split("{{" + k + "}}").join(v);
+            fs.writeFileSync("/tmp/notes.md", t)'
+          gh release edit "$tag" -R "$GITHUB_REPOSITORY" --notes-file /tmp/notes.md
+          echo "::notice title=Draft release ready for review::$tag: all jobs passed; notes and checksums written. Still a draft.%0A$(echo "$sums" | sed ':a;N;$!ba;s/\n/%0A/g')"

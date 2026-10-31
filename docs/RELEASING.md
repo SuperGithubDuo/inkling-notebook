@@ -56,13 +56,13 @@ When a step fails, its key error lines appear as annotations on the run summary,
 
 ### Publish a release (only with approval)
 
-**Draft without a public tag (used for Beta 2).** Create the draft release first (GitHub → *Releases → Draft a new release*, tag `v<version>` *created on publish*, target `beta-release`, tick *Set as a pre-release*, **Save draft**), then push `build/draft-release` from the commit to ship:
+**Draft without a public tag (used for Beta 2).** Push `build/draft-release` from the commit to ship:
 
 ```bash
 git push origin origin/beta-release:refs/heads/build/draft-release --force
 ```
 
-Both installers are built, tested and uploaded to that draft, with `Inkling-<version>-SHA256SUMS-Windows.txt` and `-macOS.txt`. The git tag is only created when someone presses **Publish**. Pushing again replaces the assets (and changes their checksums).
+The workflow creates the draft pre-release `v<version>` (or reuses it, pointing it at the new commit; it refuses to touch a published one), builds and tests both installers, and uploads them with `Inkling-<version>-SHA256SUMS-Windows.txt` and `-macOS.txt`. When every job has passed, *Draft release notes* checks that every file carries the version and writes the notes from `.github/release-notes.md` with the checksums and feedback link filled in; if anything failed, the draft says **DO NOT PUBLISH**. The git tag is only created when someone presses **Publish**. Pushing again replaces the files (and changes their checksums).
 
 **Or with a tag.** Tag the commit and push the tag (the tag is visible in the public repository at once, though the release stays a draft):
 
