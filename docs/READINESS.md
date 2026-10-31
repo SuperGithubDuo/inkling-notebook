@@ -2,7 +2,19 @@
 
 Status as of 31 Oct 2026, 01:00 UTC, on branch `beta-release`, commit `4ea46be` (Beta 2). Earlier entries refer to `974177b` (Beta 1). Builds run on GitHub Actions; results come from the check runs on that commit.
 
-## Beta 2 for 5–10 invited testers (31 Oct 2026, 00:40 UTC)
+## Beta 2 for 5–10 invited testers
+
+**Current draft (31 Oct 2026, 07:50 UTC):** `v0.2.0-beta.2` from `d086a06`, all jobs green, not published, no tag.
+
+| File | SHA-256 |
+|---|---|
+| `Inkling-Setup-0.2.0-beta.2-x64.exe` | `c7361f3819d34b467b7a7a4ff0391148d12a035cc914493474200cd96c13cf5b` |
+| `Inkling-0.2.0-beta.2-arm64.dmg` | `6e45cfa077be281177254e7c446eb4a78f2e577a472c38193ff124c035080ebc` |
+| `Inkling-0.2.0-beta.2-x64.dmg` | `ac380bf06ee864dd4886f45cf93a0f9bd14cef1ad8452026c19df154aa6ce797` |
+
+These change when the draft is rebuilt with `INKLING_FEEDBACK_URL`.
+
+### History (31 Oct, 00:40 UTC)
 
 **Draft pre-release `v0.2.0-beta.2`** (no git tag until published) was built from `f00f3dd` by pushing `build/draft-release` (run 41149694675). It is marked **DO NOT PUBLISH**.
 
@@ -45,8 +57,8 @@ By UTC calendar day: 30 Oct 9,734, 31 Oct 1,648 — neither reaches 10,000, yet 
 - **Tests:** the full real-model suite (~1,100 Neurons) is now opt-in (`[live]`). Every deploy run first measures what tests used in the last 24 hours (Cloudflare's count minus the server's) and fails rather than let tests exceed 1,000 Neurons, the share left beside testers' 9,000. `[no-testers-yet]` overrides it, only before invitations. A build's packaged-app check uses about 20 Neurons per system.
 
 ### Exactly what blocks the first 5–10 testers
-1. **Cloudflare must accept requests again.** It refuses (4006) until enough of the 30 Oct test usage leaves its rolling window; expected about 06:00–07:00 UTC 31 Oct (11 pm–midnight Pacific). Probes are scheduled.
-2. **Green verification after that:** deploy the rolling cap (`deploy/beta-server`: security + usage limits, budget check), then `build/draft-release` with packaged real answers and installer lifecycle on Windows and macOS. Nothing else in the code is pending.
+1. ~~Cloudflare accepting requests~~ **Done 31 Oct 06:26 UTC.** Refused at 04:01 UTC, accepted at 06:26 UTC once the 30 Oct 06:00 UTC test burst left the 24-hour window, while the UTC-day totals never changed: a rolling window, confirmed.
+2. ~~Green verification~~ **Done.** Deploy run 41176622240 (`7dc07f9`, rolling cap live): security 26/26, usage limits 13/13, Workers Free, no subscriptions; the full live suite also ran (13/13, 981 Neurons) because the run's tag was read from the commit body — fixed in `d086a06` to read the subject only. Draft build run 41177279556 (`d086a06`): Linux checks; Windows and macOS packaged apps answered a real question anonymously ("56", 11 Neurons, window told 9 left), Gemini absent, installer lifecycle kept notebooks; all acceptance suites (Windows phase 3 failed once on a typing race in the test and passed on re-run; the test now waits for editor focus); draft notes written with checksums.
 3. **Feedback form** (`docs/FEEDBACK-FORM.md`): you create it, set `INKLING_FEEDBACK_URL`, and the draft is rebuilt once more (final checksums come from that build).
 4. **Children and parental consent** (all ages supported, by your decision). When a child asks the AI, Inkling sends an image of their selection, plus an anonymous installation ID and their IP address (kept only as daily-scrambled counts) to the server and Cloudflare. In the US that likely needs a parent's verifiable consent before a child under 13 uses it (COPPA), and similar rules apply under 16 in parts of the EU/UK. For 5–10 testers: invite the parent, who reads the privacy notice, agrees in writing (a reply is enough to record it), installs Inkling and clicks *Allow* themselves. Counsel should confirm this before any child tests; it's not something the app can decide.
 5. **Privacy notice with real details:** `docs/PRIVACY.md` still has placeholders for who runs the beta, a contact, and the children section. Testers (and parents) need these before installing.
