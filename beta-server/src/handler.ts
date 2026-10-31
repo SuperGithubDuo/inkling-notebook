@@ -26,7 +26,7 @@
  */
 import { aiRequestSchema, type AiRequest } from '../../src/shared/ai'
 import { taskSpec } from '../../src/main/ai/prompts'
-import type { Identity, Ledger, Quota, RefusalCode } from './ledger'
+import { UPSTREAM_RETRY_MS, type Identity, type Ledger, type Quota, type RefusalCode } from './ledger'
 import { classifyUpstream, estimateInputTokens, neuronsFor, parseUpstream, readSse, toMessages, type Rates, type Usage } from './upstream'
 
 /** The parts of the Workers AI binding the server uses. */
@@ -95,6 +95,12 @@ function identify(request: Request): Identity | Response {
   return { install, network: request.headers.get('cf-connecting-ip') ?? 'unknown' }
 }
 
+/** A short wait in minutes ("in about 15 minutes"), for pauses well under an hour. */
+const inMinutes = (seconds?: number): string => {
+  const m = Math.max(1, Math.ceil((seconds ?? 60) / 60))
+  return `in about ${m} minute${m === 1 ? '' : 's'}`
+}
+
 const inAbout = (seconds?: number): string => {
   if (!seconds || seconds < 3600) return 'within the hour'
   const h = Math.round(seconds / 3600)
@@ -112,6 +118,10 @@ function refusal(code: RefusalCode, retryAfter: number | undefined, quota?: Quot
       return problem(429, 'daily_quota', `Today’s free AI answers for your internet connection (shared by everyone on it, such as a school or office) are used up. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'global_quota':
       return problem(429, 'daily_quota', `Inkling’s free AI answers for today are used up for everyone. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
+    case 'upstream_unavailable':
+      // Not Inkling's daily allowance: a short pause after Cloudflare refused, with the real retry time.
+      // 'server' (not 'daily_quota') so the app keeps no day-long pause and the next try reaches the server.
+      return problem(503, 'server', `Inkling’s free AI is briefly unavailable from its provider. Try again ${inMinutes(retryAfter)}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'too_large':
       return problem(413, 'bad_request', 'This request is too large for the free AI. Select a smaller part of the page or ask for fewer problems.', undefined, { scope: code })
     case 'busy':
@@ -297,7 +307,7 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
 function upstreamProblem(kind: ReturnType<typeof classifyUpstream>['kind']): Response {
   switch (kind) {
     case 'free_allocation':
-      return refusal('global_quota', secondsToUtcMidnight())
+      return refusal('upstream_unavailable', UPSTREAM_RETRY_MS / 1000)
     case 'rate_limited':
       return problem(429, 'rate_limited', 'The AI service is busy. Try again in a few seconds.', 10)
     case 'capacity':
@@ -342,12 +352,6 @@ function timingSafeHexEqual(a: string, b: string): boolean {
   let diff = 0
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
   return diff === 0
-}
-
-function secondsToUtcMidnight(): number {
-  const now = Date.now()
-  const d = new Date(now)
-  return Math.ceil((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - now) / 1000)
 }
 
 function json(status: number, body: unknown): Response {

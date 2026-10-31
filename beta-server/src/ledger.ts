@@ -72,7 +72,7 @@ export interface Quota {
   resetAt: string
 }
 
-export type RefusalCode = 'install_quota' | 'network_quota' | 'global_quota' | 'rate_limited' | 'busy' | 'capacity' | 'paused' | 'too_large'
+export type RefusalCode = 'install_quota' | 'network_quota' | 'global_quota' | 'upstream_unavailable' | 'rate_limited' | 'busy' | 'capacity' | 'paused' | 'too_large'
 export type ReserveResult = { ok: true; reservationId: string; quota: Quota } | { ok: false; code: RefusalCode; retryAfter?: number; quota?: Quota }
 
 interface Day {
@@ -245,13 +245,20 @@ export class Ledger {
     return day.upstreamExhaustedAt !== undefined && this.now() - day.upstreamExhaustedAt < UPSTREAM_RETRY_MS
   }
 
+  /** Whole seconds until answers are tried again after an upstream stop (at least 1). */
+  private upstreamRetryIn(day: Day): number {
+    return Math.max(1, Math.ceil(((day.upstreamExhaustedAt ?? 0) + UPSTREAM_RETRY_MS - this.now()) / 1000))
+  }
+
   private async quotaFor(k: { install: string; network: string }, day: Day): Promise<Quota> {
     const open = await this.openReservations()
     const reserved = (pred: (r: Reservation) => boolean): number => open.filter(pred).reduce((n, r) => n + r.neurons, 0)
     const installUsed = (await this.counter(k.install)).neurons + reserved((r) => r.install === k.install)
     const networkUsed = (await this.counter(k.network)).neurons + reserved((r) => r.network === k.network)
     const globalUsed = day.global + reserved(() => true)
-    const globalLimit = this.upstreamBlocked(day) ? Math.min(this.limits.globalDailyNeurons, Math.ceil(globalUsed)) : this.limits.globalDailyNeurons
+    // Inkling's own daily figures, also while Cloudflare is briefly unavailable: that pause is reported
+    // as its own refusal (upstream_unavailable), never as today's allowance being used up.
+    const globalLimit = this.limits.globalDailyNeurons
     const left = Math.max(0, Math.min(this.limits.installDailyNeurons - installUsed, this.limits.networkDailyNeurons - networkUsed, globalLimit - globalUsed))
     return {
       installUsed: Math.round(installUsed),
@@ -308,7 +315,8 @@ export class Ledger {
       if (wn.length >= this.limits.networkPerMinute) return { ok: false, code: 'rate_limited', retryAfter: wait(wn) }
 
       const q = await this.quotaFor(k, day)
-      if (this.upstreamBlocked(day)) return { ok: false, code: 'global_quota', retryAfter: Math.min(resetIn, Math.ceil((day.upstreamExhaustedAt! + UPSTREAM_RETRY_MS - now) / 1000)), quota: q }
+      // Cloudflare reported its free allocation used up a moment ago: stop briefly for everyone, then try again.
+      if (this.upstreamBlocked(day)) return { ok: false, code: 'upstream_unavailable', retryAfter: this.upstreamRetryIn(day), quota: q }
       if (q.globalUsed + worst > q.globalLimit) return { ok: false, code: 'global_quota', retryAfter: resetIn, quota: q }
       if (expected > this.limits.installDailyNeurons) return { ok: false, code: 'too_large', quota: q }
       if (q.installUsed + expected > q.installLimit) return { ok: false, code: 'install_quota', retryAfter: resetIn, quota: q }
