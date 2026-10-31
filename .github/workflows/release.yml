@@ -46,14 +46,17 @@ jobs:
           want=both
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then want="${{ inputs.platforms }}"; fi
           case "$GITHUB_REF_NAME" in *win*) want=windows ;; *mac*) want=macos ;; esac
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then want=both; fi
+          # build/draft-release: both installers, uploaded to the DRAFT release v<version> (no git tag
+          # is created until someone presses Publish). Same effect as pushing a tag, minus the public tag.
+          draft=no
+          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_REF" == refs/heads/build/draft-release ]]; then want=both; draft=yes; fi
           case "$want" in
             windows) m='["windows-2022"]' ;;
             macos) m='["macos-15"]' ;;
             *) m='["windows-2022","macos-15"]' ;;
           esac
           echo "matrix=$m" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "publish=always" >> "$GITHUB_OUTPUT"; else echo "publish=never" >> "$GITHUB_OUTPUT"; fi
+          if [ "$draft" = yes ]; then echo "publish=always" >> "$GITHUB_OUTPUT"; else echo "publish=never" >> "$GITHUB_OUTPUT"; fi
           echo "Building for: $m"
 
   checks:
@@ -136,6 +139,17 @@ jobs:
           else
             echo "::error title=Cloud AI address missing::The build does not contain $MAIN_VITE_INKLING_BETA_URL"; exit 1
           fi
+      - name: Report where Send Feedback goes
+        shell: bash
+        run: |
+          # Testers without a GitHub account need INKLING_FEEDBACK_URL (an https form or mailto:).
+          if [ -z "$MAIN_VITE_INKLING_FEEDBACK_URL" ]; then
+            echo "::warning title=Feedback link::No INKLING_FEEDBACK_URL variable: Send Feedback opens a new GitHub issue, which needs a GitHub account. Set the variable and rebuild before inviting testers."
+          elif grep -qF "$MAIN_VITE_INKLING_FEEDBACK_URL" out/main/index.js; then
+            echo "::notice title=Feedback link built in::Send Feedback opens $MAIN_VITE_INKLING_FEEDBACK_URL"
+          else
+            echo "::error title=Feedback link missing::The build does not contain $MAIN_VITE_INKLING_FEEDBACK_URL"; exit 1
+          fi
       - run: node scripts/ci-run.mjs "licence notices" node scripts/notices.mjs
       - name: Build installers
         shell: bash
@@ -191,6 +205,14 @@ jobs:
           hash() { if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
           sums=$(cd release && for f in Inkling-Setup-*.exe Inkling-*.dmg; do if [ -f "$f" ]; then echo "$f SHA-256 $(hash "$f")"; fi; done)
           echo "::notice title=Installer download (${{ runner.os }})::$LINK%0A$(echo "$sums" | sed ':a;N;$!ba;s/\n/%0A/g')"
+          # Draft releases also get a checksum file per system, so testers can check their download.
+          if [ "${{ needs.plan.outputs.publish }}" = always ]; then
+            ver=$(node -p "require('./package.json').version")
+            f="release/Inkling-$ver-SHA256SUMS-${{ runner.os }}.txt"
+            (cd release && for x in Inkling-Setup-*.exe Inkling-*.dmg; do if [ -f "$x" ]; then echo "$(hash "$x")  $x"; fi; done) > "$f"
+            cat "$f"
+            gh release upload "v$ver" "$f" --clobber -R "$GITHUB_REPOSITORY" || echo "::warning title=Checksums::Could not attach $f to the draft release v$ver"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: inkling-${{ runner.os }}

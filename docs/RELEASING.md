@@ -23,6 +23,7 @@ GitHub's *Run workflow* button only lists workflows that exist on the **default 
 | `build/windows` | Windows installer |
 | `build/macos` | macOS installers |
 | `build/all` (or any other `build/…` name) | both |
+| `build/draft-release` | both, **and uploads them to the draft release `v<version>`** (see *Publish* below) |
 
 From a clone of the repository:
 
@@ -55,7 +56,15 @@ When a step fails, its key error lines appear as annotations on the run summary,
 
 ### Publish a release (only with approval)
 
-Tag the commit and push the tag:
+**Draft without a public tag (used for Beta 2).** Create the draft release first (GitHub → *Releases → Draft a new release*, tag `v<version>` *created on publish*, target `beta-release`, tick *Set as a pre-release*, **Save draft**), then push `build/draft-release` from the commit to ship:
+
+```bash
+git push origin origin/beta-release:refs/heads/build/draft-release --force
+```
+
+Both installers are built, tested and uploaded to that draft, with `Inkling-<version>-SHA256SUMS-Windows.txt` and `-macOS.txt`. The git tag is only created when someone presses **Publish**. Pushing again replaces the assets (and changes their checksums).
+
+**Or with a tag.** Tag the commit and push the tag (the tag is visible in the public repository at once, though the release stays a draft):
 
 ```bash
 git tag v0.2.0-beta.1
@@ -126,6 +135,22 @@ Inside it:
 - `ai-settings.json`, `gemini-key.bin` and `beta-access.bin` hold the tutor settings and encrypted keys.
 
 The Windows uninstaller is configured with `deleteAppDataOnUninstall: false`. Reinstalling, or installing a new version over an old one, opens the same library. Files saved by a newer version are never overwritten by an older one: the older app refuses to open them and asks for an update.
+
+## Watching and pausing the free AI server
+
+Push one of these branches from any branch (and delete it afterwards so it can be pushed again). The workflow is `.github/workflows/beta-server-ops.yml`; it uses the `INKLING_ADMIN_TOKEN` secret, so nobody else can run these against the server.
+
+| Push | Does |
+|---|---|
+| `ops/summary` | Read-only: today's (UTC) Neurons used of the 9,000 cap, answers, installations, networks, whether paused. Shown as the run's annotation and summary. |
+| `ops/pause` | Stops all AI answers at once (the app says the AI is paused; notebooks work). |
+| `ops/resume` | Turns AI answers back on. |
+
+```bash
+git push origin origin/beta-release:refs/heads/ops/summary && git push origin --delete ops/summary
+```
+
+On github.com: open any branch's menu, type `ops/summary`, *Create branch*, then read *Actions → AI server emergency switch*. With the token on your own computer, `cd beta-server && npm run admin -- summary` does the same. Cloudflare's dashboard (*Workers AI → Usage*) shows the account's own Neuron count.
 
 ## Release checklist
 

@@ -1,8 +1,14 @@
 # Inkling release notes
 
-## 0.2.0-beta.2 — QA fixes (draft, not published)
+## 0.2.0-beta.2 — first invited beta (draft, not published)
 
 Fixes from independent QA of the Beta 1 Windows installer. Beta 1 was never published; this build replaces it.
+
+**Install** (guide: `docs/INSTALL.md`)
+- **Windows 10/11** (x64; ARM PCs run it through Windows' emulation): `Inkling-Setup-0.2.0-beta.2-x64.exe`.
+- **Mac, Apple silicon:** `Inkling-0.2.0-beta.2-arm64.dmg`. **Mac, Intel:** `Inkling-0.2.0-beta.2-x64.dmg`. macOS 12 or later.
+- **Not code-signed:** Windows and macOS warn on first open and can't verify the publisher. Install only from the link you were sent, and compare the SHA-256 checksums.
+- Free AI tutor with no account or key: about 10 answers a day per computer, resetting at 00:00 UTC. Notebooks stay on your computer; only what you ask about is sent, after you allow it.
 
 **Fixed**
 - **Free AI answers left:** the count under the tutor now updates after every answer, including page markups, practice sets and answer checks, instead of staying the same until Inkling was restarted. It uses the AI server's own figures, refreshes after a stopped answer, and refreshes after the daily reset at midnight UTC.
@@ -15,7 +21,7 @@ Fixes from independent QA of the Beta 1 Windows installer. Beta 1 was never publ
 The first version of Inkling you can install like any other app. No developer tools are needed.
 
 **Install**
-- **Windows 10/11:** `Inkling-Setup-0.2.0-beta.1-x64.exe` (or `-arm64`). It installs for your account with no administrator rights. Uninstalling keeps your notebooks.
+- **Windows 10/11:** `Inkling-Setup-0.2.0-beta.1-x64.exe` (x64 only; ARM PCs use emulation). It installs for your account with no administrator rights. Uninstalling keeps your notebooks.
 - **macOS 12+:** `Inkling-0.2.0-beta.1-arm64.dmg` (Apple silicon) or `-x64.dmg` (Intel).
 - This beta is **not yet code-signed**, so Windows and macOS show a security prompt the first time. `INSTALL.md` explains how to open it.
 
