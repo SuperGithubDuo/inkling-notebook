@@ -1,0 +1,55 @@
+name: Cloudflare AI diagnostics
+
+# Read-mostly checks of the Cloudflare account behind Inkling's free AI, for the
+# operator. Start by pushing the branch `ops/cloudflare` (force-push a new commit
+# to run again).
+#   1. Account-wide Workers AI use for the last 48 hours, hour by hour, with
+#      UTC-day totals and the rolling 24-hour total at each hour (counts only).
+#   2. One minimal inference request straight to Workers AI ("2 + 3", at most
+#      8 tokens): whether Cloudflare accepts requests right now, and its exact
+#      error if not. A few Neurons when accepted, none when refused.
+# Never deploys, never changes the plan or the server.
+
+on:
+  push:
+    branches: ['ops/cloudflare']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Workers AI use, last 48 hours
+        shell: bash
+        run: |
+          node scripts/cf-usage.mjs 48 > /tmp/usage.json
+          if [ "$(jq -r .ok /tmp/usage.json)" != true ]; then echo "::warning title=Workers AI use::$(jq -r .error /tmp/usage.json)"; exit 0; fi
+          echo "::notice title=Workers AI use by UTC day::$(jq -c .utcDays /tmp/usage.json)"
+          echo "::notice title=Highest rolling 24-hour total::$(jq -c .peakRolling24h /tmp/usage.json)"
+          echo "::notice title=Hours with use (hour requests Neurons rolling24h)::$(jq -r '[.hours[] | "\(.hour) \(.requests) \(.neurons) \(.rolling24h)"] | join("%0A")' /tmp/usage.json)"
+          { echo "### Workers AI use (UTC hours)"; echo; echo "| Hour | Requests | Neurons | Rolling 24 h |"; echo "|---|---|---|---|";
+            jq -r '.hours[] | "| \(.hour) | \(.requests) | \(.neurons) | \(.rolling24h) |"' /tmp/usage.json; } >> "$GITHUB_STEP_SUMMARY"
+      - name: One minimal inference request
+        shell: bash
+        run: |
+          out=$(node scripts/cf-probe.mjs)
+          echo "$out"
+          if [ "$(echo "$out" | jq -r .accepted)" = true ]; then
+            echo "::notice title=Cloudflare accepts requests::$out"
+          else
+            echo "::warning title=Cloudflare refused the request::$out"
+          fi
