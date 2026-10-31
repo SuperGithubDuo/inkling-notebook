@@ -1,0 +1,44 @@
+{
+  "tests": [
+    {
+      "name": "rectangle drawing corrected selector",
+      "status": "PASS",
+      "data": {
+        "id": "0fa72d3a-d4ce-43ad-8564-02991f1366bf",
+        "createdAt": 1793411144741,
+        "author": "user",
+        "type": "shape",
+        "kind": "rect",
+        "x": 400.0000217428037,
+        "y": 299.9999922347129,
+        "width": 149.99997204496663,
+        "height": 100.00002950809079,
+        "rotation": 0,
+        "color": "#1f2430",
+        "strokeWidth": 4,
+        "fill": null,
+        "fillOpacity": 0.18
+      }
+    },
+    {
+      "name": "two page PDF import and rendered export",
+      "status": "PASS",
+      "data": {
+        "importBackgroundPixel": [
+          255,
+          204,
+          204,
+          255
+        ],
+        "exportPages": 3,
+        "bytes": 6699
+      }
+    },
+    {
+      "name": "manual backup and restore",
+      "status": "FAIL",
+      "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Storage', exact: true })\u001b[22m\n"
+    }
+  ],
+  "errors": []
+}

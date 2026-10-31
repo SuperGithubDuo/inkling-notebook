@@ -1,0 +1,44 @@
+{
+  "tests": [
+    {
+      "name": "rectangle drawing corrected selector",
+      "status": "PASS",
+      "data": {
+        "id": "099ce538-9e4f-45ca-a483-7b18e64ae070",
+        "createdAt": 1793411259341,
+        "author": "user",
+        "type": "shape",
+        "kind": "rect",
+        "x": 400.0000217428037,
+        "y": 299.9999922347129,
+        "width": 149.99997204496663,
+        "height": 100.00002950809079,
+        "rotation": 0,
+        "color": "#1f2430",
+        "strokeWidth": 4,
+        "fill": null,
+        "fillOpacity": 0.18
+      }
+    },
+    {
+      "name": "two page PDF import and rendered export",
+      "status": "PASS",
+      "data": {
+        "importBackgroundPixel": [
+          255,
+          204,
+          204,
+          255
+        ],
+        "exportPages": 3,
+        "bytes": 6699
+      }
+    },
+    {
+      "name": "manual backup and restore",
+      "status": "FAIL",
+      "error": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n\n  assert.ok(fs.existsSync(root+'/manual-backup/library.json'))\n"
+    }
+  ],
+  "errors": []
+}

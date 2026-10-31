@@ -1,0 +1,147 @@
+[
+  {
+    "file": "qa-results.json",
+    "bytes": 14347,
+    "sha256": "b28239427b045cc3217b7ec2da053975d77c566e0b3973056c8956a261f229e7"
+  },
+  {
+    "file": "qa2-results.json",
+    "bytes": 1107,
+    "sha256": "057b9141dcc94235154afe83c788a3e0c8d2e60ce2bad9a9d75336c4943a507e"
+  },
+  {
+    "file": "qa3-results.json",
+    "bytes": 1092,
+    "sha256": "487d5c4730c1f9234211fe36bd79a30d78767c2daf49032ca185cbe1b122f067"
+  },
+  {
+    "file": "backup-results.json",
+    "bytes": 15905,
+    "sha256": "6d9afe4b7983400cf802d03760bb402be5fe01d00516111e4f9e464a61b2eae1"
+  },
+  {
+    "file": "live-results.json",
+    "bytes": 14883,
+    "sha256": "22231a82a0fba522993e7d79ad1bf6a4038f4e8f5dedd95adb39f11a3556d606"
+  },
+  {
+    "file": "hash-verification.json",
+    "bytes": 226,
+    "sha256": "f74f1ad293e2b44c68fc5d2dac338c27bf72233963a4a9f1b97c5be6d3cb5ec9"
+  },
+  {
+    "file": "pdf-render-results.json",
+    "bytes": 831,
+    "sha256": "33a91eaa73d56defe8a868d0e7cdc1eebf6e3a3d39a50b0a699c1b15be5a1071"
+  },
+  {
+    "file": "draft-latest.yml",
+    "bytes": 372,
+    "sha256": "6678ad6063aa630776733b0b633d21b40cc6c5956c1105fbc25fbfa4c885776c"
+  },
+  {
+    "file": "fresh-isolated.png",
+    "bytes": 172843,
+    "sha256": "e3800eb80ffaa3d629793b30176af9cb86c1501110f7bf5ec3af2701ff2c576f"
+  },
+  {
+    "file": "mouse-ink-saved.png",
+    "bytes": 177844,
+    "sha256": "44894b363edcd1010c698dd3dcc26f6419645d130ed2051a68d270d5809e24f1"
+  },
+  {
+    "file": "lasso-moved.png",
+    "bytes": 186869,
+    "sha256": "124a7e59ce9f9269c9fd1f88e79582df5db5e24c9bc720570854b4ff88345366"
+  },
+  {
+    "file": "cloud-consent.png",
+    "bytes": 310984,
+    "sha256": "242413f7a3023f8af71e35db3aa3e1021cd4b6effca394b619835d86502cfd32"
+  },
+  {
+    "file": "anonymous-status.png",
+    "bytes": 177570,
+    "sha256": "22ec54d8d67e6f8882b3a9ec1c1f82765143e86a062f7a050eb6425ef8cc7ca5"
+  },
+  {
+    "file": "window-800x600.png",
+    "bytes": 117299,
+    "sha256": "64790c99b1094d15b5fe191ccc459eff3526f22ab012ab38fe1c3efd9d45a734"
+  },
+  {
+    "file": "reopened-notebook.png",
+    "bytes": 186618,
+    "sha256": "042a1366ff33a96c8c4218302ee4b6b64cea8fd4d7fdeee0fcb6c721ea718446"
+  },
+  {
+    "file": "rectangle-drawn.png",
+    "bytes": 182007,
+    "sha256": "aa8cd61826e8a99ad21ee76f69cd37b442842f614915194c5bdccddbd3afb4fe"
+  },
+  {
+    "file": "pdf-imported.png",
+    "bytes": 153519,
+    "sha256": "9f5ab61c63fc11fc2972538c952f19375e83dbff50472fde95aca73f4a00e8eb"
+  },
+  {
+    "file": "backup-created.png",
+    "bytes": 270155,
+    "sha256": "be2e24b9b04d60111785cb1a247e99291596c3a2f12ddb89117385cb9c6b2d12"
+  },
+  {
+    "file": "incorrect-ink.png",
+    "bytes": 181423,
+    "sha256": "f35828a6346fc522d86388e1f4d7c1e9e871305dedcad03872743bd95de199c4"
+  },
+  {
+    "file": "incorrect-reply.png",
+    "bytes": 199444,
+    "sha256": "071c23c921dc38b70caea9485095d095003b4fb5fb9b694e9ae545841f0e6c9b"
+  },
+  {
+    "file": "export-render-1.png",
+    "bytes": 28204,
+    "sha256": "9a84f75e7ee301d4b1852ef93255b3162cf4caa1bb4c2920e17e1fb33b403401"
+  },
+  {
+    "file": "export-render-2.png",
+    "bytes": 3372,
+    "sha256": "867777a62cb7ffe754970d3424865648f9307f5e66e5079a4ce5d17eb156ee09"
+  },
+  {
+    "file": "export-render-3.png",
+    "bytes": 3468,
+    "sha256": "4bcbe741d95c68fb6600e68b2ff62e935e57383871501aa1352b6725124219cf"
+  },
+  {
+    "file": "qa.cjs",
+    "bytes": 6809,
+    "sha256": "9f72a037d257864e15af51eb6cfc18f2d4eff0f8f87f839ee4e5d298c1bd3ad7"
+  },
+  {
+    "file": "qa2.cjs",
+    "bytes": 5446,
+    "sha256": "f3f1146c1e28582e9854fa913f4b6b81e3826f27db7f6180e43ea56328f87a01"
+  },
+  {
+    "file": "qa3.cjs",
+    "bytes": 5312,
+    "sha256": "d2016c8bd988ced21c88d05503295efe413045d77abdf8b89de87811822f7a21"
+  },
+  {
+    "file": "backup.cjs",
+    "bytes": 2789,
+    "sha256": "15e63023583cd1baf75e6102826997ad51baa1d6a39715ecadb0f54c8908cb47"
+  },
+  {
+    "file": "live-full.cjs",
+    "bytes": 7730,
+    "sha256": "5d1a03a30d08f649c6c9e155bf91cbfc108cedff67f1345ad130accecb7e5fc8"
+  },
+  {
+    "file": "render-pdf.cjs",
+    "bytes": 1232,
+    "sha256": "02bee8a0c2308b118cd868050204d7a8febf1bfdbb22fd3f2866b16f299b7a4e"
+  }
+]
