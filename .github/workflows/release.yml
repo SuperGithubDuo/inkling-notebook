@@ -20,7 +20,8 @@ on:
       platforms:
         description: Which installers to build
         type: choice
-        options: [windows, macos, both]
+        # draft-release: both installers, uploaded to the DRAFT release v<version> (never published).
+        options: [windows, macos, both, draft-release]
         default: windows
   push:
     branches: ['build/**']
@@ -49,7 +50,7 @@ jobs:
           # build/draft-release: both installers, uploaded to the DRAFT release v<version> (no git tag
           # is created until someone presses Publish). Same effect as pushing a tag, minus the public tag.
           draft=no
-          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_REF" == refs/heads/build/draft-release ]]; then want=both; draft=yes; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_REF" == refs/heads/build/draft-release || "$want" == draft-release ]]; then want=both; draft=yes; fi
           case "$want" in
             windows) m='["windows-2022"]' ;;
             macos) m='["macos-15"]' ;;
@@ -294,44 +295,36 @@ jobs:
           path: test-results
           if-no-files-found: ignore
 
-  # Draft builds: once every job has passed, check the draft's files and write its notes
-  # (from .github/release-notes.md, with the checksums filled in). If anything failed, the
-  # draft says DO NOT PUBLISH instead. Never publishes.
+  # Draft builds: once every job has passed, verify the draft's files and write its notes
+  # (scripts/release/finalize-draft.mjs: version, source commit, SHA-256 of each installer against
+  # the build machines' and GitHub's own digests, update metadata, one checksum file, user-friendly
+  # notes from .github/release-notes.md, and the hidden verified-build marker the download site
+  # requires). If anything failed, the draft says DO NOT PUBLISH instead. Never publishes.
   release-notes:
     name: Draft release notes
     needs: [plan, draft, checks, installers, acceptance]
     if: ${{ always() && needs.plan.outputs.publish == 'always' && needs.draft.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       FEEDBACK_URL: ${{ vars.INKLING_FEEDBACK_URL }}
+      DOWNLOAD_PAGE_URL: ${{ vars.INKLING_DOWNLOAD_PAGE_URL }}
       ALL_PASSED: ${{ needs.checks.result == 'success' && needs.installers.result == 'success' && needs.acceptance.result == 'success' }}
     steps:
       - uses: actions/checkout@v5
-      - shell: bash
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Mark the draft DO NOT PUBLISH if any job failed
+        if: env.ALL_PASSED != 'true'
+        shell: bash
         run: |
-          ver=$(node -p "require('./package.json').version"); tag="v$ver"
-          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          if [ "$ALL_PASSED" != true ]; then
-            gh release edit "$tag" -R "$GITHUB_REPOSITORY" --notes "**DO NOT PUBLISH.** A build or test failed in $run_url. Fix it and push build/draft-release again."
-            echo "::error title=Draft release::Tests failed; the draft $tag is marked DO NOT PUBLISH"; exit 1
-          fi
-          # Every file must carry this version (latest*.yml excepted), and the three installers must be there.
-          names=$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | sort)
-          echo "$names"
-          bad=$(echo "$names" | grep -v -e "^latest.*\.yml$" | grep -vF -- "-$ver-" || true)
-          [ -z "$bad" ] || { echo "::error title=Release files::Files without version $ver: $bad"; exit 1; }
-          for f in "Inkling-Setup-$ver-x64.exe" "Inkling-$ver-arm64.dmg" "Inkling-$ver-x64.dmg" "Inkling-$ver-SHA256SUMS-Windows.txt" "Inkling-$ver-SHA256SUMS-macOS.txt" latest.yml latest-mac.yml; do
-            echo "$names" | grep -qxF "$f" || { echo "::error title=Release files::$f is missing from the draft"; exit 1; }
-          done
-          mkdir -p /tmp/sums && gh release download "$tag" -R "$GITHUB_REPOSITORY" -p "*SHA256SUMS*" -D /tmp/sums --clobber
-          sums=$(cat /tmp/sums/*.txt)
-          if [ -n "$FEEDBACK_URL" ]; then fb="$FEEDBACK_URL"; else fb="*(feedback form link to be added)*"; echo "::warning title=Draft release::No INKLING_FEEDBACK_URL: the notes and the app have no feedback form yet"; fi
-          VER="$ver" SUMS="$sums" FB="$fb" SHA="$GITHUB_SHA" RUN="$run_url" node -e '
-            const fs = require("fs"); let t = fs.readFileSync(".github/release-notes.md", "utf8");
-            for (const [k, v] of Object.entries({ VERSION: process.env.VER, SHA256SUMS: process.env.SUMS, FEEDBACK: process.env.FB, COMMIT: process.env.SHA, RUN: process.env.RUN }))
-              t = t.split("{{" + k + "}}").join(v);
-            fs.writeFileSync("/tmp/notes.md", t)'
-          gh release edit "$tag" -R "$GITHUB_REPOSITORY" --notes-file /tmp/notes.md
-          echo "::notice title=Draft release ready for review::$tag: all jobs passed; notes and checksums written. Still a draft.%0A$(echo "$sums" | sed ':a;N;$!ba;s/\n/%0A/g')"
+          ver=$(node -p "require('./package.json').version")
+          gh release edit "v$ver" -R "$GITHUB_REPOSITORY" --notes "**DO NOT PUBLISH.** A build or test failed in $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Fix it and push build/draft-release again."
+          echo "::error title=Draft release::Tests failed; the draft v$ver is marked DO NOT PUBLISH"; exit 1
+      - name: Verify the draft's files and write its notes
+        if: env.ALL_PASSED == 'true'
+        run: |
+          if [ -z "$FEEDBACK_URL" ]; then echo "::warning title=Draft release::No INKLING_FEEDBACK_URL: the notes and the app have no feedback form yet"; fi
+          node scripts/release/finalize-draft.mjs

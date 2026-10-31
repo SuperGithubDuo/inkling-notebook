@@ -1,38 +1,38 @@
-# Inkling Beta 2 — tester guide
+# Install Inkling
 
-Thank you for testing Inkling, a handwriting notebook with an AI tutor. Installing and trying it takes about 10 minutes. You don't need an account or anything else installed.
-
-**Version:** `0.2.0-beta.2`. Download only from the link you were sent, and only the files named below. If a file name doesn't say `0.2.0-beta.2`, it's the wrong file.
+Installing Inkling and trying it takes about 10 minutes. You don't need an account, Node.js, npm, a GitHub account, an API key, or anything else installed.
 
 ## 1. Download the right file
 
-| Your computer | File |
+The easiest way: open the **[download page](https://supergithubduo.github.io/inkling-notebook/)** and click the button for your computer. It shows the current version and links straight to the official installer on GitHub.
+
+| Your computer | File (`<version>` is shown on the download page, e.g. `0.2.0-beta.2`) |
 |---|---|
-| Windows 10 or 11 (including ARM PCs such as Surface Pro X or Snapdragon laptops, which run it through Windows' built-in emulation) | `Inkling-Setup-0.2.0-beta.2-x64.exe` |
-| Mac with Apple silicon (*Apple menu → About This Mac* shows "Chip: Apple M…") | `Inkling-0.2.0-beta.2-arm64.dmg` |
-| Mac with an Intel processor (About This Mac shows "Processor: … Intel …") | `Inkling-0.2.0-beta.2-x64.dmg` |
+| Windows 10 or 11 (including ARM PCs such as Surface Pro X or Snapdragon laptops, which run it through Windows' built-in emulation) | `Inkling-Setup-<version>-x64.exe` |
+| Mac with Apple silicon (*Apple menu → About This Mac* shows "Chip: Apple M…") | `Inkling-<version>-arm64.dmg` |
+| Mac with an Intel processor (About This Mac shows "Processor: … Intel …") | `Inkling-<version>-x64.dmg` |
 
-Ignore the other files on the release page (`.zip`, `.blockmap`, `.yml`): Inkling uses them for update checks.
+Download only from the download page or this project's [GitHub Releases](https://github.com/SuperGithubDuo/inkling-notebook/releases). If you're on a release page, ignore the other files (`.zip`, `.blockmap`, `.yml`): Inkling uses them to check for updates.
 
-**Optional, recommended:** check that your download wasn't altered. Compare its SHA-256 with the one on the release page (also in `Inkling-0.2.0-beta.2-SHA256SUMS-Windows.txt` / `-macOS.txt`):
-- Windows (PowerShell): `Get-FileHash .\Downloads\Inkling-Setup-0.2.0-beta.2-x64.exe`
-- macOS (Terminal): `shasum -a 256 ~/Downloads/Inkling-0.2.0-beta.2-arm64.dmg`
+**Optional, recommended:** check that your download wasn't altered. Compare its SHA-256 with the one on the download page (also on the release page, and in `Inkling-<version>-SHA256SUMS.txt`):
+- Windows (PowerShell): `Get-FileHash .\Downloads\Inkling-Setup-<version>-x64.exe`
+- macOS (Terminal): `shasum -a 256 ~/Downloads/Inkling-<version>-arm64.dmg`
 
 ## 2. Install
 
 ### About the security warnings (please read)
 
 This beta is **not code-signed**. Signing is how Windows and macOS confirm who made an app and that nobody changed it. Without it, your computer can't verify the publisher, so it warns you and you have to choose to open the app yourself. That's expected for this beta, but it means you are trusting the download link rather than the operating system. So:
-- only install a file you got from the link we sent you, and check its SHA-256 if you can;
+- only install a file you got from the download page or this project's GitHub Releases, and check its SHA-256 if you can;
 - don't install it on a computer where you aren't allowed to install your own software (for example, a school- or work-managed computer) without permission;
 - if you're unsure, don't install it, and ask us.
 
-Unsigned builds also can't update themselves. When a new beta is out, Inkling tells you and links to the download.
+Unsigned builds also can't update themselves. When a new version is out, Inkling tells you and links to the download.
 
 ### Windows
 
-1. Double-click `Inkling-Setup-0.2.0-beta.2-x64.exe`. It installs for your user account only (no administrator password) and adds Start menu and desktop shortcuts.
-2. If you see **"Windows protected your PC"**: click **More info**, check that it names `Inkling-Setup-0.2.0-beta.2-x64.exe` with publisher **Unknown publisher**, then click **Run anyway**.
+1. Double-click `Inkling-Setup-<version>-x64.exe`. It installs for your user account only (no administrator password) and adds Start menu and desktop shortcuts.
+2. If you see **"Windows protected your PC"**: click **More info**, check that it names `Inkling-Setup-<version>-x64.exe` with publisher **Unknown publisher**, then click **Run anyway**.
 3. Inkling opens when installation finishes.
 
 ### macOS (12 Monterey or later)
@@ -64,7 +64,7 @@ Inkling is meant for students of every age. For a tester under 18, a parent or g
 
 ## Feedback
 
-Use **Help → Send Feedback or Report a Problem** (also in *Settings*), or the feedback link we sent you. It takes about 3 minutes. **Please don't paste or upload notebook contents, screenshots of personal notes, or anything sensitive.** Describe what happened instead.
+Use **Help → Send Feedback or Report a Problem** (also in *Settings*), or the feedback link on the [download page](https://supergithubduo.github.io/inkling-notebook/#feedback). More in [SUPPORT.md](../SUPPORT.md). It takes about 3 minutes. **Please don't paste or upload notebook contents, screenshots of personal notes, or anything sensitive.** Describe what happened instead.
 
 ## Uninstall
 

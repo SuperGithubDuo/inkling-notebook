@@ -1,0 +1,84 @@
+name: Download site
+
+# Builds the download page (site/) and, once switched on, deploys it to GitHub Pages.
+#
+# What it offers: scripts/site/build-site.mjs picks the newest PUBLISHED release that the
+# Release workflow verified (hidden marker in its notes), whose tag points at the verified
+# commit and whose installers still match the verified SHA-256. Drafts, "DO NOT PUBLISH"
+# builds and tags listed in site/config.json → "withdrawn" are never offered. With nothing
+# approved, the page says no download is available.
+#
+# When it runs: whenever a release is published, edited, unpublished or deleted (so the page
+# follows your Publish click), when the site or its rules change on main, every 3 hours as a
+# safety net, and by hand. Release events run the workflow file at the release's tag, so they
+# only hand over to a fresh run on main ("relay"); everything is built and deployed from main.
+#
+# Switching it on (needs approval; see docs/maintainers/DOWNLOAD-SITE.md):
+#   1. Settings → Pages → Source: "GitHub Actions".
+#   2. Settings → Variables → Actions: INKLING_SITE_ENABLED = true.
+# Until both are done the site is only built and checked, never deployed.
+
+on:
+  release:
+    types: [published, edited, unpublished, deleted, prereleased, released]
+  push:
+    branches: [main]
+    paths: ['site/**', 'scripts/site/**', 'scripts/release/rules.mjs', '.github/workflows/pages.yml']
+  pull_request:
+    paths: ['site/**', 'scripts/site/**', 'scripts/release/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+  schedule:
+    - cron: '23 */3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  relay:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run pages.yml -R "$GITHUB_REPOSITORY" --ref main
+
+  build:
+    if: github.event_name != 'release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Choose the release and build the page
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FEEDBACK_URL: ${{ vars.INKLING_FEEDBACK_URL }}
+        run: node scripts/site/build-site.mjs --out _site
+      - name: Check the page links only to verified installers
+        run: node scripts/site/check-site.mjs _site
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.INKLING_SITE_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -62,7 +62,17 @@ When a step fails, its key error lines appear as annotations on the run summary,
 git push origin origin/beta-release:refs/heads/build/draft-release --force
 ```
 
-The workflow creates the draft pre-release `v<version>` (or reuses it, pointing it at the new commit; it refuses to touch a published one), builds and tests both installers, and uploads them with `Inkling-<version>-SHA256SUMS-Windows.txt` and `-macOS.txt`. When every job has passed, *Draft release notes* checks that every file carries the version and writes the notes from `.github/release-notes.md` with the checksums and feedback link filled in; if anything failed, the draft says **DO NOT PUBLISH**. The git tag is only created when someone presses **Publish**. Pushing again replaces the files (and changes their checksums).
+The workflow creates the draft pre-release `v<version>` (or reuses it, pointing it at the new commit; it refuses to touch a published one), builds and tests both installers on real Windows and macOS machines, and uploads them. When every job has passed, *Draft release notes* runs `scripts/release/finalize-draft.mjs`, which:
+
+- checks the draft targets the commit that was built, and that every file carries the version;
+- downloads every file and checks each installer's SHA-256 against the one computed on the build machine and GitHub's own digest;
+- checks the update metadata (`latest.yml`, `latest-mac.yml`): right version, and the files it points at exist with the SHA-512 and size it claims;
+- replaces the two per-OS checksum files with one `Inkling-<version>-SHA256SUMS.txt`;
+- writes user-friendly notes from `.github/release-notes.md` (download table with direct links, the security prompt, checksums, privacy, feedback), ending with a hidden **verified-build marker**.
+
+If anything failed, the draft says **DO NOT PUBLISH** instead and carries no marker. The git tag is only created when someone presses **Publish**. Pushing again replaces the files (and changes their checksums).
+
+**Publishing is the approval.** Nothing publishes automatically. Review the draft, then press **Publish** (tick *Set as a pre-release* for betas). The download site then follows within minutes: it offers the newest published release that has the verified-build marker, whose tag points at the verified commit and whose installers still match the verified checksums. A release published without the marker, or one whose notes say DO NOT PUBLISH or WITHDRAWN, is never offered. To take a release off the download page, add its tag to `withdrawn` in `site/config.json` (or write WITHDRAWN in its notes). See [maintainers/DOWNLOAD-SITE.md](maintainers/DOWNLOAD-SITE.md).
 
 **Or with a tag.** Tag the commit and push the tag (the tag is visible in the public repository at once, though the release stays a draft):
 
@@ -71,7 +81,7 @@ git tag v0.2.0-beta.1
 git push origin v0.2.0-beta.1
 ```
 
-The workflow builds both installers and uploads them to a **draft** GitHub release, together with the `latest*.yml` files that in-app updates read. A draft is invisible to users. Review it, add the release notes (`RELEASE_NOTES.md`), tick *Set as a pre-release* for betas, then press **Publish**. Only published releases reach users or their update checks.
+The workflow builds both installers and uploads them to a **draft** GitHub release, together with the `latest*.yml` files that in-app updates read. A draft is invisible to users. Review it, tick *Set as a pre-release* for betas, then press **Publish**. Only published releases reach users or their update checks.
 
 ### Repository settings the workflow reads
 
@@ -79,6 +89,8 @@ The workflow builds both installers and uploads them to a **draft** GitHub relea
 |---|---|---|
 | `INKLING_BETA_URL` | Variable | The cloud AI beta server built into the app (`https://inkling-ai-beta.<you>.workers.dev`). Leave unset to ship without cloud AI. |
 | `INKLING_FEEDBACK_URL` | Variable | Where *Send feedback* goes: an `https://` form or a `mailto:` address. The default is a new GitHub issue, which needs a GitHub account. |
+| `INKLING_DOWNLOAD_PAGE_URL` | Variable | Optional. The download page linked from release notes. Default `https://supergithubduo.github.io/inkling-notebook/`. |
+| `INKLING_SITE_ENABLED` | Variable | `true` lets the *Download site* workflow deploy to GitHub Pages. Unset: the site is built and checked but not deployed. |
 | `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD` | Secrets | Developer ID Application certificate (`.p12`, base64-encoded) and its password. |
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | Secrets | Notarization with Apple. |
 | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` | Secrets | Windows code-signing certificate (`.pfx`, base64) and password. |
