@@ -22,10 +22,26 @@ Status as of 31 Oct 2026, 01:00 UTC, on branch `beta-release`, commit `4ea46be` 
 
 **Cloudflare is still refusing.** In the post-deploy run (41152494794) every real request, on production and on the separate temporary limits server, got the strict `4006` refusal; Cloudflare's count rose by 2 requests and 0 Neurons. So Workers AI itself is withholding the account's free allocation, not a misread error. Likely cause: the previous UTC day's heavy test usage (production plus temporary limits servers share the account's 10,000) with Cloudflare's reset lagging 00:00 UTC; unconfirmed. Live inference, the limit checks and the packaged/lifecycle tests can only pass once Cloudflare answers again; the server now retries automatically every 15 minutes.
 
+**Diagnosis (31 Oct 01:27 UTC, `ops/cloudflare`, run on `2ddb474`).** Cloudflare's own hourly counts for the whole account (all workers, all tests):
+
+| UTC hour | Requests | Neurons | Rolling 24 h |
+|---|---|---|---|
+| 30 Oct 03:00 | 17 | 1,170 | 1,170 |
+| 30 Oct 05:00 | 2 | 22 | 1,192 |
+| 30 Oct 06:00 | 182 | 6,833 | 8,025 |
+| 30 Oct 07:00 | 1 | 11 | 8,036 |
+| 30 Oct 15:00 | 3 | 310 | 8,345 |
+| 30 Oct 23:00 | 40 | 1,388 | 9,733 |
+| 31 Oct 00:00 | 46 | 1,648 | 11,382 |
+
+By UTC calendar day: 30 Oct 9,734, 31 Oct 1,648 — neither reaches 10,000, yet a minimal direct request (2 + 3, 8 tokens) was refused at 01:27 UTC with HTTP 429, code 4006, "you have used up your daily free allocation of 10,000 neurons". The rolling 24-hour total was 11,382. So the allocation does **not** behave as a midnight-UTC calendar day; it matches a rolling (or lagging) window. The 6,833-Neuron burst on 30 Oct 06:00 UTC (test runs) leaves a rolling window at 06:00–07:00 UTC on 31 Oct, after which the total drops to about 3,400. Prediction to test: refused at 04:00 UTC, accepted from about 07:00 UTC. Probes are scheduled at 04:00, 06:25 and 07:25 UTC (one 8-token request each).
+
+**Consequence for the beta:** the server's 9,000-Neuron cap per UTC day doesn't stop Cloudflare's limit: heavy use late one UTC day plus normal use early the next can exceed 10,000 in 24 hours, and test runs share the same allowance. The 15-minute retry keeps such an outage short and accurate rather than day-long; it does not prevent it.
+
 **Usage monitor:** push `ops/summary` (read-only; `docs/RELEASING.md`). Tested: "1330 of 9000 Neurons used (14%), 19 answers, 6 installations, 3 networks, paused=false".
 
 ### Must fix before inviting testers
-1. **Green verification once Cloudflare answers again:** re-run `deploy/beta-server` (security, live model, limits 13/13, plan) and then `build/draft-release` (packaged real answer on Windows and macOS, installer lifecycle). Then find out from Cloudflare's dashboard why the allocation was withheld, and keep test runs from using the testers' daily allowance.
+1. **Green verification once Cloudflare answers again:** re-run `deploy/beta-server` (security, live model, limits 13/13, plan) and then `build/draft-release` (packaged real answer on Windows and macOS, installer lifecycle). Then decide how to keep test runs from using the testers' allowance (e.g. a separate Cloudflare account for CI, or no full test runs within 24 h of testers' use), and whether the server cap should also count a rolling 24 hours (a change to the ledger, not made).
 2. **Feedback form** (`docs/FEEDBACK-FORM.md`): create it, set `INKLING_FEEDBACK_URL`, rebuild the draft; annotation *Feedback link built in*.
 3. **Age policy** for the beta (18+ is simplest; under-18 or school use needs parental/school consent wording and counsel). State it in the invitation.
 4. **Privacy notice:** `docs/PRIVACY.md` is a draft with placeholders (who we are, contact, children). Testers need at least a named contact and the age rule; counsel before any students.
