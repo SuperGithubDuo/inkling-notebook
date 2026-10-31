@@ -4,7 +4,7 @@ name: Beta AI server
 # it against the REAL model (@cf/qwen/qwen3.8-27b), from GitHub's runners:
 #   1. security checks on the deployed server (scripts/abuse-check.mjs security);
 #   2. the real-model test, anonymously, as a freshly installed app (~1,100 Neurons:
-#      ONLY when the commit message contains "[live]" or the manual run asks for it);
+#      ONLY when the commit SUBJECT line contains the live tag or the manual run asks for it);
 #   3. usage-limit checks on a TEMPORARY copy of the server with tiny limits
 #      (installation, network, per-minute, one-at-a-time, global cap under a
 #      burst, pause), deleted again at the end.
@@ -162,8 +162,10 @@ jobs:
           LIVE_INPUT: ${{ inputs.live_test }}
         run: |
           ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          # Tags count only in the commit's subject line (a body may mention them in passing).
+          SUBJECT=${MSG%%$'\n'*}
           live=no
-          if [[ "$MSG" == *"[live]"* || "$LIVE_INPUT" == true ]]; then live=yes; fi
+          if [[ "$SUBJECT" == *"[live]"* || "$LIVE_INPUT" == true ]]; then live=yes; fi
           echo "live=$live" >> "$GITHUB_OUTPUT"
           planned=500; [ "$live" = yes ] && planned=$((planned + 1100))
           usage=$(node scripts/cf-usage.mjs 25)
@@ -174,7 +176,7 @@ jobs:
           line="last 24 h: Cloudflare $cf Neurons, of which the server served $served, tests $tests; this run plans ~$planned; test budget 1000"
           if [ $((tests + planned)) -le 1000 ]; then
             echo "::notice title=AI test budget::$line"
-          elif [[ "$MSG" == *"[no-testers-yet]"* ]]; then
+          elif [[ "$SUBJECT" == *"[no-testers-yet]"* ]]; then
             echo "::warning title=AI test budget exceeded (allowed: [no-testers-yet])::$line. Only acceptable while no testers have been invited."
           else
             echo "::error title=AI test budget exceeded::$line. Real-model tests skipped to keep testers' answers. Re-run later, or add [no-testers-yet] to the commit message only if no testers are using Inkling."
@@ -197,7 +199,7 @@ jobs:
           echo "day_start=$(date -u +%Y-%m-%dT00:00:00Z)" >> "$GITHUB_ENV"
 
       - name: Live test against the real model (anonymous, as a fresh install)
-        # Opt-in: "[live]" in the commit message or the manual run's live_test input (~1,100 Neurons).
+        # Opt-in: the live tag in the commit subject, or the manual run's live_test input (~1,100 Neurons).
         if: steps.budget.outputs.ok == 'yes' && steps.budget.outputs.live == 'yes'
         shell: bash
         env:
