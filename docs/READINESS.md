@@ -1,6 +1,6 @@
 # Release readiness: public beta, 7 November 2026
 
-Status as of 30 Oct 2026, 07:30 UTC, on branch `beta-release`, commit `974177b`. Builds run on GitHub Actions; results come from the check runs on that commit.
+Status as of 31 Oct 2026, 01:00 UTC, on branch `beta-release`, commit `4ea46be` (Beta 2). Earlier entries refer to `974177b` (Beta 1). Builds run on GitHub Actions; results come from the check runs on that commit.
 
 ## ✅ Verified (automated, on real Windows and macOS runners)
 
@@ -28,6 +28,15 @@ Bugs found and fixed by these runs:
 - Usage limits on a temporary copy with tiny limits, against the real model: 13/13 (installation quota, one at a time, network and installation per-minute limits, network quota with fresh installation IDs, global cap under a 12-request burst ×2, pause and resume, no identities in the summary). The copy is deleted afterwards.
 - Real-model test, anonymous as a fresh install: 13/13 answers, all checks passed, about 80 Neurons per typical interaction.
 - The account has no subscriptions (Workers Free) before and after.
+
+**31 Oct, Beta 2 QA fixes (`0.2.0-beta.2`, commits `e110268` + `4ea46be`).** Fixes from Hermes's QA of the Beta 1 installer:
+- **AI answers-left count:** now pushed to the window after every server report (chat, markup, practice, check, refusals), refreshed with a free status check after a stopped answer, and re-read after the UTC reset. Regression tests fail on Beta 1 code and pass now: unit (`beta.test.ts`, 5 tests) and the cloud acceptance test reading the visible count in the real app.
+- **Chats are session-only:** the chat says so; README and release notes too.
+- Linux: typecheck, 222/222 unit tests, build, all 9 acceptance suites passed.
+- Windows (run 41147420893): installer built; unit tests, packaged app, installer lifecycle and all 11 acceptance suites passed. The installed app answered a real question on the public server and the window received the new count (9 left) with the answer.
+- `Inkling-Setup-0.2.0-beta.2-x64.exe` SHA-256 `47fcc43b5d60ef22c9a69f48a2592d3897d6ac6e46a548a2ec1a88b2e13969fa`. Not published.
+- Cloud server redeployed unchanged: security 26/26, real model 13/13, limits 13/13, no subscriptions. (A first run straddling 00:00 UTC failed one per-minute check because the day rollover clears minute counters; the re-run passed.)
+- Hands-on pass: `docs/BETA2-CHECKLIST.md`.
 
 ## ⚠️ Not verified yet
 
