@@ -2,6 +2,41 @@
 
 Status as of 31 Oct 2026, 01:00 UTC, on branch `beta-release`, commit `4ea46be` (Beta 2). Earlier entries refer to `974177b` (Beta 1). Builds run on GitHub Actions; results come from the check runs on that commit.
 
+## Beta 2 for 5–10 invited testers (31 Oct 2026, 00:40 UTC)
+
+**Draft pre-release `v0.2.0-beta.2`** (no git tag until published) was built from `f00f3dd` by pushing `build/draft-release` (run 41149694675). It is marked **DO NOT PUBLISH**.
+
+| Check | Result |
+|---|---|
+| Version `0.2.0-beta.2` (package.json; About in the packaged app) | ✅ |
+| Linux checks; Windows and macOS acceptance suites (phase 1–4, regressions, Ollama, cloud stand-in incl. allowance count, layout, release, large notebook) | ✅ all passed |
+| Installers built from one commit; every file name carries `0.2.0-beta.2` (`.exe` x64, `.dmg` arm64 + x64, update `.zip`/`.blockmap`/`latest*.yml`) | ✅ uploaded to the draft |
+| Packaged app answers a real question anonymously (Windows, macOS) | ❌ **AI server refused: "used up for everyone"** |
+| Installer lifecycle (notebooks survive update/uninstall/reinstall) | ⏸ not reached (runs after the step above) |
+| Server redeploy: security 21/22, limits 5/13, plan Workers Free, Cloudflare count 1,648 Neurons | ❌ same cause |
+| `INKLING_FEEDBACK_URL` | ⚠️ not set: *Send Feedback* opens a GitHub issue |
+
+**Cause:** just after 00:00 UTC one Workers AI error was classified as "Cloudflare's free allocation used up", and the server latched that for the rest of the UTC day (global limit pinned at 1,330 Neurons) although Cloudflare had counted only 1,648 of 10,000. One error can close the AI for every tester for up to 24 h. Fix on branch `fix/upstream-exhausted-retry` (`c005cf5`: 15-minute stop then retry; only 4006 counts; unit tests), **not merged or deployed**. The latch clears at 00:00 UTC on 1 Nov either way.
+
+**Usage monitor:** push `ops/summary` (read-only; `docs/RELEASING.md`). Tested: "1330 of 9000 Neurons used (14%), 19 answers, 6 installations, 3 networks, paused=false".
+
+### Must fix before inviting testers
+1. **AI server latch** (above): approve and deploy the fix (or accept the risk), then re-run `deploy/beta-server` and `build/draft-release`; both must be green (packaged real answer on Windows and macOS, installer lifecycle, limits 13/13, security).
+2. **Feedback form** (`docs/FEEDBACK-FORM.md`): create it, set `INKLING_FEEDBACK_URL`, rebuild the draft; annotation *Feedback link built in*.
+3. **Age policy** for the beta (18+ is simplest; under-18 or school use needs parental/school consent wording and counsel). State it in the invitation.
+4. **Privacy notice:** `docs/PRIVACY.md` is a draft with placeholders (who we are, contact, children). Testers need at least a named contact and the age rule; counsel before any students.
+5. **Hands-on install** on one real Windows PC and one real Mac from the draft's files (SmartScreen / Gatekeeper prompts, pen, consent, AI count). CI has no real pen, touch or download prompts.
+6. **A contact for testers** (who answers problems and data questions). Not invented here.
+
+### Before sharing with students or publicly (not needed for 5–10 adult testers who agree)
+- Code signing (Apple Developer ID + notarization; Windows certificate or Azure Trusted Signing).
+- Trademark check on "Inkling" (Wacom Inkling; Inkling digital textbooks) before any public announcement.
+- Counsel review: COPPA / FERPA / GDPR age of consent, school agreement; moderation of AI answers.
+- Merge to `main` (only with approval).
+
+### Optional
+- Native Windows arm64 build; Intel-Mac and Windows 10 testers; a scheduled usage summary (scheduled workflows only run from `main`); a dedicated domain instead of `workers.dev`.
+
 ## ✅ Verified (automated, on real Windows and macOS runners)
 
 | Item | Windows Server 2022 (x64) | macOS 15 (Apple silicon) | Linux |
