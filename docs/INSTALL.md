@@ -56,7 +56,11 @@ Unsigned builds also can't update themselves. When a new beta is out, Inkling te
 
 **The AI only sees what you send it.** When you ask the tutor something, Inkling sends your question plus the context shown in the box: an image of your lasso selection, or the current page's typed text. Nothing is sent until you have clicked *Allow* and asked. It goes over an encrypted connection to Inkling's server on Cloudflare, which gets an answer from an AI model (Qwen) on Cloudflare Workers AI. We don't store your questions, images or answers, and Cloudflare says it doesn't keep them or train on them. **Please don't send personal or sensitive information.** You can withdraw permission in *Settings → AI Tutor*; *Help → Privacy* explains the details.
 
-**The AI is free but limited.** About 10 answers a day per computer, and about 110 a day shared by all testers. Allowances reset at 00:00 UTC (4 pm Pacific in winter, 5 pm in summer). When they run out, the tutor pauses and everything else works. It never costs you anything. AI answers can be wrong — check them.
+**The AI is free but limited.** About 10 answers a day per computer, and about 110 a day shared by all testers. Each computer's allowance resets at 00:00 UTC (4 pm Pacific in winter, 5 pm in summer); the shared total counts the last 24 hours. When they run out, or the AI provider is briefly unavailable, the tutor pauses and everything else works. It never costs you anything. AI answers can be wrong — check them.
+
+## Younger testers
+
+Inkling is meant for students of every age. For a tester under 18, a parent or guardian should read this guide and the privacy notice first, install Inkling, and be the one who clicks **Allow** for the AI — or keep the AI off. Remind younger testers never to put names, addresses, photos or other personal details on a page they ask the AI about.
 
 ## Feedback
 

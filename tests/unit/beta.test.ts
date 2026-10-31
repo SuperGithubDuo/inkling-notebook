@@ -215,15 +215,37 @@ describe('ledger', () => {
     expect((await ledger.summary()).upstreamExhausted).toBe(false)
   })
 
-  it('a used-up Inkling allowance for everyone still waits until the UTC reset', async () => {
-    const tight = new Ledger(memoryStorage(), { ...limits, globalDailyNeurons: 100 }, () => t)
-    const r = await tight.reserve(ada, 100)
+  it('the whole-service cap counts the last 24 hours, across the UTC midnight', async () => {
+    const roomy = { ...limits, globalDailyNeurons: 1000, installDailyNeurons: 1000, networkDailyNeurons: 2000 }
+    t = nextUtcMidnight(t) - 3_600_000 + 60_000 // 23:01 UTC
+    const tight = new Ledger(memoryStorage(), roomy, () => t)
+    const r = await tight.reserve(ada, 800)
     if (!r.ok) throw new Error()
-    await tight.settle(r.reservationId, 100)
-    const refused = await tight.reserve(bo, 1)
-    expect(refused).toMatchObject({ ok: false, code: 'global_quota', retryAfter: Math.ceil((nextUtcMidnight(t) - t) / 1000) })
-    t += UPSTREAM_RETRY_MS
-    expect(await tight.reserve(bo, 1)).toMatchObject({ ok: false, code: 'global_quota' })
+    await tight.settle(r.reservationId, 800)
+    // 01:01 UTC: a new day for each computer's allowance, but the service's last 24 hours still hold the 800.
+    t += 2 * 3_600_000
+    expect((await tight.quota(bo)).globalUsed).toBe(800)
+    const refused = await tight.reserve(bo, 300)
+    expect(refused).toMatchObject({ ok: false, code: 'global_quota' })
+    // Room returns when the 23:00 hour leaves the window: 25 h after its start, i.e. at 00:00 the day after.
+    const wait = refused.ok ? 0 : refused.retryAfter!
+    expect(wait).toBe((23 * 3_600_000 - 60_000) / 1000)
+    const fits = await tight.reserve(bo, 200)
+    expect(fits.ok).toBe(true)
+    if (fits.ok) await tight.settle(fits.reservationId, 0)
+    t += wait * 1000 - 1000
+    expect(await tight.reserve(bo, 300)).toMatchObject({ ok: false, code: 'global_quota' })
+    t += 1000
+    expect((await tight.reserve(bo, 300)).ok).toBe(true)
+  })
+
+  it('a reservation left unsettled overnight still counts against the rolling cap', async () => {
+    const roomy = { ...limits, globalDailyNeurons: 1000, installDailyNeurons: 1000, networkDailyNeurons: 2000 }
+    t = nextUtcMidnight(t) - 60_000 // 23:59 UTC
+    const tight = new Ledger(memoryStorage(), roomy, () => t)
+    expect((await tight.reserve(ada, 700)).ok).toBe(true)
+    t += 2 * 3_600_000 // the reservation expired unsettled, on another UTC day
+    expect((await tight.quota(bo)).globalUsed).toBe(700)
   })
 
   it('a day closed by an older server version is open again', async () => {
@@ -561,14 +583,15 @@ describe('AI server', () => {
     expect(server.ai.calls).toHaveLength(2)
   })
 
-  it('a used-up Inkling allowance for everyone is a daily quota until the UTC reset', async () => {
+  it('a used-up Inkling allowance for everyone is a quota with the time until the last 24 hours have room', async () => {
     await start({ globalDailyNeurons: 300 })
     server.ai.reply({ text: 'x', usage: { inputTokens: 1000, outputTokens: 600 } })
     await post(server, chat('one'))
     const r = await post(server, { task: 'practice', turns: [{ role: 'user', parts: [{ text: 'Two problems.' }] }] }, { install: INSTALL_B, ip: '192.0.2.5' })
     expect(r.json.error).toMatchObject({ code: 'daily_quota', scope: 'global_quota' })
-    const toMidnight = (Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1) - Date.now()) / 1000
-    expect(Math.abs(r.json.error.retryAfter - toMidnight)).toBeLessThan(5)
+    // 24–25 hours: until this hour's use leaves the rolling window, not the next UTC midnight.
+    expect(r.json.error.retryAfter).toBeGreaterThan(24 * 3600)
+    expect(r.json.error.retryAfter).toBeLessThanOrEqual(25 * 3600)
     expect(r.json.error.message).toMatch(/used up for everyone/)
   })
 

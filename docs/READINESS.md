@@ -40,15 +40,20 @@ By UTC calendar day: 30 Oct 9,734, 31 Oct 1,648 — neither reaches 10,000, yet 
 
 **Usage monitor:** push `ops/summary` (read-only; `docs/RELEASING.md`). Tested: "1330 of 9000 Neurons used (14%), 19 answers, 6 installations, 3 networks, paused=false".
 
-### Must fix before inviting testers
-1. **Green verification once Cloudflare answers again:** re-run `deploy/beta-server` (security, live model, limits 13/13, plan) and then `build/draft-release` (packaged real answer on Windows and macOS, installer lifecycle). Then decide how to keep test runs from using the testers' allowance (e.g. a separate Cloudflare account for CI, or no full test runs within 24 h of testers' use), and whether the server cap should also count a rolling 24 hours (a change to the ledger, not made).
-2. **Feedback form** (`docs/FEEDBACK-FORM.md`): create it, set `INKLING_FEEDBACK_URL`, rebuild the draft; annotation *Feedback link built in*.
-3. **Age policy** for the beta (18+ is simplest; under-18 or school use needs parental/school consent wording and counsel). State it in the invitation.
-4. **Privacy notice:** `docs/PRIVACY.md` is a draft with placeholders (who we are, contact, children). Testers need at least a named contact and the age rule; counsel before any students.
-5. **Hands-on install** on one real Windows PC and one real Mac from the draft's files (SmartScreen / Gatekeeper prompts, pen, consent, AI count). CI has no real pen, touch or download prompts.
-6. **A contact for testers** (who answers problems and data questions). Not invented here.
+### Rolling-window protection (31 Oct, on `beta-release`, deploys with the next `deploy/beta-server`)
+- **Server:** the whole-service cap (9,000 Neurons, unchanged) now counts the last 24 hours in hourly buckets that stay counted 25 hours, instead of the UTC calendar day; per-computer and per-network allowances still reset at 00:00 UTC. A refusal at the cap gives the time until enough old use leaves the window. Unsettled reservations count even across midnight. Unit tests 227/227; the 3 new ones fail on the old ledger.
+- **Tests:** the full real-model suite (~1,100 Neurons) is now opt-in (`[live]`). Every deploy run first measures what tests used in the last 24 hours (Cloudflare's count minus the server's) and fails rather than let tests exceed 1,000 Neurons, the share left beside testers' 9,000. `[no-testers-yet]` overrides it, only before invitations. A build's packaged-app check uses about 20 Neurons per system.
 
-### Before sharing with students or publicly (not needed for 5–10 adult testers who agree)
+### Exactly what blocks the first 5–10 testers
+1. **Cloudflare must accept requests again.** It refuses (4006) until enough of the 30 Oct test usage leaves its rolling window; expected about 06:00–07:00 UTC 31 Oct (11 pm–midnight Pacific). Probes are scheduled.
+2. **Green verification after that:** deploy the rolling cap (`deploy/beta-server`: security + usage limits, budget check), then `build/draft-release` with packaged real answers and installer lifecycle on Windows and macOS. Nothing else in the code is pending.
+3. **Feedback form** (`docs/FEEDBACK-FORM.md`): you create it, set `INKLING_FEEDBACK_URL`, and the draft is rebuilt once more (final checksums come from that build).
+4. **Children and parental consent** (all ages supported, by your decision). When a child asks the AI, Inkling sends an image of their selection, plus an anonymous installation ID and their IP address (kept only as daily-scrambled counts) to the server and Cloudflare. In the US that likely needs a parent's verifiable consent before a child under 13 uses it (COPPA), and similar rules apply under 16 in parts of the EU/UK. For 5–10 testers: invite the parent, who reads the privacy notice, agrees in writing (a reply is enough to record it), installs Inkling and clicks *Allow* themselves. Counsel should confirm this before any child tests; it's not something the app can decide.
+5. **Privacy notice with real details:** `docs/PRIVACY.md` still has placeholders for who runs the beta, a contact, and the children section. Testers (and parents) need these before installing.
+6. **A named contact** for problems and data questions (also deleting a tester's feedback). Not invented here.
+7. **Hands-on install** of the final files on one real Windows PC and one real Mac (security prompts, pen, consent dialog, AI count). CI has no real pens, touch or download prompts.
+
+### Before sharing with schools or publicly
 - Code signing (Apple Developer ID + notarization; Windows certificate or Azure Trusted Signing).
 - Trademark check on "Inkling" (Wacom Inkling; Inkling digital textbooks) before any public announcement.
 - Counsel review: COPPA / FERPA / GDPR age of consent, school agreement; moderation of AI answers.

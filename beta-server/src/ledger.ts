@@ -39,7 +39,11 @@ export interface LedgerStorage {
 }
 
 export interface LedgerLimits {
-  /** Daily cap for the whole service, below Cloudflare's free 10,000. */
+  /**
+   * Cap for the whole service over ANY 24 hours (not only a UTC day), below Cloudflare's
+   * free 10,000. Cloudflare counts its allocation over a rolling window, so a calendar-day
+   * cap alone let late use one day plus early use the next exceed it.
+   */
   globalDailyNeurons: number
   installDailyNeurons: number
   networkDailyNeurons: number
@@ -135,7 +139,18 @@ export function networkOf(ip: string): string {
     .join(':')}::/64`
 }
 
+/** One hour, the width of a rolling-usage bucket. */
+const HOUR_MS = 3_600_000
+/**
+ * How long a bucket's Neurons count against the whole-service cap: 24 hours from the END of
+ * its hour, so use anywhere in the hour is still counted a full 24 hours later (slightly
+ * stricter than Cloudflare's own window).
+ */
+export const ROLLING_WINDOW_MS = 25 * HOUR_MS
+
 export class Ledger {
+  /** Whole-service Neurons per hour (key: the hour's start in ms), for the rolling cap. */
+  private hourState: Record<string, number> | null = null
   private dayState: Day | null = null
   private reservations: Reservation[] | null = null
   private paused: boolean | null = null
@@ -223,6 +238,41 @@ export class Ledger {
     await this.storage.put(key, { neurons: c.neurons + neurons, requests: c.requests + 1 })
   }
 
+  /** The whole service's Neurons per hour still inside the rolling window (older hours dropped). */
+  private async hours(): Promise<Record<string, number>> {
+    this.hourState ??= (await this.storage.get<Record<string, number>>('hours')) ?? {}
+    const now = this.now()
+    for (const k of Object.keys(this.hourState)) if (Number(k) + ROLLING_WINDOW_MS <= now) delete this.hourState[k]
+    return this.hourState
+  }
+
+  private async chargeGlobal(neurons: number, at: number): Promise<void> {
+    if (!(neurons > 0)) return
+    const h = await this.hours()
+    const k = String(Math.floor(at / HOUR_MS) * HOUR_MS)
+    h[k] = (h[k] ?? 0) + neurons
+    await this.storage.put('hours', h)
+  }
+
+  private rollingUsed(h: Record<string, number>): number {
+    return Object.values(h).reduce((n, v) => n + v, 0)
+  }
+
+  /** Seconds until `need` more Neurons fit under the whole-service cap, as old hours leave the window. */
+  private secondsUntilRoom(h: Record<string, number>, used: number, need: number): number {
+    const now = this.now()
+    let left = used
+    const hoursHeld = Object.keys(h).map(Number).sort((a, b) => a - b)
+    for (const k of hoursHeld) {
+      left -= h[String(k)]!
+      if (left + need <= this.limits.globalDailyNeurons) return Math.max(60, Math.ceil((k + ROLLING_WINDOW_MS - now) / 1000))
+    }
+    // Answers in progress are in the way: soon. Otherwise the request is bigger than any room left once
+    // the window is empty (only with tiny caps): the latest held hour's exit, the furthest honest estimate.
+    const last = hoursHeld.at(-1)
+    return last === undefined ? 60 : Math.max(60, Math.ceil((last + ROLLING_WINDOW_MS - now) / 1000))
+  }
+
   /** Releases reservations that were never settled; they stay charged. */
   private async expire(day: Day): Promise<void> {
     const open = await this.openReservations()
@@ -230,6 +280,8 @@ export class Ledger {
     const stale = open.filter((r) => now - r.at >= this.limits.reservationTtlMs || r.day !== day.day)
     if (!stale.length) return
     for (const r of stale) {
+      // Whatever day it started on, the model may have worked: it counts against the rolling cap.
+      await this.chargeGlobal(r.neurons, r.at)
       if (r.day !== day.day) continue
       await this.charge(r.install, r.neurons)
       await this.charge(r.network, r.neurons)
@@ -250,12 +302,13 @@ export class Ledger {
     return Math.max(1, Math.ceil(((day.upstreamExhaustedAt ?? 0) + UPSTREAM_RETRY_MS - this.now()) / 1000))
   }
 
-  private async quotaFor(k: { install: string; network: string }, day: Day): Promise<Quota> {
+  private async quotaFor(k: { install: string; network: string }): Promise<Quota> {
     const open = await this.openReservations()
     const reserved = (pred: (r: Reservation) => boolean): number => open.filter(pred).reduce((n, r) => n + r.neurons, 0)
     const installUsed = (await this.counter(k.install)).neurons + reserved((r) => r.install === k.install)
     const networkUsed = (await this.counter(k.network)).neurons + reserved((r) => r.network === k.network)
-    const globalUsed = day.global + reserved(() => true)
+    // The whole service: the last 24 hours (rolling), not only today, plus answers in progress.
+    const globalUsed = this.rollingUsed(await this.hours()) + reserved(() => true)
     // Inkling's own daily figures, also while Cloudflare is briefly unavailable: that pause is reported
     // as its own refusal (upstream_unavailable), never as today's allowance being used up.
     const globalLimit = this.limits.globalDailyNeurons
@@ -278,7 +331,7 @@ export class Ledger {
     return this.exclusive(async () => {
       const day = await this.today()
       await this.expire(day)
-      return this.quotaFor(await this.keys(id, day), day)
+      return this.quotaFor(await this.keys(id, day))
     })
   }
 
@@ -314,10 +367,10 @@ export class Ledger {
       if (wi.length >= this.limits.installPerMinute) return { ok: false, code: 'rate_limited', retryAfter: wait(wi) }
       if (wn.length >= this.limits.networkPerMinute) return { ok: false, code: 'rate_limited', retryAfter: wait(wn) }
 
-      const q = await this.quotaFor(k, day)
+      const q = await this.quotaFor(k)
       // Cloudflare reported its free allocation used up a moment ago: stop briefly for everyone, then try again.
       if (this.upstreamBlocked(day)) return { ok: false, code: 'upstream_unavailable', retryAfter: this.upstreamRetryIn(day), quota: q }
-      if (q.globalUsed + worst > q.globalLimit) return { ok: false, code: 'global_quota', retryAfter: resetIn, quota: q }
+      if (q.globalUsed + worst > q.globalLimit) return { ok: false, code: 'global_quota', retryAfter: this.secondsUntilRoom(await this.hours(), q.globalUsed, worst), quota: q }
       if (expected > this.limits.installDailyNeurons) return { ok: false, code: 'too_large', quota: q }
       if (q.installUsed + expected > q.installLimit) return { ok: false, code: 'install_quota', retryAfter: resetIn, quota: q }
       if (q.networkUsed + expected > q.networkLimit) return { ok: false, code: 'network_quota', retryAfter: resetIn, quota: q }
@@ -327,7 +380,7 @@ export class Ledger {
       await this.saveReservations()
       wi.push(now)
       wn.push(now)
-      return { ok: true, reservationId: r.id, quota: await this.quotaFor(k, day) }
+      return { ok: true, reservationId: r.id, quota: await this.quotaFor(k) }
     })
   }
 
@@ -347,6 +400,7 @@ export class Ledger {
         await this.saveReservations()
         // A request the model never started costs nothing.
         const cost = opts.failedBeforeModel ? 0 : Math.max(0, neurons ?? r.neurons)
+        await this.chargeGlobal(cost, r.at)
         if (r.day === day.day) {
           await this.charge(r.install, cost)
           await this.charge(r.network, cost)
@@ -359,15 +413,17 @@ export class Ledger {
   }
 
   /** Today's totals for the operator; no identities. */
-  summary(): Promise<{ day: string; globalUsed: number; globalLimit: number; answers: number; installations: number; networks: number; answering: number; upstreamExhausted: boolean; paused: boolean; limits: LedgerLimits }> {
+  summary(): Promise<{ day: string; globalUsed: number; globalLimit: number; todayUsed: number; answers: number; installations: number; networks: number; answering: number; upstreamExhausted: boolean; paused: boolean; limits: LedgerLimits }> {
     return this.exclusive(async () => {
       const day = await this.today()
       await this.expire(day)
       const open = await this.openReservations()
       return {
         day: day.day,
-        globalUsed: Math.round(day.global + open.reduce((n, r) => n + r.neurons, 0)),
+        // The capped figure: the last 24 hours plus answers in progress.
+        globalUsed: Math.round(this.rollingUsed(await this.hours()) + open.reduce((n, r) => n + r.neurons, 0)),
         globalLimit: this.limits.globalDailyNeurons,
+        todayUsed: Math.round(day.global),
         answers: day.requests,
         installations: (await this.storage.list('i:')).length,
         networks: (await this.storage.list('n:')).length,

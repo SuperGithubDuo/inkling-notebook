@@ -3,11 +3,19 @@ name: Beta AI server
 # Deploys Inkling's free cloud AI server (beta-server/) to Cloudflare and tests
 # it against the REAL model (@cf/qwen/qwen3.8-27b), from GitHub's runners:
 #   1. security checks on the deployed server (scripts/abuse-check.mjs security);
-#   2. the real-model test, anonymously, as a freshly installed app;
+#   2. the real-model test, anonymously, as a freshly installed app (~1,100 Neurons:
+#      ONLY when the commit message contains "[live]" or the manual run asks for it);
 #   3. usage-limit checks on a TEMPORARY copy of the server with tiny limits
 #      (installation, network, per-minute, one-at-a-time, global cap under a
 #      burst, pause), deleted again at the end.
 # Anyone may use the deployed server without an account; see beta-server/README.md.
+#
+# Test budget: the server lets testers use 9,000 Neurons in any 24 hours; Cloudflare's
+# free allocation is 10,000 over a rolling window, shared with these tests. So tests may
+# use at most 1,000 Neurons in any 24 hours. Before any real-model test, "AI test budget"
+# measures what tests used (Cloudflare's 24-hour count minus the server's own) and fails
+# the run instead of eating into testers' answers. Before testers are invited, the commit
+# message can contain "[no-testers-yet]" to run anyway (Cloudflare still has to accept).
 #
 # Start it by pushing the branch `deploy/beta-server` (works from any branch,
 # without touching main), or Actions → Beta AI server → Run workflow once this
@@ -29,9 +37,9 @@ on:
   workflow_dispatch:
     inputs:
       live_test:
-        description: Run the real-model and usage-limit tests after deploying (uses ~1,500–2,500 of today's 10,000 free Neurons)
+        description: Also run the full real-model test (~1,100 Neurons of the 1,000-a-day test budget; normally off)
         type: boolean
-        default: true
+        default: false
   push:
     branches: ['deploy/beta-server']
 
@@ -145,6 +153,35 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "::notice title=AI server deployed::$url  (set this as the repository variable INKLING_BETA_URL to build it into the app)"
 
+      - name: AI test budget (protects testers' allowance)
+        id: budget
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+          MSG: ${{ github.event.head_commit.message }}
+          LIVE_INPUT: ${{ inputs.live_test }}
+        run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          live=no
+          if [[ "$MSG" == *"[live]"* || "$LIVE_INPUT" == true ]]; then live=yes; fi
+          echo "live=$live" >> "$GITHUB_OUTPUT"
+          planned=500; [ "$live" = yes ] && planned=$((planned + 1100))
+          usage=$(node scripts/cf-usage.mjs 25)
+          [ "$(echo "$usage" | jq -r .ok)" = true ] || { echo "::error title=AI test budget::Could not read Cloudflare's usage: $(echo "$usage" | jq -r .error)"; exit 1; }
+          cf=$(echo "$usage" | jq -r .rollingNow)
+          served=$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -r '.globalUsed // 0')
+          tests=$(( cf > served ? cf - served : 0 ))
+          line="last 24 h: Cloudflare $cf Neurons, of which the server served $served, tests $tests; this run plans ~$planned; test budget 1000"
+          if [ $((tests + planned)) -le 1000 ]; then
+            echo "::notice title=AI test budget::$line"
+          elif [[ "$MSG" == *"[no-testers-yet]"* ]]; then
+            echo "::warning title=AI test budget exceeded (allowed: [no-testers-yet])::$line. Only acceptable while no testers have been invited."
+          else
+            echo "::error title=AI test budget exceeded::$line. Real-model tests skipped to keep testers' answers. Re-run later, or add [no-testers-yet] to the commit message only if no testers are using Inkling."
+            exit 1
+          fi
+          echo "ok=yes" >> "$GITHUB_OUTPUT"
+
       - name: Security checks on the deployed server
         shell: bash
         env:
@@ -160,8 +197,8 @@ jobs:
           echo "day_start=$(date -u +%Y-%m-%dT00:00:00Z)" >> "$GITHUB_ENV"
 
       - name: Live test against the real model (anonymous, as a fresh install)
-        # "[skip live]" in the commit message skips only this step (~1,000 Neurons), e.g. to re-run the limit checks.
-        if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip live]')) || inputs.live_test
+        # Opt-in: "[live]" in the commit message or the manual run's live_test input (~1,100 Neurons).
+        if: steps.budget.outputs.ok == 'yes' && steps.budget.outputs.live == 'yes'
         shell: bash
         env:
           URL: ${{ steps.deploy.outputs.url }}
@@ -183,7 +220,7 @@ jobs:
 
       - name: Usage-limit checks on a temporary server with tiny limits
         # Also after a failed live test, so every run reports every check.
-        if: (success() || failure()) && steps.deploy.outputs.url != '' && (github.event_name == 'push' || inputs.live_test)
+        if: (success() || failure()) && steps.deploy.outputs.url != '' && steps.budget.outputs.ok == 'yes'
         working-directory: beta-server
         shell: bash
         env:

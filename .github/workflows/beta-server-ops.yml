@@ -5,7 +5,7 @@ name: AI server emergency switch
 # in beta-server/.
 #
 # Start one by pushing (creating) a branch from any branch:
-#   ops/summary  → today's usage (no identities): Neurons used of the daily cap,
+#   ops/summary  → usage (no identities): Neurons used in the last 24 h of the cap, today's use,
 #                  answers, installations, networks, paused or not. Read-only.
 #   ops/pause    → stop ALL AI answers now. The app says the AI is paused for
 #                  maintenance; notebooks work as usual.
@@ -48,6 +48,6 @@ jobs:
           # Today's totals (UTC day), after any switch. Counts only: no identities or content.
           code=$(curl -sS -o /tmp/sum.json -w '%{http_code}' "$URL/admin/summary" -H "Authorization: Bearer $ADMIN")
           [ "$code" = 200 ] || { echo "::error title=AI usage::The server answered $code."; exit 1; }
-          line=$(jq -r '"\(.day) UTC: \(.globalUsed) of \(.globalLimit) Neurons used (\((100*.globalUsed/.globalLimit)|floor)%), \(.answers) answers, \(.installations) installations, \(.networks) networks, \(.answering) answering now, paused=\(.paused), Cloudflare free allowance used up=\(.upstreamExhausted)"' /tmp/sum.json)
+          line=$(jq -r '"\(.day) UTC: \(.globalUsed) of \(.globalLimit) Neurons used in the last 24 h (\((100*.globalUsed/.globalLimit)|floor)%), \(.todayUsed // "?") today, \(.answers) answers today, \(.installations) installations, \(.networks) networks, \(.answering) answering now, paused=\(.paused), Cloudflare free allowance used up=\(.upstreamExhausted)"' /tmp/sum.json)
           echo "::notice title=AI usage today::$line"
           { echo "### Inkling AI usage"; echo; echo "$line"; echo; echo '```json'; jq . /tmp/sum.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

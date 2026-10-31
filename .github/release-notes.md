@@ -21,8 +21,9 @@ Windows ("Windows protected your PC" → *More info* → *Run anyway*) and macOS
 ### Your notebooks and the AI
 
 - **Notebooks stay on your computer.** No account, no cloud storage; we can't see them. Updating or uninstalling keeps them.
-- **The AI tutor is free but limited:** about 10 answers a day per computer (about 110 a day for all testers together), resetting at 00:00 UTC. No account, key or download needed.
+- **The AI tutor is free but limited:** about 10 answers a day per computer (resetting at 00:00 UTC), and about 110 in any 24 hours for all testers together. No account, key or download needed.
 - **Only what you ask about is sent**, after you click *Allow*: your question and the selection or page text you include, to Inkling's server on Cloudflare (model: Qwen on Workers AI). It isn't stored, and Cloudflare says it doesn't keep it or train on it. Don't send personal or sensitive information. AI answers can be wrong.
+- **Younger testers:** for anyone under 18, a parent or guardian installs Inkling and decides whether to allow the AI (see the guide).
 
 ### What's new since the last internal build
 

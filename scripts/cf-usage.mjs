@@ -63,7 +63,7 @@ try {
   const days = {}
   for (const r of rows) days[r.hour.slice(0, 10)] = (days[r.hour.slice(0, 10)] ?? 0) + r.neurons
   const peak = rows.reduce((a, b) => (b.rolling24h > a.rolling24h ? b : a), rows[0])
-  console.log(JSON.stringify({ ok: true, start: start.toISOString(), end: end.toISOString(), utcDays: days, peakRolling24h: peak, hours: rows.filter((r) => r.requests > 0) }))
+  console.log(JSON.stringify({ ok: true, start: start.toISOString(), end: end.toISOString(), rollingNow: rows.at(-1)?.rolling24h ?? 0, utcDays: days, peakRolling24h: peak, hours: rows.filter((r) => r.requests > 0) }))
 } catch (err) {
   console.log(JSON.stringify({ ok: false, error: String(err?.message ?? err) }))
 }

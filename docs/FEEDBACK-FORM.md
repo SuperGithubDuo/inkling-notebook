@@ -38,7 +38,7 @@ A short form (about 3 minutes) that testers can fill in **without a GitHub accou
 18. **Anything else?** *(paragraph, optional)*
 
 ### Optional contact
-19. **May we contact you about your answers? If so, leave an email address.** *(short answer, optional)* — "Optional. Used only to follow up on this feedback and deleted after the beta."
+19. **May we contact you about your answers? If so, leave an email address. Under 18: a parent's or guardian's email only.** *(short answer, optional)* — "Optional. Used only to follow up on this feedback and deleted after the beta."
 
 ## Form settings
 
@@ -47,7 +47,7 @@ Whatever tool you use, the form must open and submit **without signing in**:
 - **Microsoft Forms:** *Settings → Who can fill out this form → Anyone can respond*.
 - **Tally** or similar: public by default. Don't add file uploads.
 - Use the form's normal **https** link (Google: *Send → link icon*, e.g. `https://docs.google.com/forms/d/e/…/viewform`). Shortened links work too.
-- Decide who can see responses, and delete them (including the optional emails) when the beta ends. If testers may be under 18, see the age and consent items in `docs/READINESS.md` before collecting any contact details.
+- Decide who can see responses, and delete them (including the optional emails) when the beta ends. Testers of any age may answer; only a parent's or guardian's contact is collected for a tester under 18 (question 19), and children's answers are handled under the parental-consent arrangement in `docs/READINESS.md`.
 
 ## Connect it to the app
 
