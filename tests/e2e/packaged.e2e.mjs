@@ -72,6 +72,14 @@ try {
   await win.getByRole('button', { name: 'Skip' }).click()
   step(`starts as installed Inkling ${facts.version}, data in ${facts.userData}, welcome shown, no developer menu`)
 
+  // Public, all-ages builds don't offer Google Gemini (adults only under Google's terms).
+  const aiStatus = await win.evaluate(() => window.inkling.ai.status())
+  assert.equal(aiStatus.geminiAvailable, false, 'Gemini is not offered in a packaged build')
+  assert.notEqual((await win.evaluate(() => window.inkling.ai.setProvider('gemini'))).provider, 'gemini', 'Gemini cannot be chosen')
+  const keyRefused = await win.evaluate(() => window.inkling.ai.setKey('AQ.Ab8RN6LnotARealKey.0123456789abcdef'))
+  assert.match(keyRefused.error ?? '', /isn’t available/, 'no Gemini key can be saved')
+  step('Gemini is not offered, cannot be chosen, and no key can be saved')
+
   if (expectBetaUrl) {
     // A fresh install uses the cloud AI built into it: no code, key, account, Ollama or download.
     const ai = await win.evaluate(() => window.inkling.ai.status())

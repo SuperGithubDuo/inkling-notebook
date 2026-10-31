@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { ApiError } from '@google/genai'
 import { mkdtemp, readFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,9 +7,9 @@ import { GeminiProvider, classifyError, secondsUntilPacificMidnight } from '../.
 import { AiConfig, type SecretCipher } from '../../src/main/ai/config'
 import { AiService } from '../../src/main/ai/service'
 import { ProviderError, type ProviderChunk } from '../../src/main/ai/provider'
-import { aiRequestSchema, apiKeySchema, type AiEvent, type AiRequest } from '../../src/shared/ai'
+import { aiRequestSchema, apiKeySchema, redactKeys, type AiEvent, type AiRequest } from '../../src/shared/ai'
 import { parseTaskResult } from '../../src/shared/tutor'
-import { BAD_KEY, VALID_KEY, errors, startFakeGemini, type FakeGemini } from '../support/fakeGemini.mjs'
+import { BAD_KEY, VALID_AQ_KEY, VALID_KEY, errors, startFakeGemini, type FakeGemini } from '../support/fakeGemini.mjs'
 
 let fake: FakeGemini
 beforeAll(async () => {
@@ -377,5 +378,111 @@ describe('request validation', () => {
     expect(apiKeySchema.safeParse(` ${VALID_KEY} `).success).toBe(true)
     expect(apiKeySchema.safeParse('short').success).toBe(false)
     expect(apiKeySchema.safeParse('AIza key with spaces 0123456789').success).toBe(false)
+  })
+
+  it('accepts legacy AIza keys and newer AQ. authorization keys, with their dots', () => {
+    const legacy = 'AIzaSyD' + 'x'.repeat(28) + '_-9Q' // 39 characters, the usual length
+    const ok = [legacy, VALID_KEY, VALID_AQ_KEY, ` ${VALID_AQ_KEY}\n`, 'AQ.' + 'Ab8RN6'.repeat(10), 'AQ.Ab8RN6Lx.Yz-0_1.' + 'q'.repeat(30)]
+    for (const k of ok) expect(apiKeySchema.safeParse(k), k).toMatchObject({ success: true, data: k.trim() })
+    const bad = [
+      'AQ.short',                                 // too short to be a key
+      'AQ.' + 'a'.repeat(30) + '.',                // can't end with a dot
+      'AQ..' + 'a'.repeat(30),                     // or start its body with one
+      'AQ.' + 'a'.repeat(15) + ' ' + 'a'.repeat(15), // no spaces
+      'AQ.' + 'a'.repeat(20) + '"' + 'a'.repeat(5),  // no quotes
+      'aq.' + 'a'.repeat(30),                      // prefixes are case-sensitive
+      'AIza.' + 'a'.repeat(30),                    // no dots in legacy keys
+      'auth_tokens/' + 'a'.repeat(30),             // ephemeral tokens work only with the Live API
+      'x-goog-api-key: ' + VALID_KEY,              // a whole header line
+      'Bearer ' + VALID_AQ_KEY,
+      'sk-' + 'a'.repeat(40),                      // another provider's key
+      'AQ.' + 'a'.repeat(300)                      // too long
+    ]
+    for (const k of bad) {
+      const r = apiKeySchema.safeParse(k)
+      expect(r.success, k).toBe(false)
+      if (!r.success) expect(r.error.issues[0]?.message).toMatch(/starts with “AIza” or “AQ\.”/)
+    }
+  })
+
+  it('hides keys in any text that may be shown or logged', () => {
+    const text = `API key not valid: ${VALID_AQ_KEY} (also ${VALID_KEY})`
+    const out = redactKeys(text)
+    expect(out).not.toContain(VALID_AQ_KEY)
+    expect(out).not.toContain(VALID_KEY)
+    expect(out).toContain(`[key …${VALID_AQ_KEY.slice(-4)}]`)
+    expect(redactKeys('Quota exceeded for model gemini-3.8-flash.')).toBe('Quota exceeded for model gemini-3.8-flash.')
+  })
+})
+
+describe('newer AQ. Gemini keys', () => {
+  it('are saved encrypted and reload unchanged; only the last 4 characters are shown', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'inkling-ai-'))
+    const config = new AiConfig(dir, fakeCipher(), 'linux')
+    await config.load()
+    expect(await config.setKey(apiKeySchema.parse(` ${VALID_AQ_KEY} `))).toBe('encrypted')
+    for (const f of await readdir(dir)) {
+      const raw = await readFile(join(dir, f), 'utf8')
+      expect(raw).not.toContain(VALID_AQ_KEY)
+      expect(raw).not.toContain(VALID_AQ_KEY.slice(3, 20))
+    }
+    const again = new AiConfig(dir, fakeCipher(), 'linux')
+    await again.load()
+    expect(again.apiKey).toBe(VALID_AQ_KEY)
+    expect(again.keyHint).toBe(VALID_AQ_KEY.slice(-4))
+  })
+
+  it('reach Google through the official SDK in the x-goog-api-key header, dots and all', async () => {
+    const models = await provider(VALID_AQ_KEY).listModels()
+    expect(models.length).toBeGreaterThan(0)
+    fake.reply({ chunks: ['ok'] })
+    const chunks = await collect(provider(VALID_AQ_KEY).stream(req()))
+    expect(chunks.at(-1)).toMatchObject({ type: 'end' })
+    expect(fake.requests.at(-1)!.key).toBe(VALID_AQ_KEY)
+  })
+
+  it('saving and Google accepting the key are separate: a well-formed key Google rejects is saved, and the test says Google refused it', async () => {
+    const rejected = 'AQ.Ab8RN6LnotKnownToGoogle.0123456789abcdef'
+    const { service } = await makeService({ key: rejected })
+    expect(service.status()).toMatchObject({ hasKey: true, keyHint: rejected.slice(-4) })
+    const result = await service.test()
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid_key' } })
+    expect(JSON.stringify(result)).not.toContain(rejected)
+  })
+
+  it('never show a key that Google echoes in an error message', () => {
+    const message = JSON.stringify({ error: { code: 403, message: `Method doesn't allow unregistered callers. Key ${VALID_AQ_KEY} is restricted.`, status: 'PERMISSION_DENIED' } })
+    for (const e of [new ApiError({ message, status: 403 }), new Error(`fetch failed for key=${VALID_KEY}`)]) {
+      const err = classifyError(e, { aborted: false, timedOut: false })
+      expect(err.message).not.toContain(VALID_AQ_KEY)
+      expect(err.message).not.toContain(VALID_KEY)
+    }
+    expect(classifyError(new ApiError({ message, status: 403 }), { aborted: false, timedOut: false }).code).toBe('invalid_key')
+  })
+})
+
+describe('builds without Gemini (public, all ages)', () => {
+  const make = async (provider: 'gemini' | 'cloud' = 'gemini') => {
+    const dir = await mkdtemp(join(tmpdir(), 'inkling-ai-'))
+    const config = new AiConfig(dir, fakeCipher(), { builtInCloudUrl: 'https://ai.example.test', defaultProvider: 'cloud' })
+    await config.load()
+    await config.setProvider(provider)
+    const service = new AiService({ config, geminiEnabled: false, makeProvider: (apiKey) => new GeminiProvider({ apiKey, baseUrl: fake.url }), emit: () => undefined })
+    return { config, service }
+  }
+
+  it("don't offer Gemini, switch to it, or save a key for it", async () => {
+    const { service } = await make('cloud')
+    expect(service.status().geminiAvailable).toBe(false)
+    expect((await service.setProvider('gemini')).provider).toBe('cloud')
+    expect((await service.setKey(VALID_KEY)).hasKey).toBe(false)
+  })
+
+  it('move settings saved with Gemini to the cloud AI, without calling Google', async () => {
+    const { service } = await make('gemini')
+    const before = fake.requests.length
+    await service.ensureAllowedProvider()
+    expect(service.status().provider).toBe('cloud')
+    expect(fake.requests.length).toBe(before)
   })
 })

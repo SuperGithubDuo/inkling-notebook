@@ -9,6 +9,7 @@ Fixes from independent QA of the Beta 1 Windows installer. Beta 1 was never publ
 - **Mac, Apple silicon:** `Inkling-0.2.0-beta.2-arm64.dmg`. **Mac, Intel:** `Inkling-0.2.0-beta.2-x64.dmg`. macOS 12 or later.
 - **Not code-signed:** Windows and macOS warn on first open and can't verify the publisher. Install only from the link you were sent, and compare the SHA-256 checksums.
 - Free AI tutor with no account or key: about 10 answers a day per computer, resetting at 00:00 UTC. Notebooks stay on your computer; only what you ask about is sent, after you allow it.
+- Google Gemini is not offered in this build (its terms are adults-only and are being reviewed for an all-ages app); the cloud AI and the local Ollama tutor remain. Developer builds still accept Gemini keys in both Google AI Studio formats (`AIza…` and the newer `AQ.…`).
 
 **Fixed**
 - **Free AI answers left:** the count under the tutor now updates after every answer, including page markups, practice sets and answer checks, instead of staying the same until Inkling was restarted. It uses the AI server's own figures, refreshes after a stopped answer, and refreshes after the daily reset at midnight UTC.

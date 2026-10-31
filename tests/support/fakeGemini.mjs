@@ -12,6 +12,8 @@ import http from 'node:http'
 
 export const VALID_KEY = 'AIzaFakeTestKey-0123456789abcdef'
 export const BAD_KEY = 'AIzaRejectedKey-0123456789abcdef'
+/** A newer Google AI Studio authorization key: `AQ.` and parts separated by dots (made up). */
+export const VALID_AQ_KEY = 'AQ.Ab8RN6LfakeTest_key-0123.456789abcdefGHIJ.klmnop'
 
 const DEFAULT_MODELS = [
   { name: 'models/gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', inputTokenLimit: 1048576, supportedGenerationMethods: ['generateContent', 'countTokens'] },
@@ -140,7 +142,7 @@ export async function startFakeGemini() {
         res.writeHead(status, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify(b))
       }
-      if (key !== VALID_KEY) return sendError(errors.invalidKey())
+      if (key !== VALID_KEY && key !== VALID_AQ_KEY) return sendError(errors.invalidKey())
 
       if (req.method === 'GET' && url.pathname === '/v1beta/models') {
         res.writeHead(200, { 'Content-Type': 'application/json' })

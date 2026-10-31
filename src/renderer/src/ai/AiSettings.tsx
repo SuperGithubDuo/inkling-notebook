@@ -51,8 +51,8 @@ export function AiSettings() {
 
   return (
     <div className="space-y-4" data-testid="ai-settings" data-provider={status.provider}>
-      <div role="radiogroup" aria-label="AI provider" className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
-        {(['cloud', 'ollama', 'gemini'] as const).map((id) => {
+      <div role="radiogroup" aria-label="AI provider" className={cx('grid grid-cols-1 gap-1.5', status.geminiAvailable ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
+        {(status.geminiAvailable ? (['cloud', 'ollama', 'gemini'] as const) : (['cloud', 'ollama'] as const)).map((id) => {
           const selected = status.provider === id
           return (
             <button
@@ -351,6 +351,8 @@ function GeminiSettings({ status }: { status: AiStatus }) {
   const { setStatus } = useAi.getState()
   const [key, setKey] = useState('')
   const [keyError, setKeyError] = useState<string | null>(null)
+  // Saving (encrypted, on this computer) and Google accepting the key are separate steps, reported separately.
+  const [savedNote, setSavedNote] = useState<string | null>(null)
   const [test, setTest] = useState<TestState>({ kind: 'idle' })
   const [busy, setBusy] = useState(false)
 
@@ -358,7 +360,10 @@ function GeminiSettings({ status }: { status: AiStatus }) {
     setTest({ kind: 'running' })
     const result = await window.inkling.ai.test()
     setStatus(await window.inkling.ai.status())
-    setTest(result.ok ? { kind: 'ok', latencyMs: result.latencyMs } : { kind: 'error', error: result.error })
+    if (result.ok) return setTest({ kind: 'ok', latencyMs: result.latencyMs })
+    // The key is saved either way: say which step failed.
+    const error = result.error.code === 'invalid_key' ? { ...result.error, message: `The key is saved, but Google didn't accept it. ${result.error.message}` } : result.error
+    setTest({ kind: 'error', error })
   }
 
   const saveKey = async (): Promise<void> => {
@@ -369,7 +374,13 @@ function GeminiSettings({ status }: { status: AiStatus }) {
     if ('error' in result) return setKeyError(result.error)
     setStatus(result)
     setKey('')
+    setSavedNote(
+      result.keyProtection === 'encrypted'
+        ? 'Key saved on this computer, encrypted with your system keychain. Checking it with Google…'
+        : 'Key saved on this computer. Checking it with Google…'
+    )
     await runTest()
+    setSavedNote(null)
   }
 
   const chooseModel = async (model: AiModelId): Promise<void> => {
@@ -415,7 +426,7 @@ function GeminiSettings({ status }: { status: AiStatus }) {
               aria-label="Gemini API key"
               autoComplete="off"
               spellCheck={false}
-              placeholder="Paste your key (starts with AIza…)"
+              placeholder="Paste your key (starts with AIza… or AQ.…)"
               onChange={(e) => setKey(e.target.value)}
               className="min-w-0 flex-1 rounded-xl border border-line bg-white px-3 py-2 text-[13px] outline-none select-text focus:border-accent"
             />
@@ -424,7 +435,8 @@ function GeminiSettings({ status }: { status: AiStatus }) {
             </button>
           </form>
         )}
-        {keyError && <p className="mt-1.5 text-[12.5px] text-[#c03a3e]">{keyError}</p>}
+        {keyError && <p className="mt-1.5 text-[12.5px] text-[#c03a3e]" data-testid="ai-key-error">{keyError}</p>}
+        {savedNote && <p className="mt-1.5 text-[12.5px] text-ink-2" data-testid="ai-key-saved-note">{savedNote}</p>}
         <KeyProtectionNote status={status} />
       </div>
 
@@ -474,7 +486,7 @@ function GeminiSettings({ status }: { status: AiStatus }) {
         )}
       </div>
 
-      <TestRow test={test} disabled={!status.hasKey} onTest={() => void runTest()} okText={(ms) => `Connected (${ms} ms). No notebook content was sent.`} />
+      <TestRow test={test} disabled={!status.hasKey} onTest={() => void runTest()} okText={(ms) => `Google accepted the key (${ms} ms). No notebook content was sent.`} />
 
       <div className="rounded-xl border border-line px-3 py-2.5">
         <label className="flex items-start gap-2.5 text-[13px]">

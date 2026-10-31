@@ -6,7 +6,7 @@
  * translated into a ProviderError with a message a student can act on.
  */
 import { ApiError, GoogleGenAI, type Content, type GenerateContentResponse, type Part } from '@google/genai'
-import type { AiTurn } from '@shared/ai'
+import { redactKeys, type AiTurn } from '@shared/ai'
 import { ProviderError, type AiProvider, type ProviderChunk, type ProviderModel, type ProviderRequest } from './provider'
 
 const REQUEST_TIMEOUT_MS = 90_000
@@ -208,5 +208,9 @@ export function classifyError(err: unknown, ctx: { aborted: boolean; timedOut: b
   return new ProviderError('unknown', `Something went wrong talking to Gemini: ${shorten(e?.message ?? String(err))}`)
 }
 
-const shorten = (s: string): string => (s.length > 200 ? `${s.slice(0, 197)}…` : s)
+/** Google's message, shortened, with anything shaped like a key hidden: error text is shown to people. */
+const shorten = (raw: string): string => {
+  const s = redactKeys(raw)
+  return s.length > 200 ? `${s.slice(0, 197)}…` : s
+}
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)

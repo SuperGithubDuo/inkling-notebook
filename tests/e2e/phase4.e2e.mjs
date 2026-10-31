@@ -15,7 +15,7 @@ import { mkdtemp, readFile, readdir, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import assert from 'node:assert/strict'
-import { BAD_KEY, VALID_KEY, errors, startFakeGemini } from '../support/fakeGemini.mjs'
+import { BAD_KEY, VALID_AQ_KEY, VALID_KEY, errors, startFakeGemini } from '../support/fakeGemini.mjs'
 import { strokesFor } from '../support/handwriting.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
@@ -134,15 +134,26 @@ try {
   // A key Google rejects: saved, but the connection test says why.
   await win.fill('[data-testid="ai-key-input"]', BAD_KEY)
   await win.click('[data-testid="ai-key-save"]')
-  await testResult().getByText(/Google rejected this API key/).waitFor()
+  await testResult().getByText(/The key is saved, but Google didn't accept it\. Google rejected this API key/).waitFor()
   await win.click('[data-testid="ai-key-remove"]')
   await win.waitForSelector('[data-testid="ai-key-input"]')
-  step('rejected key explained by the connection test, and removable')
+  step('rejected key: saved, then Google’s refusal shown as a separate step; removable')
+
+  // A newer Google AI Studio key (AQ. with dots) is accepted, saved encrypted and used.
+  await win.fill('[data-testid="ai-key-input"]', VALID_AQ_KEY)
+  await win.click('[data-testid="ai-key-save"]')
+  await testResult().getByText(/Google accepted the key \(\d+ ms\)/).waitFor()
+  await win.getByText(`Key ending in …${VALID_AQ_KEY.slice(-4)}`).waitFor()
+  assert.equal(fake.requests.at(-1).key, VALID_AQ_KEY)
+  assert.ok(!(await win.content()).includes(VALID_AQ_KEY), 'the full key is never in the window')
+  await win.click('[data-testid="ai-key-remove"]')
+  await win.waitForSelector('[data-testid="ai-key-input"]')
+  step('a newer AQ. key is accepted by the app and by Google (stand-in), never shown in full, removable')
 
   fake.requests.length = 0
   await win.fill('[data-testid="ai-key-input"]', VALID_KEY)
   await win.click('[data-testid="ai-key-save"]')
-  await testResult().getByText(/Connected \(\d+ ms\)\. No notebook content was sent\./).waitFor()
+  await testResult().getByText(/Google accepted the key \(\d+ ms\)\. No notebook content was sent\./).waitFor()
   await win.getByText(`Key ending in …${VALID_KEY.slice(-4)}`).waitFor()
   assert.deepEqual(
     fake.requests.map((r) => `${r.method} ${r.path}`),
@@ -181,7 +192,7 @@ try {
   await win.locator('[data-testid="ai-model-gemini-3.8-flash"]').getByText('not offered to this key').waitFor()
   await win.click('[data-testid="ai-model-gemini-3.5-flash-lite"]')
   await win.click('[data-testid="ai-test"]')
-  await testResult().getByText(/Connected/).waitFor()
+  await testResult().getByText(/Google accepted the key/).waitFor()
   fake.setModels([
     { name: 'models/gemini-3.8-flash', supportedGenerationMethods: ['generateContent'] },
     { name: 'models/gemini-3.5-flash-lite', supportedGenerationMethods: ['generateContent'] }

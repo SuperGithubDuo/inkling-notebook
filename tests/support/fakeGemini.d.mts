@@ -1,4 +1,5 @@
 export const VALID_KEY: string
+export const VALID_AQ_KEY: string
 export const BAD_KEY: string
 export interface FakeError {
   status: number

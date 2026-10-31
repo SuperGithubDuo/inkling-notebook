@@ -62,6 +62,11 @@ export interface AiServiceOptions {
   emit: (event: AiEvent) => void
   now?: () => number
   limits?: Partial<Limits>
+  /**
+   * Whether Google Gemini is offered. Off in public builds until its terms are cleared for
+   * users of all ages: no Gemini provider, no key saving, no requests to Google.
+   */
+  geminiEnabled?: boolean
 }
 
 interface Limits {
@@ -86,6 +91,7 @@ interface Cooldown {
 
 export class AiService {
   private readonly config: AiConfig
+  private readonly geminiEnabled: boolean
   private readonly makeProvider: (apiKey: string) => AiProvider
   private readonly local: LocalProvider
   private ollama: OllamaState
@@ -110,6 +116,7 @@ export class AiService {
 
   constructor(options: AiServiceOptions) {
     this.config = options.config
+    this.geminiEnabled = options.geminiEnabled ?? true
     this.makeProvider = options.makeProvider
     this.local = options.makeLocalProvider?.() ?? new OllamaProvider()
     this.makeCloud = options.makeCloudProvider ?? ((o) => new CloudProvider(o))
@@ -133,6 +140,7 @@ export class AiService {
       keyProtection: this.config.keyProtection,
       consented: provider === 'gemini' ? this.config.consented : provider === 'cloud' ? this.config.cloudConsented : true,
       geminiConsented: this.config.consented,
+      geminiAvailable: this.geminiEnabled,
       models: this.availability(),
       ollama: { ...this.ollama },
       cloud: this.cloudState(),
@@ -199,6 +207,7 @@ export class AiService {
   }
 
   async setProvider(provider: AiProviderId): Promise<AiStatus> {
+    if (provider === 'gemini' && !this.geminiEnabled) return this.status()
     if (provider === this.config.provider) return this.status()
     this.cancelActive()
     await this.config.setProvider(provider)
@@ -222,7 +231,20 @@ export class AiService {
     }
   }
 
+  /**
+   * After loading settings: a build without Gemini never starts on it (settings from a
+   * build that had it move to the cloud AI, or Ollama without one). A saved key stays
+   * encrypted on disk, unused.
+   */
+  async ensureAllowedProvider(): Promise<void> {
+    if (this.geminiEnabled || this.config.provider !== 'gemini') return
+    await this.config.setProvider(this.config.cloudUrl ? 'cloud' : 'ollama')
+    this.last = null
+  }
+
+  /** Saves the key (encrypted). Saving says nothing about whether Google accepts it: test() asks Google. */
   async setKey(key: string): Promise<AiStatus> {
+    if (!this.geminiEnabled) return this.status()
     await this.config.setKey(key)
     this.resetProvider()
     return this.status()
