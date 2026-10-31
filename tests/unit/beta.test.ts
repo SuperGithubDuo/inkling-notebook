@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Ledger, networkOf, nextUtcMidnight, type Identity, type LedgerLimits } from '../../beta-server/src/ledger'
+import { Ledger, UPSTREAM_RETRY_MS, networkOf, nextUtcMidnight, type Identity, type LedgerLimits } from '../../beta-server/src/ledger'
 import { estimateInputTokens, imageSize, imageTokens, neuronsFor, parseUpstream, readSse, toMessages, classifyUpstream } from '../../beta-server/src/upstream'
 import { startBetaServer, RATES, type BetaServer } from '../support/fakeBeta.mjs'
 import { AiConfig, migrateSettings, type SecretCipher } from '../../src/main/ai/config'
@@ -197,14 +197,28 @@ describe('ledger', () => {
     expect((await ledger.quota(ada)).installUsed).toBe(0)
   })
 
-  it('Cloudflare reporting the free allocation used up closes the day for everyone', async () => {
+  it('Cloudflare reporting the free allocation used up stops answers for everyone, then tries again', async () => {
+    t = nextUtcMidnight(t) + 3_600_000 // 01:00 UTC: the retry comes long before the daily reset
     const r = await ledger.reserve(ada, 50)
     if (!r.ok) throw new Error()
     await ledger.settle(r.reservationId, undefined, { failedBeforeModel: true, upstreamExhausted: true })
-    expect(await ledger.reserve(bo, 1)).toMatchObject({ ok: false, code: 'global_quota' })
+    const refused = await ledger.reserve(bo, 1)
+    expect(refused).toMatchObject({ ok: false, code: 'global_quota', retryAfter: UPSTREAM_RETRY_MS / 1000 })
     expect((await ledger.quota(bo)).approxAnswersLeft).toBe(0)
-    t = nextUtcMidnight(t) + 1
+    expect((await ledger.summary()).upstreamExhausted).toBe(true)
+    t += UPSTREAM_RETRY_MS - 1000
+    expect(await ledger.reserve(bo, 1)).toMatchObject({ ok: false, code: 'global_quota' })
+    t += 1000
     expect((await ledger.reserve(bo, 1)).ok).toBe(true)
+    expect((await ledger.summary()).upstreamExhausted).toBe(false)
+  })
+
+  it('a day closed by an older server version is open again', async () => {
+    await spend(ada, 5)
+    const day = storage.map.get('day') as Record<string, unknown>
+    storage.map.set('day', { ...day, upstreamExhausted: true })
+    // The new version starts with a fresh Durable Object instance on the same storage.
+    expect((await new Ledger(storage, limits, () => t).reserve(bo, 1)).ok).toBe(true)
   })
 
   it('pause stops everyone and survives a restart; the summary holds no identities', async () => {
@@ -287,6 +301,8 @@ describe('upstream', () => {
   it('recognises Workers AI errors', () => {
     expect(classifyUpstream(new Error('4006: you have used up your daily free allocation of 10,000 neurons, please upgrade to Cloudflare\'s Workers Paid plan')).kind).toBe('free_allocation')
     expect(classifyUpstream(new Error('3040: Capacity temporarily exceeded, please try again.')).kind).toBe('capacity')
+    // Other errors that merely mention Neurons don't stop the service.
+    expect(classifyUpstream(new Error('5021: input too long (estimated 120000 neurons)')).kind).not.toBe('free_allocation')
     expect(classifyUpstream(new Error('JSON Mode couldn\'t be met')).kind).toBe('json_mode')
   })
 })

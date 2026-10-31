@@ -193,7 +193,7 @@ export type UpstreamErrorKind = 'free_allocation' | 'rate_limited' | 'capacity' 
 /** Sorts a Workers AI error by its message (they carry numeric codes such as 4006). */
 export function classifyUpstream(err: unknown): { kind: UpstreamErrorKind; detail: string } {
   const detail = String((err as Error)?.message ?? err).slice(0, 300)
-  if (/4006|daily free allocation|neurons/i.test(detail)) return { kind: 'free_allocation', detail }
+  if (/\b4006\b|daily free allocation/i.test(detail)) return { kind: 'free_allocation', detail }
   if (/3040|capacity/i.test(detail)) return { kind: 'capacity', detail }
   if (/429|rate limit|too many requests|3036/i.test(detail)) return { kind: 'rate_limited', detail }
   if (/5007|no such model|model .*not found|not supported/i.test(detail)) return { kind: 'model_unavailable', detail }

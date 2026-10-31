@@ -80,9 +80,18 @@ interface Day {
   salt: string
   global: number
   requests: number
-  /** Set when Cloudflare itself reported the free allocation used up. */
+  /** Older servers latched this for the whole day; now ignored (see upstreamExhaustedAt). */
   upstreamExhausted?: boolean
+  /** When Cloudflare last reported the free allocation used up. Answers stop for UPSTREAM_RETRY_MS, then are tried again. */
+  upstreamExhaustedAt?: number
 }
+
+/**
+ * How long answers stop after Cloudflare reports the free allocation used up. A
+ * real exhaustion just repeats (Workers Free errors instead of billing, so a retry
+ * costs nothing); a transient or misread error no longer closes the whole day.
+ */
+export const UPSTREAM_RETRY_MS = 15 * 60_000
 
 interface Counter {
   neurons: number
@@ -232,13 +241,17 @@ export class Ledger {
     await this.storage.put('day', day)
   }
 
+  private upstreamBlocked(day: Day): boolean {
+    return day.upstreamExhaustedAt !== undefined && this.now() - day.upstreamExhaustedAt < UPSTREAM_RETRY_MS
+  }
+
   private async quotaFor(k: { install: string; network: string }, day: Day): Promise<Quota> {
     const open = await this.openReservations()
     const reserved = (pred: (r: Reservation) => boolean): number => open.filter(pred).reduce((n, r) => n + r.neurons, 0)
     const installUsed = (await this.counter(k.install)).neurons + reserved((r) => r.install === k.install)
     const networkUsed = (await this.counter(k.network)).neurons + reserved((r) => r.network === k.network)
     const globalUsed = day.global + reserved(() => true)
-    const globalLimit = day.upstreamExhausted ? Math.min(this.limits.globalDailyNeurons, Math.ceil(globalUsed)) : this.limits.globalDailyNeurons
+    const globalLimit = this.upstreamBlocked(day) ? Math.min(this.limits.globalDailyNeurons, Math.ceil(globalUsed)) : this.limits.globalDailyNeurons
     const left = Math.max(0, Math.min(this.limits.installDailyNeurons - installUsed, this.limits.networkDailyNeurons - networkUsed, globalLimit - globalUsed))
     return {
       installUsed: Math.round(installUsed),
@@ -295,7 +308,8 @@ export class Ledger {
       if (wn.length >= this.limits.networkPerMinute) return { ok: false, code: 'rate_limited', retryAfter: wait(wn) }
 
       const q = await this.quotaFor(k, day)
-      if (day.upstreamExhausted || q.globalUsed + worst > q.globalLimit) return { ok: false, code: 'global_quota', retryAfter: resetIn, quota: q }
+      if (this.upstreamBlocked(day)) return { ok: false, code: 'global_quota', retryAfter: Math.min(resetIn, Math.ceil((day.upstreamExhaustedAt! + UPSTREAM_RETRY_MS - now) / 1000)), quota: q }
+      if (q.globalUsed + worst > q.globalLimit) return { ok: false, code: 'global_quota', retryAfter: resetIn, quota: q }
       if (expected > this.limits.installDailyNeurons) return { ok: false, code: 'too_large', quota: q }
       if (q.installUsed + expected > q.installLimit) return { ok: false, code: 'install_quota', retryAfter: resetIn, quota: q }
       if (q.networkUsed + expected > q.networkLimit) return { ok: false, code: 'network_quota', retryAfter: resetIn, quota: q }
@@ -319,7 +333,7 @@ export class Ledger {
       const open = await this.openReservations()
       // Missing means it already expired, and was charged in full then.
       const r = open.find((x) => x.id === reservationId)
-      if (opts.upstreamExhausted) day.upstreamExhausted = true
+      if (opts.upstreamExhausted) day.upstreamExhaustedAt = this.now()
       if (r) {
         this.reservations = open.filter((x) => x !== r)
         await this.saveReservations()
@@ -350,7 +364,7 @@ export class Ledger {
         installations: (await this.storage.list('i:')).length,
         networks: (await this.storage.list('n:')).length,
         answering: open.length,
-        upstreamExhausted: !!day.upstreamExhausted,
+        upstreamExhausted: this.upstreamBlocked(day),
         paused: await this.isPaused(),
         limits: this.limits
       }
