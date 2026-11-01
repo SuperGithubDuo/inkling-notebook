@@ -31,7 +31,7 @@
 | [Building and releasing](RELEASING.md) | Installers, signing, the approval-gated release flow, operating the AI server |
 | [Download site and release flow](maintainers/DOWNLOAD-SITE.md) | How an approved build reaches users, and why a bad one can't |
 | [Repository cleanup plan](maintainers/REPOSITORY-CLEANUP.md) | Branch audit and proposed structure |
-| [Changes waiting for approval](maintainers/APPROVALS.md) | Exactly what needs a yes before it happens |
+| [Changes waiting for approval](maintainers/APPROVALS.md) | What's done, and exactly what still needs a yes (including branch deletions) |
 | [Claims audit](maintainers/CLAIMS-AUDIT.md) | README and site checked against what the code does (privacy, AI data, ages, features) |
 | [Release readiness](READINESS.md) | Evidence-based checklist for the beta |
 | [Launch kit](LAUNCH.md) · [Monetization plan](MONETIZATION.md) | Product copy, website outline, editions |

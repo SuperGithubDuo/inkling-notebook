@@ -25,16 +25,14 @@ GitHub's *Run workflow* button only lists workflows that exist on the **default 
 | `build/all` (or any other `build/…` name) | both |
 | `build/draft-release` | both, **and uploads them to the draft release `v<version>`** (see *Publish* below) |
 
-From a clone of the repository:
+**Recommended:** *Actions → Release → Run workflow*, branch `main`, and choose `windows`, `macos`, `both` or `draft-release`. No extra branches needed.
+
+Or push a trigger branch from a clone (it's left behind afterwards; delete it when done):
 
 ```bash
 git fetch origin
-git push origin origin/beta-release:refs/heads/build/windows --force   # Windows from the current beta-release
+git push origin origin/main:refs/heads/build/windows --force   # Windows from the current main
 ```
-
-On github.com, without git: open the `beta-release` branch, open the branch menu, type `build/windows` and choose *Create branch build/windows from beta-release*. Pushing the same branch again (with `--force`) starts a new build.
-
-Once the workflow is on `main`: *Actions → Release → Run workflow*, choose the branch (e.g. `beta-release`) and the platforms.
 
 ### Get the installers
 
@@ -56,11 +54,7 @@ When a step fails, its key error lines appear as annotations on the run summary,
 
 ### Publish a release (only with approval)
 
-**Draft without a public tag (used for Beta 2).** Push `build/draft-release` from the commit to ship:
-
-```bash
-git push origin origin/beta-release:refs/heads/build/draft-release --force
-```
+**Draft without a public tag (used for Beta 2).** *Actions → Release → Run workflow*, branch `main`, platforms **draft-release**. (Pushing `build/draft-release` from the commit to ship does the same.)
 
 The workflow creates the draft pre-release `v<version>` (or reuses it, pointing it at the new commit; it refuses to touch a published one), builds and tests both installers on real Windows and macOS machines, and uploads them. When every job has passed, *Draft release notes* runs `scripts/release/finalize-draft.mjs`, which:
 
@@ -159,7 +153,7 @@ Push one of these branches from any branch (and delete it afterwards so it can b
 | `ops/resume` | Turns AI answers back on. |
 
 ```bash
-git push origin origin/beta-release:refs/heads/ops/summary && git push origin --delete ops/summary
+git push origin origin/main:refs/heads/ops/summary && git push origin --delete ops/summary
 ```
 
 On github.com: open any branch's menu, type `ops/summary`, *Create branch*, then read *Actions → AI server emergency switch*. With the token on your own computer, `cd beta-server && npm run admin -- summary` does the same. Cloudflare's dashboard (*Workers AI → Usage*) shows the account's own Neuron count.

@@ -1,56 +1,65 @@
 # Changes waiting for approval
 
-Everything prepared for the "download in one click" milestone is on the branch **`prep/download-experience`** (based on `beta-release` @ `ff97b60`). Nothing below has been done. Each item is independent unless it says otherwise; approve them one by one.
+Status on 1 Nov 2026. What's done is listed first so this page stays the single record. **Nothing has been published and no branch has been deleted.**
 
-## A. Merging the preparation work
+## Done (approved 1 Nov 2026)
 
-| # | Change | Effect | Reversible? |
+| Step | Result |
+|---|---|
+| Rebase the preparation work onto the latest `beta-release` | Clean rebase onto `14baed9`; both newer commits (`d086a06`, `14baed9`) kept |
+| Accuracy audit of README, site and docs | [CLAIMS-AUDIT.md](CLAIMS-AUDIT.md) |
+| PR [#2](https://github.com/SuperGithubDuo/inkling-notebook/pull/2): download experience → `beta-release` | CI green, merged (merge commit `d9211ff`) |
+| PR [#3](https://github.com/SuperGithubDuo/inkling-notebook/pull/3): Hermes's launch review and evidence → `beta-release` | CI green, merged (`2e37ec5`); Hermes's commit `3e1ab80` kept, his 34 files byte-identical |
+| PR [#4](https://github.com/SuperGithubDuo/inkling-notebook/pull/4): update `main` | Fast-forward `5c0f27d` → `2e37ec5`: no merge commit, no rewritten history. CI and *Download site* green on `main` |
+| Draft-release checks from `main` | See [READINESS.md](../READINESS.md#beta-2-for-510-invited-testers): run started with *Run workflow* on `main` |
+
+## Waiting for you
+
+### 1. Switch on the download site (one click)
+
+*Settings → Pages → Build and deployment → Source: **GitHub Actions*** ([settings](https://github.com/SuperGithubDuo/inkling-notebook/settings/pages)). Repository settings can't be changed from Claude's session. After the click, *Actions → Download site → Run workflow* (or the next change to `site/` on `main`) deploys `https://supergithubduo.github.io/inkling-notebook/`, which shows *Coming soon / No download is available yet* until step 3.
+
+### 2. Feedback form (before inviting testers)
+
+Create the no-sign-in form from [HERMES-FEEDBACK-FORM.md](../HERMES-FEEDBACK-FORM.md) and set the repository **variable** `INKLING_FEEDBACK_URL`. The site then shows a *Send feedback* button; installers pick it up only when the draft is rebuilt (*Actions → Release → Run workflow → draft-release*).
+
+### 3. Publish a release (the approval that makes downloads live)
+
+Press **Publish** on the `v0.2.0-beta.2` draft only when its notes start with "## Inkling 0.2.0-beta.2" and contain no DO NOT PUBLISH. The site then offers it within minutes. Publishing creates the public tag `v0.2.0-beta.2`.
+
+### 4. Branch deletions
+
+`main` is now the only long-lived branch. Each branch below has no commit that isn't on `main`, except where noted. Deleting a branch doesn't delete its commits from `main`.
+
+| Delete | Tip | Why it's safe | Precondition |
 |---|---|---|---|
-| A1 | Open a PR `prep/download-experience` → `beta-release` and merge it | New README and docs, download site source, stricter release verification, tests. No app code changes | Yes (revert the merge) |
-| A2 | Merge Hermes's `docs/hermes-launch-review` (PR into `beta-release`) | Brings Hermes's Beta 2 launch review, privacy review, feedback form and evidence into the main line. Docs only | Yes |
-| A3 | Fast-forward `main` to `beta-release` (after A1 and A2) | `main` becomes current; workflows get *Run workflow* buttons; the README on the repository's front page becomes the new product page. It's a fast-forward: no merge commit, no history rewritten | Yes, by resetting `main` to `5c0f27d` (that *would* need a force push) |
-| A4 | Protect `main`: PRs required, CI must pass, no force pushes; turn on *Automatically delete head branches* | Enforces the simplified structure | Yes |
+| `prep/download-experience` | `16a3231` | Merged in #2 | — |
+| `docs/integrate-hermes-review` | `b9c5b38` | Merged in #3 | — |
+| `docs/hermes-launch-review` | `3e1ab80` | Merged via #3; Hermes's commit is on `main` | Optional tag `qa/hermes-beta2-launch-review` at `3e1ab80` first |
+| `cloud-beta` | `26a5cc4` | Contained in `main` | — |
+| `admin/add-tester/qiao` | `fa9c449` | Contained; trigger for the removed *Add beta tester* workflow | Disable that workflow too (it only exists on this branch) |
+| `build/all` | `974177b` | Contained; build trigger, replaced by *Run workflow* | — |
+| `build/windows` | `4ea46be` | Contained; build trigger | — |
+| `build/draft-release` | `d086a06` | Contained; replaced by *Run workflow → draft-release*, tested from `main` on 1 Nov | — |
+| `ops/summary` | `f00f3dd` | Contained; ops trigger (README says "delete before reuse") | — |
+| `fix/upstream-exhausted-retry` | `864dc1e` | Contained; older duplicate of a deploy | — |
+| `deploy/beta-server` | `7dc07f9` | Contained; deploy trigger. *Beta AI server* has a *Run workflow* button on `main` | Run *Beta AI server* once from `main` first, if you want it proven before deleting |
+| `ops/cloudflare` | `9285237` | One commit not on `main`, but it's **empty** (a probe trigger) | Its workflow runs only on pushes to this branch; add `workflow_dispatch` first if you still want the diagnostics |
+| `accept-new-gemini-keys` + PR #1 | `791aedb` | One commit not on `main`, **superseded** by `ff97b60` (both key formats, redaction, tests) | Close PR #1 with a note; optional tag `archive/accept-new-gemini-keys` |
+| `beta-release` | `2e37ec5` | Identical to `main` | Last, once nothing points at it (`docs/RELEASING.md` mentions it as an example) |
 
-## B. Branch cleanup (after A3)
+**Kept:** `main`.
 
-| # | Change | Notes |
-|---|---|---|
-| B1 | Create tag `qa/hermes-beta2-launch-review` at `3e1ab80`, then delete `docs/hermes-launch-review` | Only after A2 |
-| B2 | Close PR #1 with a note that `ff97b60` supersedes it; tag `archive/accept-new-gemini-keys` at `791aedb`; delete the branch | |
-| B3 | Delete branches whose commits are all on `beta-release`: `cloud-beta`, `admin/add-tester/qiao`, `build/all`, `build/windows`, `build/draft-release`, `ops/summary`, `fix/upstream-exhausted-retry` | Loses no history |
-| B4 | Delete `ops/cloudflare` and `deploy/beta-server` | Only once the 31 Oct Cloudflare incident is closed and *Run workflow* works on `main` |
-| B5 | Disable the orphan *Add beta tester* workflow | |
-| B6 | Delete `beta-release` | Only after A3, when it equals `main` |
+### 5. Settings that keep it clean (optional)
 
-## C. Download site
+- Protect `main`: pull requests required, CI must pass, no force pushes.
+- *Settings → General → Automatically delete head branches*.
 
-| # | Change | Notes |
-|---|---|---|
-| C1 | *Settings → Pages → Source: GitHub Actions* | Needs A3 |
-| C2 | Repository variable `INKLING_SITE_ENABLED=true` | The site goes public at `https://supergithubduo.github.io/inkling-notebook/`. It shows "No download is available yet" until C5 |
-| C3 | Repository variable `INKLING_FEEDBACK_URL` | The no-sign-in feedback form (Hermes's 10-question version). Without it the page shows only the in-app route and GitHub issues. Installers need a rebuild to pick it up |
-| C4 | Optional: `INKLING_DOWNLOAD_PAGE_URL` | Only for a custom domain |
+### 6. Decisions only you can make
 
-## D. Releases
-
-| # | Change | Notes |
-|---|---|---|
-| D1 | Rebuild the Beta 2 draft from the fixed commit with the new verification (push `build/draft-release`, or *Run workflow → draft-release* after A3) | The existing draft holds installers from `f00f3dd` and says DO NOT PUBLISH. Rebuilding replaces its files and notes |
-| D2 | **Press Publish** on a draft whose notes start with "Inkling <version>" and contain no DO NOT PUBLISH | This is the approval step. The site then offers it within minutes. Do **not** publish the current draft |
-| D3 | Withdraw a release later, if needed | Add its tag to `withdrawn` in `site/config.json` |
-
-## E. Decisions only you can make
-
-- **Licence.** `package.json` says `UNLICENSED` and `LICENSE.txt` says "all rights reserved". The README is styled like an open-source project page but says, accurately, that Inkling is not open source. Choosing an open-source licence (e.g. MIT, Apache-2.0, GPL-3.0) is a separate decision.
-- **Privacy notice.** `docs/PRIVACY.md` is a draft for legal review with the operator's name and contact missing. The site and README link to it labelled "draft". Public launch needs the reviewed version.
-- **Age policy and the cloud AI for minors** (Hermes's H-04): the site tells under-18s that a parent or guardian should decide.
-- **App link to the site** (`RELEASES_URL` in `src/shared/product.ts`): pointing the "new version" notice at the download page is a one-line app change, not made here.
-
-## What was verified on this branch
-
-- `npm run typecheck` and `npm test` pass (the existing 235 unit tests plus 24 new ones for release verification and the site).
-- The site was built from the **real** release list on 31 Oct: it offers nothing, because the only release is the DO NOT PUBLISH draft; the deploy check passed.
-- The page was rendered in Chrome at 1280 px and 390 px, light and dark, as a Windows, Mac and iPhone visitor: no horizontal scrolling, no console errors, every download button disabled in the no-release state.
-- Links in the README and docs were checked: every relative link resolves to a file and heading on this branch.
-- External links: the site's links to `blob/main/…` files (install guide, privacy, licence, support) return 404 today because `main` is stale; the same paths return 200 on `beta-release`, so they work after A3. *Open a public issue* asks anonymous visitors to sign in, as labelled.
-- Download links on the site and in release notes are direct `releases/download/<tag>/<file>` URLs, which work without a GitHub account for this public repository.
+- **Licence.** `LICENSE.txt` says "all rights reserved" (`UNLICENSED`). The README says so. An open-source licence is a separate decision.
+- **Privacy notice.** [PRIVACY.md](../PRIVACY.md) is a draft pending legal review; who runs Inkling, a contact address and the children section are placeholders.
+- **Children and the cloud AI** (Hermes H-04, [CLAIMS-AUDIT.md](CLAIMS-AUDIT.md)): the app doesn't check ages and uses one *Allow* per installation. Parental consent for under-13s (US) and under-16s (parts of the EU/UK) needs counsel.
+- **Security contact** (`SUPPORT.md` placeholder).
+- **App's "new version" link** points at the GitHub release page; pointing it at the download site is a one-line app change, not made.
+- **Hermes's evidence** contains local Windows paths with the tester's account name, and one manifest hash (`hash-verification.json`) doesn't match its file in Hermes's own commit. Left unchanged; Hermes may want to regenerate the manifest.

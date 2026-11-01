@@ -4,13 +4,15 @@ Status as of 31 Oct 2026, 01:00 UTC, on branch `beta-release`, commit `4ea46be` 
 
 ## Beta 2 for 5–10 invited testers
 
-**Current draft (31 Oct 2026, 07:50 UTC):** `v0.2.0-beta.2` from `d086a06`, all jobs green, not published, no tag.
+**Current draft (1 Nov 2026, 23:00 UTC):** `v0.2.0-beta.2` from `main` @ `2e37ec5`, built by *Run workflow → draft-release* on `main` (run [41354956054](https://github.com/SuperGithubDuo/inkling-notebook/actions/runs/41354956054)). All jobs green, including the new draft verification (commit, versions, SHA-256 vs build machines and GitHub digests, `latest*.yml` SHA-512 and sizes) and the verified-build marker. Not published, no tag; the download site doesn't offer it until it's published.
 
 | File | SHA-256 |
 |---|---|
-| `Inkling-Setup-0.2.0-beta.2-x64.exe` | `c7361f3819d34b467b7a7a4ff0391148d12a035cc914493474200cd96c13cf5b` |
-| `Inkling-0.2.0-beta.2-arm64.dmg` | `6e45cfa077be281177254e7c446eb4a78f2e577a472c38193ff124c035080ebc` |
-| `Inkling-0.2.0-beta.2-x64.dmg` | `ac380bf06ee864dd4886f45cf93a0f9bd14cef1ad8452026c19df154aa6ce797` |
+| `Inkling-Setup-0.2.0-beta.2-x64.exe` | `ce82899c7d5899a0ac30c6661e19c061c7fa6966debee7c4c0d5b104359e6d7c` |
+| `Inkling-0.2.0-beta.2-arm64.dmg` | `5b5dc481a116846ec5e8eac635689c2003bcf545064ac6e3949bdd75fe5486b8` |
+| `Inkling-0.2.0-beta.2-x64.dmg` | `6c32a1f6663cf2343c13c73e5de470a46b6d170ab319dcd5d4c5d6f08b8acfe9` |
+
+One checksum file, `Inkling-0.2.0-beta.2-SHA256SUMS.txt`, is attached to the draft. The earlier draft from `d086a06` (31 Oct) was replaced.
 
 These change when the draft is rebuilt with `INKLING_FEEDBACK_URL`.
 
