@@ -337,7 +337,15 @@ function TestRow({ test, disabled, onTest, okText }: { test: TestState; disabled
         )}
         {test.kind === 'error' && (
           <span className="flex items-start gap-1.5 text-[#c03a3e]">
-            <CircleAlert size={14} className="mt-px shrink-0" /> {test.error.message}
+            <CircleAlert size={14} className="mt-px shrink-0" />
+            <span>
+              {test.error.message}
+              {test.error.detail && (
+                <span data-testid="ai-test-detail" className="mt-0.5 block select-text font-mono text-[11.5px] break-words text-ink-3">
+                  {test.error.detail}
+                </span>
+              )}
+            </span>
           </span>
         )}
       </span>

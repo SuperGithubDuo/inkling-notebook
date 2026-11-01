@@ -43,11 +43,28 @@ export class ProviderError extends Error {
   constructor(
     readonly code: AiErrorCode,
     message: string,
-    readonly retryAfter?: number
+    readonly retryAfter?: number,
+    readonly options: {
+      /** What the provider actually answered (HTTP status, Google's status and reason, its message), keys redacted. */
+      detail?: string
+      /** A transient failure worth retrying automatically (never bad keys, quotas or bad requests). */
+      retryable?: boolean
+    } = {}
   ) {
     super(message)
   }
+  get detail(): string | undefined {
+    return this.options.detail
+  }
+  get retryable(): boolean {
+    return this.options.retryable ?? false
+  }
   toJSON(): AiError {
-    return { code: this.code, message: this.message, ...(this.retryAfter !== undefined ? { retryAfter: this.retryAfter } : {}) }
+    return {
+      code: this.code,
+      message: this.message,
+      ...(this.retryAfter !== undefined ? { retryAfter: this.retryAfter } : {}),
+      ...(this.options.detail ? { detail: this.options.detail } : {})
+    }
   }
 }

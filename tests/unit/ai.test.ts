@@ -3,7 +3,7 @@ import { ApiError } from '@google/genai'
 import { mkdtemp, readFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GeminiProvider, classifyError, secondsUntilPacificMidnight } from '../../src/main/ai/gemini'
+import { DEFAULT_RETRY, GeminiProvider, backoffDelay, classifyError, secondsUntilPacificMidnight, type RetryPolicy } from '../../src/main/ai/gemini'
 import { AiConfig, type SecretCipher } from '../../src/main/ai/config'
 import { AiService } from '../../src/main/ai/service'
 import { ProviderError, type ProviderChunk } from '../../src/main/ai/provider'
@@ -18,13 +18,18 @@ beforeAll(async () => {
 afterAll(() => fake.close())
 beforeEach(() => {
   fake.requests.length = 0
+  logs = []
   fake.setModels([
     { name: 'models/gemini-3.8-flash', supportedGenerationMethods: ['generateContent'], inputTokenLimit: 1000000 },
     { name: 'models/gemini-3.5-flash-lite', supportedGenerationMethods: ['generateContent'] }
   ])
 })
 
-const provider = (key = VALID_KEY): GeminiProvider => new GeminiProvider({ apiKey: key, baseUrl: fake.url })
+/** Fast, quiet retries for tests; `logs` collects what the provider would print. */
+const FAST_RETRY = { baseDelayMs: 1, maxDelayMs: 4 }
+let logs: string[] = []
+const provider = (key = VALID_KEY, retry: Partial<RetryPolicy> = FAST_RETRY): GeminiProvider =>
+  new GeminiProvider({ apiKey: key, baseUrl: fake.url, retry, log: (l) => logs.push(l) })
 const collect = async (it: AsyncIterable<ProviderChunk>): Promise<ProviderChunk[]> => {
   const out: ProviderChunk[] = []
   for await (const c of it) out.push(c)
@@ -87,7 +92,7 @@ describe('Gemini provider (official SDK against a fake Gemini API)', () => {
     ['overloaded', errors.overloaded(), 'server', 10]
   ])('translates %s into a friendly error', async (_name, error, code, retry) => {
     fake.reply({ error })
-    const e = await errorOf(collect(provider().stream(req())))
+    const e = await errorOf(collect(provider(VALID_KEY, { attempts: 1 }).stream(req())))
     expect(e).toBeInstanceOf(ProviderError)
     expect(e.code).toBe(code)
     expect(e.message).not.toMatch(/\{|RESOURCE_EXHAUSTED/)
@@ -101,7 +106,7 @@ describe('Gemini provider (official SDK against a fake Gemini API)', () => {
   })
 
   it('reports network failures', async () => {
-    const offline = new GeminiProvider({ apiKey: VALID_KEY, baseUrl: 'http://127.0.0.1:9' })
+    const offline = new GeminiProvider({ apiKey: VALID_KEY, baseUrl: 'http://127.0.0.1:9', retry: FAST_RETRY, log: (l) => logs.push(l) })
     const e = await errorOf(collect(offline.stream(req())))
     expect(e.code).toBe('network')
   })
@@ -217,7 +222,7 @@ async function makeService(opts: { consent?: boolean; key?: string | null; clock
   const clock = opts.clock
   const service = new AiService({
     config,
-    makeProvider: (apiKey) => new GeminiProvider({ apiKey, baseUrl: fake.url }),
+    makeProvider: (apiKey) => new GeminiProvider({ apiKey, baseUrl: fake.url, retry: FAST_RETRY, log: (l) => logs.push(l) }),
     emit: (e) => events.push(e),
     now: clock ? () => clock.t : undefined,
     limits: { minIntervalMs: 0, ...opts.limits }
@@ -484,5 +489,215 @@ describe('builds without Gemini (public, all ages)', () => {
     await service.ensureAllowedProvider()
     expect(service.status().provider).toBe('cloud')
     expect(fake.requests.length).toBe(before)
+  })
+})
+
+// ------------------------------------------------- Gemini errors and retries
+
+describe('Gemini request pipeline: keys, Google errors, retries', () => {
+  const google = (status: number, message: string, googleStatus: string, details: object[] = []) => ({ status, body: { error: { code: status, message, status: googleStatus, details } } })
+  const reason = (r: string) => ({ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: r, domain: 'googleapis.com' })
+
+  it.each([VALID_KEY, VALID_AQ_KEY])('sends %s to Google unchanged, only in the x-goog-api-key header', async (key) => {
+    await collect(provider(key).stream(req()))
+    await provider(key).listModels()
+    expect(fake.requests.length).toBeGreaterThanOrEqual(2)
+    for (const r of fake.requests) {
+      expect(r.key).toBe(key)
+      expect(r.path).not.toContain(key)
+      expect(JSON.stringify(r.body ?? {})).not.toContain(key)
+    }
+  })
+
+  it.each([
+    ['400 bad key', google(400, 'API key not valid. Please pass a valid API key.', 'INVALID_ARGUMENT', [reason('API_KEY_INVALID')]), 'invalid_key', /not valid/],
+    ['400 expired key', google(400, 'API key expired. Please renew the API key.', 'INVALID_ARGUMENT', [reason('API_KEY_EXPIRED')]), 'invalid_key', /expired/],
+    ['400 region', google(400, 'User location is not supported for the API use.', 'FAILED_PRECONDITION'), 'bad_request', /region/],
+    ['400 precondition', google(400, 'Gemini API free tier is not available in your country. Please enable billing on your project in Google AI Studio.', 'FAILED_PRECONDITION'), 'permission_denied', /billing/],
+    ['400 bad argument', google(400, 'Invalid JSON payload received.', 'INVALID_ARGUMENT'), 'bad_request', /Invalid JSON payload/],
+    ['401', google(401, 'Request had invalid authentication credentials.', 'UNAUTHENTICATED', [reason('ACCESS_TOKEN_TYPE_UNSUPPORTED')]), 'invalid_key', /authenticate/],
+    ['403 unregistered', google(403, "Method doesn't allow unregistered callers (callers without established identity).", 'PERMISSION_DENIED'), 'invalid_key', /recognise/],
+    ['403 API disabled', google(403, 'Generative Language API has not been used in project 123 before or it is disabled.', 'PERMISSION_DENIED', [reason('SERVICE_DISABLED')]), 'permission_denied', /turned off/],
+    ['403 key restricted', google(403, 'Requests to this API generativelanguage.googleapis.com method are blocked.', 'PERMISSION_DENIED', [reason('API_KEY_SERVICE_BLOCKED')]), 'permission_denied', /restrictions/],
+    ['403 leaked key', google(403, 'Your API key was reported as leaked. Please use another API key.', 'PERMISSION_DENIED'), 'invalid_key', /leaked/],
+    ['403 other', google(403, 'The caller does not have permission', 'PERMISSION_DENIED'), 'permission_denied', /does not have permission/],
+    ['404 model', errors.notFound(), 'model_unavailable', /not available/],
+    ['429 per minute', errors.perMinute('17s'), 'rate_limited', /per minute/],
+    ['429 daily', errors.perDay(), 'daily_quota', /today/],
+    ['429 no free tier', errors.noFreeTier(), 'not_free', /no free quota/],
+    ['500', google(500, 'An internal error has occurred. Please retry or report in https://developers.generativeai.google/guide/troubleshooting', 'INTERNAL'), 'server', /internal error \(500\)/],
+    ['502', { status: 502, body: { error: { code: 502, message: 'Bad Gateway', status: 'Bad Gateway' } } }, 'server', /bad gateway error \(502\)/],
+    ['503', errors.overloaded(), 'server', /overloaded or temporarily unavailable \(503\)/],
+    ['504', google(504, 'Deadline expired before operation could complete.', 'DEADLINE_EXCEEDED'), 'server', /timed out \(504\)/]
+  ])('%s: its own message, with Google’s real answer kept as detail', async (_name, error, code, text) => {
+    fake.reply({ error })
+    const e = await errorOf(collect(provider(VALID_KEY, { attempts: 1 }).stream(req())))
+    expect(e.code).toBe(code)
+    expect(e.message).toMatch(text)
+    expect(e.message).not.toMatch(/\{/)
+    expect(e.detail).toMatch(new RegExp(`^HTTP ${error.status}\\b`))
+    expect(e.detail).toContain((error.body as { error: { message: string } }).error.message.slice(0, 30))
+    expect(e.toJSON().detail).toBe(e.detail)
+  })
+
+  it('distinct statuses no longer collapse into one generic message', () => {
+    const msg = (status: number) => classifyError(new ApiError({ message: JSON.stringify(google(status, 'x', 'S').body), status }), { aborted: false, timedOut: false }).message
+    expect(new Set([500, 502, 503, 504].map(msg)).size).toBe(4)
+  })
+
+  it('retries a 503 with backoff and delivers the answer when Google recovers', async () => {
+    fake.reply({ error: errors.overloaded() })
+    fake.reply({ text: 'Recovered answer' })
+    const chunks = await collect(provider().stream(req()))
+    expect(chunks.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join('')).toBe('Recovered answer')
+    expect(fake.generated()).toHaveLength(2)
+    expect(logs.some((l) => /attempt 1 of 3 failed \(HTTP 503 UNAVAILABLE: The model is overloaded/.test(l))).toBe(true)
+  })
+
+  it.each([500, 502, 504])('retries %i too', async (status) => {
+    fake.reply({ error: google(status, 'transient', 'X') })
+    await collect(provider().stream(req()))
+    expect(fake.generated()).toHaveLength(2)
+  })
+
+  it('gives up after the last attempt and says how many were made', async () => {
+    for (let i = 0; i < 3; i++) fake.reply({ error: errors.overloaded() })
+    const e = await errorOf(collect(provider().stream(req())))
+    expect(e.code).toBe('server')
+    expect(fake.generated()).toHaveLength(DEFAULT_RETRY.attempts)
+    expect(e.detail).toMatch(/HTTP 503 UNAVAILABLE: The model is overloaded.*\(3 attempts\)$/)
+    expect(logs.at(-1)).toMatch(/failed after 3 attempts: HTTP 503/)
+  })
+
+  it.each([
+    ['invalid key', errors.invalidKey()],
+    ['401', google(401, 'Request had invalid authentication credentials.', 'UNAUTHENTICATED')],
+    ['403', google(403, 'Permission denied', 'PERMISSION_DENIED', [reason('SERVICE_DISABLED')])],
+    ['404', errors.notFound()],
+    ['per-minute quota', errors.perMinute('17s')],
+    ['daily quota', errors.perDay()],
+    ['no free tier', errors.noFreeTier()],
+    ['bad request', google(400, 'Invalid JSON payload received.', 'INVALID_ARGUMENT')]
+  ])('never retries %s (one request only)', async (_name, error) => {
+    fake.reply({ error })
+    fake.reply({ text: 'should not be fetched' })
+    const e = await errorOf(collect(provider().stream(req())))
+    expect(e.retryable).toBe(false)
+    expect(fake.generated()).toHaveLength(1)
+    fake.requests.length = 0
+    await collect(provider().stream(req())) // drain the queued answer for the next test
+  })
+
+  it('does not retry a rejected key when listing models either', async () => {
+    const e = await errorOf(provider(BAD_KEY).listModels())
+    expect(e.code).toBe('invalid_key')
+    expect(fake.requests).toHaveLength(1)
+  })
+
+  it('retries a dropped connection but not a missing network', () => {
+    const reset = classifyError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }), { aborted: false, timedOut: false })
+    const dns = classifyError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }), { aborted: false, timedOut: false })
+    expect([reset.code, reset.retryable]).toEqual(['network', true])
+    expect([dns.code, dns.retryable]).toEqual(['network', false])
+    expect(classifyError(new Error('x'), { aborted: false, timedOut: true }).retryable).toBe(false)
+  })
+
+  it('backs off exponentially with jitter, capped', () => {
+    const policy = { attempts: 5, baseDelayMs: 1000, maxDelayMs: 8000 }
+    expect([1, 2, 3, 4, 5].map((a) => backoffDelay(a, policy, () => 1))).toEqual([1000, 2000, 4000, 8000, 8000])
+    expect(backoffDelay(1, policy, () => 0)).toBe(500)
+  })
+
+  it('stops waiting at once when the user presses Stop during a backoff', async () => {
+    fake.reply({ error: errors.overloaded() })
+    const controller = new AbortController()
+    const slow = provider(VALID_KEY, { attempts: 3, baseDelayMs: 60_000, maxDelayMs: 60_000 })
+    const started = Date.now()
+    const pending = errorOf(collect(slow.stream(req(), controller.signal)))
+    setTimeout(() => controller.abort(), 50)
+    const e = await pending
+    expect(e.code).toBe('canceled')
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(fake.generated()).toHaveLength(1)
+  })
+
+  it('does not retry an error that arrives after text was shown (no duplicated answer)', async () => {
+    const { createServer } = await import('node:http')
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      res.write(`data: ${JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: 'Partial ' }] }, index: 0 }] })}\r\n\r\n`)
+      setTimeout(() => res.end(`data: ${JSON.stringify({ error: { code: 503, message: 'The model is overloaded.', status: 'UNAVAILABLE' } })}\r\n\r\n`), 20)
+    })
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+    let hits = 0
+    server.on('request', () => hits++)
+    try {
+      const port = (server.address() as { port: number }).port
+      const p = new GeminiProvider({ apiKey: VALID_KEY, baseUrl: `http://127.0.0.1:${port}`, retry: FAST_RETRY, log: (l) => logs.push(l) })
+      const got: string[] = []
+      const e = await errorOf(
+        (async () => {
+          for await (const c of p.stream(req())) if (c.type === 'text') got.push(c.text)
+        })()
+      )
+      expect(got).toEqual(['Partial '])
+      expect(e.code).toBe('server')
+      expect(e.detail).toMatch(/^HTTP 503 UNAVAILABLE/)
+      expect(hits).toBe(1)
+    } finally {
+      server.close()
+    }
+  })
+
+  it.each([VALID_KEY, VALID_AQ_KEY])('keeps %s out of messages, details and logs even when Google echoes it', async (key) => {
+    for (let i = 0; i < 3; i++) fake.reply({ error: google(503, `Backend unavailable for key ${key}`, 'UNAVAILABLE') })
+    const e = await errorOf(collect(provider(key).stream(req())))
+    const surfaces = [e.message, e.detail ?? '', JSON.stringify(e.toJSON()), ...logs]
+    for (const s of surfaces) {
+      expect(s).not.toContain(key)
+      expect(s).not.toContain(key.slice(0, 20))
+    }
+    expect(e.detail).toContain(`[key …${key.slice(-4)}]`)
+  })
+
+  it('redacts keys from unexpected errors before they reach the window', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'inkling-ai-'))
+    const config = new AiConfig(dir, fakeCipher())
+    await config.load()
+    await config.setProvider('gemini')
+    await config.setKey(VALID_AQ_KEY)
+    await config.setConsent(true)
+    const events: AiEvent[] = []
+    const service = new AiService({
+      config,
+      makeProvider: () => ({
+        id: 'gemini',
+        listModels: async () => [],
+        // eslint-disable-next-line require-yield
+        stream: async function* () {
+          throw new Error(`boom with ${VALID_AQ_KEY}`)
+        }
+      }),
+      emit: (e) => events.push(e),
+      limits: { minIntervalMs: 0 }
+    })
+    idOf(service.start(chat()))
+    await new Promise((r) => setTimeout(r, 30))
+    const err = events.find((e) => e.type === 'error')
+    expect(err).toBeDefined()
+    expect(JSON.stringify(err)).not.toContain(VALID_AQ_KEY)
+  })
+
+  it('offers the other free model when Google is overloaded', async () => {
+    const { service, finished } = await makeService()
+    await service.test()
+    for (let i = 0; i < 3; i++) fake.reply({ error: errors.overloaded() })
+    const end = await finished(idOf(service.start(chat())))
+    expect(end.type).toBe('error')
+    if (end.type === 'error') {
+      expect(end.error.code).toBe('server')
+      expect(end.error.suggestModel).toBe('gemini-3.5-flash-lite')
+      expect(end.error.detail).toMatch(/HTTP 503 UNAVAILABLE/)
+    }
   })
 })

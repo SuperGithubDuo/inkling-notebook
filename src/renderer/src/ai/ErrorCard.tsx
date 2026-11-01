@@ -6,8 +6,8 @@ import { cx } from '@/components/ui/primitives'
 import { useAi } from './aiStore'
 import { useTutor } from './tutorStore'
 
-const SETTINGS_CODES = new Set(['no_key', 'invalid_key', 'consent_required', 'not_free', 'model_unavailable', 'offline', 'beta_closed'])
-const NO_RETRY = new Set(['no_key', 'consent_required', 'duplicate', 'invalid_key', 'beta_closed'])
+const SETTINGS_CODES = new Set(['no_key', 'invalid_key', 'permission_denied', 'consent_required', 'not_free', 'model_unavailable', 'offline', 'beta_closed'])
+const NO_RETRY = new Set(['no_key', 'consent_required', 'duplicate', 'invalid_key', 'permission_denied', 'beta_closed'])
 
 export function ErrorCard({ error, messageId, onOpenSettings, onRetry }: { error: AiError; messageId?: string; onOpenSettings: () => void; onRetry?: () => void }) {
   const running = useTutor((s) => !!s.running)
@@ -21,6 +21,11 @@ export function ErrorCard({ error, messageId, onOpenSettings, onRetry }: { error
         <CircleAlert size={15} className={cx('mt-0.5 shrink-0', quota ? 'text-[#c27c0e]' : 'text-[#c03a3e]')} />
         <span className="leading-relaxed text-ink">{error.message}</span>
       </div>
+      {error.detail && (
+        <p data-testid="tutor-error-detail" className="mt-1 select-text pl-6 font-mono text-[11.5px] leading-snug break-words text-ink-3">
+          {error.detail}
+        </p>
+      )}
       <div className="mt-2 flex flex-wrap gap-1.5 pl-6">
         {error.suggestModel && (
           <Action

@@ -175,6 +175,7 @@ export type AiErrorCode =
   | 'server'
   | 'blocked'
   | 'bad_request'
+  | 'permission_denied' // the key is real but its project may not use the API (disabled API, key restrictions, billing)
   | 'busy' // another request is still running
   | 'duplicate' // the same request was just sent
   | 'canceled'
@@ -191,6 +192,11 @@ export interface AiError {
   retryAfter?: number
   /** Suggests letting the user switch to this (free) model themselves. */
   suggestModel?: AiModelId
+  /**
+   * What the provider actually answered, for diagnosis: e.g. "HTTP 503 UNAVAILABLE: The model is
+   * overloaded." Never contains an API key (redacted with redactKeys).
+   */
+  detail?: string
 }
 
 // ------------------------------------------------------------------ status
