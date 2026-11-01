@@ -63,6 +63,7 @@ describe.skipIf(!key)(`${useFake ? 'fake' : 'real'} Gemini API (${model})`, () =
 
   const makeService = async (apiKey: string): Promise<AiService> => {
     const config = new AiConfig(await mkdtemp(join(tmpdir(), 'inkling-smoke-')), memoryCipher)
+    await config.setProvider('gemini') // Ollama is the default provider; this test is about Gemini
     await config.setKey(apiKey) // memory only: the cipher above cannot encrypt, so nothing is saved
     await config.setModel(model)
     await config.setConsent(true)
