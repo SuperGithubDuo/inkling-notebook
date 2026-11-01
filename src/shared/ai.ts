@@ -268,6 +268,8 @@ export interface AiStatus {
   consented: boolean
   /** The user has agreed to Gemini's data use (and its age requirement). */
   geminiConsented: boolean
+  /** Whether this build offers Google Gemini at all (off in public, all-ages builds). */
+  geminiAvailable: boolean
   /** Models of the active provider; for Ollama also other installed vision models. */
   models: ModelAvailability[]
   ollama: OllamaState
@@ -311,10 +313,28 @@ export type AiEvent =
    */
   | { requestId?: undefined; type: 'status'; status: AiStatus }
 
-/** Accepted shape of a Gemini API key (format only; Google decides validity). */
+/**
+ * The two formats Google AI Studio issues (format only; Google decides validity):
+ * - legacy API keys: `AIza` + URL-safe base64 (letters, digits, `_`, `-`; 39 characters in all today);
+ * - newer authorization keys: `AQ.` + letters, digits, `_`, `-` and `.` (the dot separates parts).
+ * Anything else, including spaces, quotes, `auth_tokens/…` ephemeral tokens (Live API only)
+ * or a whole `x-goog-api-key: …` line, is refused before it is stored.
+ */
+export const GEMINI_KEY_PATTERNS = [/^AIza[A-Za-z0-9_-]{20,96}$/, /^AQ\.[A-Za-z0-9_-][A-Za-z0-9._-]{18,196}[A-Za-z0-9_-]$/] as const
+const GEMINI_KEY_HINT = 'That does not look like a Gemini API key. Copy the whole key from Google AI Studio: it starts with “AIza” or “AQ.”.'
+
 export const apiKeySchema = z
   .string()
   .trim()
-  .min(20, 'That does not look like a Gemini API key.')
-  .max(200)
-  .regex(/^[A-Za-z0-9_-]+$/, 'That does not look like a Gemini API key.')
+  .min(20, GEMINI_KEY_HINT)
+  .max(200, GEMINI_KEY_HINT)
+  .refine((k) => GEMINI_KEY_PATTERNS.some((re) => re.test(k)), GEMINI_KEY_HINT)
+
+/**
+ * Hides anything shaped like a Google key in text that may be shown or logged (an
+ * error message from Google or the network can echo a request). Keeps the last 4
+ * characters, like the settings' "key ending in …".
+ */
+export function redactKeys(text: string): string {
+  return text.replace(/\b(?:AIza[A-Za-z0-9_-]{8,}|AQ\.[A-Za-z0-9._-]{8,})/g, (k) => `[key …${k.slice(-4)}]`)
+}

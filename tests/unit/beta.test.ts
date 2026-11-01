@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Ledger, networkOf, nextUtcMidnight, type Identity, type LedgerLimits } from '../../beta-server/src/ledger'
+import { Ledger, UPSTREAM_RETRY_MS, networkOf, nextUtcMidnight, type Identity, type LedgerLimits } from '../../beta-server/src/ledger'
 import { estimateInputTokens, imageSize, imageTokens, neuronsFor, parseUpstream, readSse, toMessages, classifyUpstream } from '../../beta-server/src/upstream'
 import { startBetaServer, RATES, type BetaServer } from '../support/fakeBeta.mjs'
 import { AiConfig, migrateSettings, type SecretCipher } from '../../src/main/ai/config'
@@ -197,14 +197,63 @@ describe('ledger', () => {
     expect((await ledger.quota(ada)).installUsed).toBe(0)
   })
 
-  it('Cloudflare reporting the free allocation used up closes the day for everyone', async () => {
+  it('Cloudflare reporting the free allocation used up stops answers for everyone, then tries again', async () => {
+    t = nextUtcMidnight(t) + 3_600_000 // 01:00 UTC: the retry comes long before the daily reset
     const r = await ledger.reserve(ada, 50)
     if (!r.ok) throw new Error()
     await ledger.settle(r.reservationId, undefined, { failedBeforeModel: true, upstreamExhausted: true })
-    expect(await ledger.reserve(bo, 1)).toMatchObject({ ok: false, code: 'global_quota' })
-    expect((await ledger.quota(bo)).approxAnswersLeft).toBe(0)
-    t = nextUtcMidnight(t) + 1
+    const refused = await ledger.reserve(bo, 1)
+    // Its own refusal with the real retry time, never "today's allowance is used up".
+    expect(refused).toMatchObject({ ok: false, code: 'upstream_unavailable', retryAfter: UPSTREAM_RETRY_MS / 1000 })
+    // Inkling's own allowance is unchanged meanwhile.
+    expect(await ledger.quota(bo)).toMatchObject({ globalLimit: limits.globalDailyNeurons, approxAnswersLeft: Math.floor(limits.installDailyNeurons / limits.typicalNeuronsPerAnswer) })
+    expect((await ledger.summary()).upstreamExhausted).toBe(true)
+    t += UPSTREAM_RETRY_MS - 60_000
+    expect(await ledger.reserve(bo, 1)).toMatchObject({ ok: false, code: 'upstream_unavailable', retryAfter: 60 })
+    t += 60_000
     expect((await ledger.reserve(bo, 1)).ok).toBe(true)
+    expect((await ledger.summary()).upstreamExhausted).toBe(false)
+  })
+
+  it('the whole-service cap counts the last 24 hours, across the UTC midnight', async () => {
+    const roomy = { ...limits, globalDailyNeurons: 1000, installDailyNeurons: 1000, networkDailyNeurons: 2000 }
+    t = nextUtcMidnight(t) - 3_600_000 + 60_000 // 23:01 UTC
+    const tight = new Ledger(memoryStorage(), roomy, () => t)
+    const r = await tight.reserve(ada, 800)
+    if (!r.ok) throw new Error()
+    await tight.settle(r.reservationId, 800)
+    // 01:01 UTC: a new day for each computer's allowance, but the service's last 24 hours still hold the 800.
+    t += 2 * 3_600_000
+    expect((await tight.quota(bo)).globalUsed).toBe(800)
+    const refused = await tight.reserve(bo, 300)
+    expect(refused).toMatchObject({ ok: false, code: 'global_quota' })
+    // Room returns when the 23:00 hour leaves the window: 25 h after its start, i.e. at 00:00 the day after.
+    const wait = refused.ok ? 0 : refused.retryAfter!
+    expect(wait).toBe((23 * 3_600_000 - 60_000) / 1000)
+    const fits = await tight.reserve(bo, 200)
+    expect(fits.ok).toBe(true)
+    if (fits.ok) await tight.settle(fits.reservationId, 0)
+    t += wait * 1000 - 1000
+    expect(await tight.reserve(bo, 300)).toMatchObject({ ok: false, code: 'global_quota' })
+    t += 1000
+    expect((await tight.reserve(bo, 300)).ok).toBe(true)
+  })
+
+  it('a reservation left unsettled overnight still counts against the rolling cap', async () => {
+    const roomy = { ...limits, globalDailyNeurons: 1000, installDailyNeurons: 1000, networkDailyNeurons: 2000 }
+    t = nextUtcMidnight(t) - 60_000 // 23:59 UTC
+    const tight = new Ledger(memoryStorage(), roomy, () => t)
+    expect((await tight.reserve(ada, 700)).ok).toBe(true)
+    t += 2 * 3_600_000 // the reservation expired unsettled, on another UTC day
+    expect((await tight.quota(bo)).globalUsed).toBe(700)
+  })
+
+  it('a day closed by an older server version is open again', async () => {
+    await spend(ada, 5)
+    const day = storage.map.get('day') as Record<string, unknown>
+    storage.map.set('day', { ...day, upstreamExhausted: true })
+    // The new version starts with a fresh Durable Object instance on the same storage.
+    expect((await new Ledger(storage, limits, () => t).reserve(bo, 1)).ok).toBe(true)
   })
 
   it('pause stops everyone and survives a restart; the summary holds no identities', async () => {
@@ -287,6 +336,8 @@ describe('upstream', () => {
   it('recognises Workers AI errors', () => {
     expect(classifyUpstream(new Error('4006: you have used up your daily free allocation of 10,000 neurons, please upgrade to Cloudflare\'s Workers Paid plan')).kind).toBe('free_allocation')
     expect(classifyUpstream(new Error('3040: Capacity temporarily exceeded, please try again.')).kind).toBe('capacity')
+    // Other errors that merely mention Neurons don't stop the service.
+    expect(classifyUpstream(new Error('5021: input too long (estimated 120000 neurons)')).kind).not.toBe('free_allocation')
     expect(classifyUpstream(new Error('JSON Mode couldn\'t be met')).kind).toBe('json_mode')
   })
 })
@@ -503,14 +554,45 @@ describe('AI server', () => {
     expect(r.events.at(-1)?.event).toBe('done')
   })
 
-  it('stops for everyone when Cloudflare says the free allocation is used up, without upgrade talk', async () => {
+  it('Cloudflare saying its free allocation is used up pauses everyone for 15 minutes, with that retry time', async () => {
     await start()
     server.ai.reply({ error: '4006: you have used up your daily free allocation of 10,000 neurons, please upgrade to Cloudflare\'s Workers Paid plan if you would like to continue usage.' })
-    const r = await post(server, chat('one'))
-    expect(r.json.error).toMatchObject({ code: 'daily_quota', scope: 'global_quota' })
-    expect(r.json.error.message).not.toMatch(/upgrade|paid plan/i)
-    expect((await post(server, chat('two'), { install: INSTALL_B, ip: '192.0.2.5' })).json.error.code).toBe('daily_quota')
+    // The request that met the error: the real retry time, not the UTC midnight reset; no upgrade talk.
+    const first = await post(server, chat('one'))
+    expect(first.status).toBe(503)
+    expect(first.json.error).toMatchObject({ code: 'server', scope: 'upstream_unavailable', retryAfter: 900 })
+    expect(first.json.error.message).toMatch(/briefly unavailable.*in about 15 minutes/)
+    expect(first.json.error.message).not.toMatch(/upgrade|paid plan|used up|24 hours/i)
+    expect(first.headers.get('retry-after')).toBe('900')
+    // Meanwhile: refused before the model for everyone, with the time left.
+    server.clock.offset = 10 * 60_000
+    const during = await post(server, chat('two'), { install: INSTALL_B, ip: '192.0.2.5' })
+    expect(during.json.error).toMatchObject({ code: 'server', scope: 'upstream_unavailable' })
+    expect(during.json.error.retryAfter).toBeGreaterThan(290)
+    expect(during.json.error.retryAfter).toBeLessThanOrEqual(300)
+    expect(during.json.error.message).toMatch(/in about 5 minutes/)
+    // Inkling's own allowance is not reported as used up, and the failed call cost nothing.
+    const st = await statusOf(server)
+    expect(st.quota).toMatchObject({ installUsed: 0, globalUsed: 0, globalLimit: 9000 })
+    expect(st.quota.approxAnswersLeft).toBeGreaterThan(0)
     expect(server.ai.calls).toHaveLength(1)
+    // Recovery: after 15 minutes the next request reaches the model again.
+    server.clock.offset = 15 * 60_000 + 1000
+    const after = await post(server, chat('three'), { install: INSTALL_B, ip: '192.0.2.5' })
+    expect(after.events.at(-1)?.event).toBe('done')
+    expect(server.ai.calls).toHaveLength(2)
+  })
+
+  it('a used-up Inkling allowance for everyone is a quota with the time until the last 24 hours have room', async () => {
+    await start({ globalDailyNeurons: 300 })
+    server.ai.reply({ text: 'x', usage: { inputTokens: 1000, outputTokens: 600 } })
+    await post(server, chat('one'))
+    const r = await post(server, { task: 'practice', turns: [{ role: 'user', parts: [{ text: 'Two problems.' }] }] }, { install: INSTALL_B, ip: '192.0.2.5' })
+    expect(r.json.error).toMatchObject({ code: 'daily_quota', scope: 'global_quota' })
+    // 24–25 hours: until this hour's use leaves the rolling window, not the next UTC midnight.
+    expect(r.json.error.retryAfter).toBeGreaterThan(24 * 3600)
+    expect(r.json.error.retryAfter).toBeLessThanOrEqual(25 * 3600)
+    expect(r.json.error.message).toMatch(/used up for everyone/)
   })
 
   it('stopping an answer stops the model and keeps the reservation charged', async () => {
@@ -694,6 +776,32 @@ describe('app on the cloud AI', () => {
     expect(ask('three')).toMatchObject({ error: { code: 'daily_quota' } })
     expect(service.status().cooldown?.reason).toBe('daily_quota')
     expect(server.ai.calls.length).toBe(calls)
+  })
+
+  it('a short provider outage keeps no day-long pause: the next try after recovery is answered, without a restart', async () => {
+    await makeService()
+    await service.setConsent(true)
+    server.ai.reply({ error: '4006: you have used up your daily free allocation of 10,000 neurons, please upgrade to Cloudflare\'s Workers Paid plan.' })
+    const first = ask('one')
+    if ('error' in first) throw new Error(first.error.message)
+    const e = await finish(first.requestId)
+    expect(e).toMatchObject({ type: 'error', error: { code: 'server', retryAfter: 900 } })
+    if (e.type === 'error') expect(e.error.message).toMatch(/briefly unavailable.*15 minutes/)
+    // No cached daily pause: today's allowance still shows answers left.
+    expect(service.status().cooldown).toBeNull()
+    expect(service.status().cloud.quota?.approxAnswersLeft ?? 1).toBeGreaterThan(0)
+    // Asking again during the pause reaches the server, which refuses it for free.
+    const again = ask('two')
+    if ('error' in again) throw new Error(again.error.message)
+    expect(await finish(again.requestId)).toMatchObject({ type: 'error', error: { code: 'server' } })
+    expect(server.ai.calls).toHaveLength(1)
+    expect(service.status().cooldown).toBeNull()
+    // The provider is back: the same running app gets an answer.
+    server.clock.offset = 15 * 60_000 + 1000
+    const later = ask('three')
+    if ('error' in later) throw new Error(later.error.message)
+    expect(await finish(later.requestId)).toMatchObject({ type: 'done' })
+    expect(server.ai.calls).toHaveLength(2)
   })
 
   // Hermes QA (Beta 1): the panel showed ~10 answers left through several answers and ~6 after a restart.

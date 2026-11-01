@@ -1,5 +1,19 @@
 # Status and remaining work
 
+## Milestones
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1 | Library, pages, pen/highlighter/eraser, text, undo/redo, local auto-save | ✅ done |
+| 2 | Lasso selection, shapes, images, zoom/pan, precise eraser, page sizes, typed command layer | ✅ done |
+| 3 | Rich-text notes, search, links/backlinks, knowledge graph, PDF import/annotation/export | ✅ done |
+| 4 | AI Tutor on Google Gemini (free tier): streaming chat about handwriting, practice mode, previewed corrections on the page | ✅ done |
+| 4.6 | Local AI tutor on Ollama (default; Qwen3-VL), Gemini optional and 18+ only, narrow-window layout | ✅ done (results: [AI providers](AI-PROVIDERS.md#local-model-results)) |
+| 4.7 | Free cloud AI: Inkling's server on Cloudflare Workers AI (Qwen 3.8 27B), anonymous per-installation and per-network daily allowances inside the free tier, Ollama and Gemini kept | ✅ built; tested against a fake model and the real one |
+| 4.8 | Beta release: installers (Windows NSIS, macOS DMG), updates, release workflow, data-safety fixes, daily backups/restore, welcome, About, feedback, privacy | ✅ built; installers and acceptance suites pass on Windows and macOS runners; hands-on device testing pending (see [READINESS.md](READINESS.md)) |
+| 5 | Advanced AI editing on the canvas, more providers (OpenRouter, Anthropic Claude), handwriting search | planned |
+| 6 | Signing and notarization, accessibility audit, download website | planned (download site prepared, not yet live) |
+
 ## Verification status
 
 See [`READINESS.md`](READINESS.md) for the current, evidence-based checklist. As of 30 Oct, every automated suite and the installer lifecycle pass on real Windows and macOS runners; the cloud AI against the real model and hands-on pen testing are still pending.
@@ -25,7 +39,7 @@ See [`READINESS.md`](READINESS.md) for the current, evidence-based checklist. As
 5. **Device coverage:** Windows on ARM, Intel Macs, Wacom/Surface/Huion pens, 4K displays, slow 8 GB laptops.
 6. **Crash reporting (opt-in)** and an in-app "copy diagnostics" button, so testers can send useful reports without notebook content.
 7. **Accessibility pass:** screen-reader labels on canvas tools, keyboard-only use of dialogs and menus, contrast. Basic labels and keyboard shortcuts exist; a full audit hasn't been done.
-8. **Website** from the outline in `LAUNCH.md`, with downloads, the install guide, privacy and support.
+8. **Website** from the outline in `LAUNCH.md`, with downloads, the install guide, privacy and support. A download site is prepared in `site/` (see [maintainers/DOWNLOAD-SITE.md](maintainers/DOWNLOAD-SITE.md)); it goes live only after approval.
 9. **Payments, after demand is validated:** Stripe or a merchant of record, as in `MONETIZATION.md`.
 10. **Smaller known gaps:**
     - Handwriting search (no recognition yet).

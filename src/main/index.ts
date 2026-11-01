@@ -112,7 +112,11 @@ const aiConfig = new AiConfig(configDir, safeStorage, { builtInCloudUrl: builtIn
 // Acceptance tests send many requests in a few seconds; they may relax the
 // free-tier pacing (which unit tests cover). Ignored in normal runs.
 const testLimits = testHooks && process.env.INKLING_AI_LIMITS ? (JSON.parse(process.env.INKLING_AI_LIMITS) as Record<string, number>) : undefined
+// Google Gemini (adults only under Google's terms) stays out of packaged builds until its terms are
+// cleared for users of all ages; development and test runs keep it.
+const geminiEnabled = !app.isPackaged || import.meta.env.MAIN_VITE_INKLING_ENABLE_GEMINI === '1'
 const ai = new AiService({
+  geminiEnabled,
   limits: testLimits,
   config: aiConfig,
   makeProvider: (apiKey) => new GeminiProvider({ apiKey, baseUrl: geminiBaseUrl }),
@@ -121,7 +125,7 @@ const ai = new AiService({
     if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.aiEvent, event)
   }
 })
-const aiReady = aiConfig.load()
+const aiReady = aiConfig.load().then(() => ai.ensureAllowedProvider())
 
 // Image assets are served from the notebook folder through a read-only scheme.
 protocol.registerSchemesAsPrivileged([
@@ -530,6 +534,7 @@ function registerIpc(): void {
   })
   handle(IPC.aiSetKey, z.tuple([z.string().max(300)]), async (raw) => {
     await aiReady
+    if (!geminiEnabled) return { error: 'Google Gemini isn’t available in this version of Inkling.' }
     const key = apiKeySchema.safeParse(raw)
     if (!key.success) return { error: key.error.issues[0]?.message ?? 'Invalid key' }
     return ai.setKey(key.data)

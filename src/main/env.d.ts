@@ -6,4 +6,6 @@ interface ImportMetaEnv {
   readonly MAIN_VITE_INKLING_UPDATE_MODE?: string
   /** Where "Send feedback" goes (https page or mailto:). Defaults to new GitHub issue. */
   readonly MAIN_VITE_INKLING_FEEDBACK_URL?: string
+  /** '1' offers Google Gemini in a packaged build. Unset: no Gemini (public all-ages builds). Development always has it. */
+  readonly MAIN_VITE_INKLING_ENABLE_GEMINI?: string
 }

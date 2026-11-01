@@ -77,6 +77,8 @@ await win.keyboard.press('Enter') // moves into the body
 await win.keyboard.type('Factoring method')
 await win.click('[data-testid="text-style"]')
 await win.getByRole('menuitem', { name: /^Heading 2/ }).click()
+// The menu hands focus back to the editor on the next frame; keys sent earlier are lost (Windows CI, 31 Oct).
+await win.waitForFunction(() => !!document.activeElement?.classList.contains('ProseMirror') && !!window.getSelection()?.anchorNode?.parentElement?.closest('h2'))
 await win.keyboard.press('End')
 await win.keyboard.press('Enter')
 await win.keyboard.type('Always ')
