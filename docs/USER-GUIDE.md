@@ -87,6 +87,6 @@ Lasso some handwritten work and press ✨ *Ask AI*. The first time, Inkling asks
 - **Everything is saved on your computer**, as you write: `%APPDATA%\Inkling\Library` on Windows, `~/Library/Application Support/Inkling/Library` on macOS. *Settings → Storage* shows the exact folder.
 - **Daily backups** of your whole library (the last 7 are kept) go to `Backups` next to it. *Settings → Storage* also has *Back up now* (to any folder) and one-click *Restore*; your current library is kept as a "before restore" copy.
 - **Updating or uninstalling Inkling never touches your notebooks.** To remove them too, delete the Inkling folder above.
-- **No account, no cloud storage, no tracking.** The AI tutor only sees what you ask about, after you allow it. Details: [privacy notice (draft)](PRIVACY.md).
+- **No account, no cloud storage, no ads or analytics.** The AI tutor only sees what you ask about, after you allow it, plus an anonymous installation ID and your internet address, used only for the daily limits and kept as scrambled counts deleted every day. Details: [AI providers](AI-PROVIDERS.md) and the [privacy notice (draft)](PRIVACY.md).
 
 Something wrong? See [SUPPORT.md](../SUPPORT.md).

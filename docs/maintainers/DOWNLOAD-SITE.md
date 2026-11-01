@@ -72,12 +72,12 @@ The `?preview=sample` mode exists only in the unbuilt source; the build turns it
 
 ## Switching it on (needs approval)
 
-1. Merge to `main` (the workflow only runs from there).
-2. *Settings → Pages → Build and deployment → Source: **GitHub Actions***.
-3. *Settings → Secrets and variables → Actions → Variables*: `INKLING_SITE_ENABLED` = `true`. Optionally `INKLING_FEEDBACK_URL` (the no-sign-in form) and `INKLING_DOWNLOAD_PAGE_URL` (if you use a custom domain).
-4. *Actions → Download site → Run workflow*. Check the page shows "No download is available yet" until you publish an approved build.
+1. Merge to `main` (the workflow deploys only from there).
+2. *Settings → Pages → Build and deployment → Source: **GitHub Actions***. This one setting is the switch: every run checks it and only deploys when it's on. (Repository variables and the Pages settings can't be changed from Claude's session, so this click is yours.)
+3. *Actions → Download site → Run workflow* (or push any change to `site/` on `main`). The page then shows *Coming soon / No download is available yet* until you publish an approved build.
+4. Optional variables: `INKLING_FEEDBACK_URL` (the no-sign-in form; the page shows a *Send feedback* button once it's set) and `INKLING_DOWNLOAD_PAGE_URL` (only for a custom domain).
 
-To take the site down: set `INKLING_SITE_ENABLED` to anything else and unpublish Pages in *Settings → Pages*.
+**Kill switch:** set the repository variable `INKLING_SITE_ENABLED` to `false` to stop deploys, and unpublish in *Settings → Pages* to take the site down.
 
 ## Later (not done)
 

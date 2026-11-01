@@ -32,6 +32,7 @@
 | [Download site and release flow](maintainers/DOWNLOAD-SITE.md) | How an approved build reaches users, and why a bad one can't |
 | [Repository cleanup plan](maintainers/REPOSITORY-CLEANUP.md) | Branch audit and proposed structure |
 | [Changes waiting for approval](maintainers/APPROVALS.md) | Exactly what needs a yes before it happens |
+| [Claims audit](maintainers/CLAIMS-AUDIT.md) | README and site checked against what the code does (privacy, AI data, ages, features) |
 | [Release readiness](READINESS.md) | Evidence-based checklist for the beta |
 | [Launch kit](LAUNCH.md) · [Monetization plan](MONETIZATION.md) | Product copy, website outline, editions |
 

@@ -90,7 +90,7 @@ The workflow builds both installers and uploads them to a **draft** GitHub relea
 | `INKLING_BETA_URL` | Variable | The cloud AI beta server built into the app (`https://inkling-ai-beta.<you>.workers.dev`). Leave unset to ship without cloud AI. |
 | `INKLING_FEEDBACK_URL` | Variable | Where *Send feedback* goes: an `https://` form or a `mailto:` address. The default is a new GitHub issue, which needs a GitHub account. |
 | `INKLING_DOWNLOAD_PAGE_URL` | Variable | Optional. The download page linked from release notes. Default `https://supergithubduo.github.io/inkling-notebook/`. |
-| `INKLING_SITE_ENABLED` | Variable | `true` lets the *Download site* workflow deploy to GitHub Pages. Unset: the site is built and checked but not deployed. |
+| `INKLING_SITE_ENABLED` | Variable | Kill switch: `false` stops the *Download site* workflow from deploying. Deploys otherwise happen only when *Settings → Pages → Source* is *GitHub Actions*. |
 | `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD` | Secrets | Developer ID Application certificate (`.p12`, base64-encoded) and its password. |
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | Secrets | Notarization with Apple. |
 | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` | Secrets | Windows code-signing certificate (`.pfx`, base64) and password. |

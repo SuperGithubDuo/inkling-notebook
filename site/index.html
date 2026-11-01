@@ -8,7 +8,7 @@
 <meta name="description" content="Inkling is a handwriting notebook for Windows and Mac with a free AI tutor that reads your working. Download the free beta.">
 <meta property="og:title" content="Inkling — write by hand, get unstuck">
 <meta property="og:description" content="Handwritten notes on your computer, with an AI tutor that reads your working and marks it up on the page.">
-<meta property="og:image" content="assets/screenshots/tutor-markup.webp">
+<meta property="og:image" content="https://supergithubduo.github.io/inkling-notebook/assets/screenshots/tutor-markup.webp">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
 <!--INKLING_PREVIEW_HEAD-->
 <style>
@@ -221,6 +221,7 @@ footer a { color: var(--ink-soft); }
         </div>
 
         <div class="status" id="status" hidden role="status">
+          <span class="chip beta" style="justify-self:start">Coming soon</span>
           <strong>No download is available yet.</strong>
           <p id="status-reason">Inkling is in beta testing. When a version passes testing and is approved, it appears here.</p>
           <p>Check back soon, or see the <a href="#feedback">feedback page</a> to get in touch.</p>
@@ -307,7 +308,7 @@ footer a { color: var(--ink-soft); }
               <tr><th scope="row">Windows</th><td>Windows 10 or 11, 64-bit. ARM PCs (Surface Pro X, Snapdragon laptops) run it through Windows' built-in emulation.</td></tr>
               <tr><th scope="row">Mac</th><td>macOS 12 Monterey or later, on Apple silicon (M1 or newer) or Intel.</td></tr>
               <tr><th scope="row">Internet</th><td>Only for the AI tutor and update checks. Notebooks work offline.</td></tr>
-              <tr><th scope="row">Pen or touch</th><td>Optional. A mouse or trackpad works too.</td></tr>
+              <tr><th scope="row">Pen or touch</th><td>Optional. A mouse or trackpad works too. Not yet tested on physical pens and touch screens, so your feedback helps.</td></tr>
               <tr><th scope="row">Phones and tablets</th><td>Not supported yet: no iPad, Android or web version.</td></tr>
             </tbody>
           </table>
@@ -315,17 +316,18 @@ footer a { color: var(--ink-soft); }
       </div>
       <div>
         <div class="sec-head">
-          <span class="eyebrow">Your notebooks, your computer</span>
-          <h2>Private by design</h2>
+          <span class="eyebrow">Privacy in plain words</span>
+          <h2>Your notebooks stay on your computer</h2>
         </div>
         <ul class="list">
           <li>Your notebooks are saved on your computer as you write, with a backup every day. There's no account and no cloud storage.</li>
-          <li>The AI tutor only sees what you ask about, after you click <em>Allow</em>. Please don't send personal information.</li>
-          <li>The tutor is free, with about 10 answers a day per computer. AI answers can be wrong, so check them.</li>
-          <li>Under 18? A parent or guardian should install Inkling and decide about the AI.</li>
-          <li>No ads, analytics or tracking, in the app or on this page.</li>
+          <li>Nothing goes to the AI until you click <em>Allow</em> and ask. Then your question and the part of the page you include go to Inkling's AI server and are answered by an AI model on Cloudflare. Inkling's server doesn't store them; Cloudflare states it doesn't keep them or train on them.</li>
+          <li>To share out the free daily limit (about 10 answers per computer), an anonymous installation ID and your internet address go with each question. They're kept only as scrambled counts, deleted every day.</li>
+          <li>AI answers can be wrong, so check them. Please don't send personal information.</li>
+          <li>Under 18? Inkling doesn't check ages. A parent or guardian should read the privacy notice, install Inkling and decide whether to allow the AI. Children's privacy rules haven't been reviewed by a lawyer yet.</li>
+          <li>The app has no ads or analytics. This page sets no cookies and runs no analytics; GitHub, which hosts it, may log visits like any web host.</li>
         </ul>
-        <p class="more"><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/PRIVACY.md">Privacy notice</a> (draft, pending legal review)</p>
+        <p class="more"><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/PRIVACY.md">Privacy notice</a>: a draft pending legal review; who runs Inkling and how to contact them are still to be added.</p>
       </div>
     </div>
   </section>
@@ -335,13 +337,14 @@ footer a { color: var(--ink-soft); }
       <div class="sec-head">
         <span class="eyebrow">Feedback &amp; help</span>
         <h2>Tell us how it went</h2>
-        <p>It takes about 3 minutes and needs no account. Please describe what happened and don't include notebook contents or screenshots of personal notes.</p>
+        <p>Please describe what happened, and don't include notebook contents or screenshots of personal notes.</p>
       </div>
       <div class="cta-row">
         <a class="btn" id="feedback-btn" href="#feedback" hidden>Send feedback</a>
         <a class="btn secondary" href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/SUPPORT.md">Help &amp; common questions</a>
       </div>
-      <p class="cta-note" id="feedback-fallback" style="margin-top:14px">In the app: <em>Help → Send Feedback or Report a Problem</em>. With a GitHub account you can also <a href="https://github.com/SuperGithubDuo/inkling-notebook/issues/new">open a public issue</a>.</p>
+      <p class="cta-note" id="feedback-form-note" style="margin-top:14px" hidden>The form takes about 3 minutes and needs no account.</p>
+      <p class="cta-note" id="feedback-fallback" style="margin-top:14px">Our no-account feedback form is being set up. Until then, <em>Help → Send Feedback or Report a Problem</em> in the app opens a GitHub issue, which needs a free GitHub account and is public.</p>
     </div>
   </section>
 </main>
@@ -497,7 +500,7 @@ footer a { color: var(--ink-soft); }
 
     // Feedback
     var fb = typeof site.feedbackUrl === 'string' && /^(https:|mailto:)/.test(site.feedbackUrl) ? site.feedbackUrl : '';
-    if (fb) { var b = document.getElementById('feedback-btn'); b.href = fb; b.hidden = false; }
+    if (fb) { var b = document.getElementById('feedback-btn'); b.href = fb; b.hidden = false; document.getElementById('feedback-form-note').hidden = false; document.getElementById('feedback-fallback').hidden = true; }
   }
 
   // Tabs

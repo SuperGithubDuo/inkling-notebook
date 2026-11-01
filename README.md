@@ -16,6 +16,8 @@ Handwritten notes on your computer, with an AI tutor that reads your working and
 
 Free beta · Windows 10/11 · macOS 12 or later
 
+**Status:** invited beta. Public downloads open when a release passes testing and is approved; until then the download page says *Coming soon*.
+
 </div>
 
 <p align="center">
@@ -24,7 +26,7 @@ Free beta · Windows 10/11 · macOS 12 or later
 
 ## Download
 
-**[Go to the download page →](https://supergithubduo.github.io/inkling-notebook/)** It picks the right file for your computer, and every download comes straight from this project's official GitHub releases.
+**[Go to the download page →](https://supergithubduo.github.io/inkling-notebook/)** It suggests the right file for your computer, and every download comes straight from this project's official GitHub releases. It only offers releases that passed the full build and test checks and were approved.
 
 | Your computer | What to download |
 |---|---|
@@ -37,7 +39,7 @@ Free beta · Windows 10/11 · macOS 12 or later
 > [!IMPORTANT]
 > **The beta isn't code-signed yet**, so the first time you open it Windows shows *"Windows protected your PC"* (click **More info → Run anyway**) and macOS says it can't verify the developer (open **System Settings → Privacy & Security → Open Anyway**). Only download Inkling from the download page above or this repository's [Releases](https://github.com/SuperGithubDuo/inkling-notebook/releases). The [install guide](docs/INSTALL.md) walks you through it, including how to check your download's SHA-256 checksum.
 
-If the download page says no release is available yet, the beta hasn't been published — please check back soon.
+If the download page says *Coming soon*, no release has been approved yet. Please check back soon.
 
 ## What you can do with Inkling
 
@@ -64,7 +66,7 @@ Search titles, tags, typed text and PDF text. Link pages with `[[links]]`, see b
 Circle your work and ask. Get a hint instead of the answer, have your steps checked, or practise similar problems. Corrections appear on your page as a preview — you choose what to keep.
 
 **🔒 Your notebooks stay yours**<br>
-Saved on your computer as you write, backed up every day, with one-click restore. No account, no tracking.
+Saved on your computer as you write, backed up every day, with one-click restore. No account, no ads, no analytics.
 
 </td>
 </tr>
@@ -75,12 +77,18 @@ Saved on your computer as you write, backed up every day, with one-click restore
   <img src="docs/live-results/app-4b-applied.png" alt="The tutor's approved corrections written onto the page in a handwriting font" width="49%">
 </p>
 
+**Not yet:** handwriting isn't searchable, audio recording and sharing aren't built (the screenshots show their menu entries, which are marked as unavailable in the app), and there's no iPad, Android or web version. Real pens and touch screens haven't been tested on physical devices yet. More in [known limitations](docs/KNOWN-LIMITATIONS.md).
+
 ## The AI tutor, in plain words
 
-- **Free, with a daily limit.** About 10 answers a day per computer, with nothing to set up. When the allowance runs out, the tutor pauses and the rest of Inkling works as usual. It never costs you anything.
-- **Only what you ask about is sent**, and only after you click *Allow*: your question and the part of the page you selected. Inkling's AI server doesn't store it. Prefer nothing to leave your computer? Use the [local Ollama option](docs/AI-PROVIDERS.md#local-ollama-default-in-development-builds) instead.
+- **Free, with a daily limit.** About 10 answers a day per computer, and a shared limit for everyone together. When an allowance runs out, or the AI provider is briefly unavailable, the tutor pauses and the rest of Inkling works as usual. It never costs you anything.
+- **Nothing is sent until you click *Allow* and ask.** Then Inkling sends your question and the part of the page you include (an image of your selection, or the page's typed text) to Inkling's AI server, which gets the answer from an AI model (Qwen) on Cloudflare Workers AI. Inkling's server doesn't store or log your questions, images or answers. Cloudflare states that it doesn't store them after answering or use them for training.
+- **What else goes with a question:** an anonymous installation ID (a random number the app makes) and your internet address, used only to share out the free daily limits. The server keeps them only as scrambled counts that are deleted every day.
+- **Prefer nothing to leave your computer?** Use the [local Ollama option](docs/AI-PROVIDERS.md#local-ollama-default-in-development-builds) instead. It needs a separate free app (Ollama) and a 2–6 GB model download.
 - **AI answers can be wrong.** Check them. Please don't send personal or sensitive information.
-- **Under 18?** A parent or guardian should read the [install guide](docs/INSTALL.md#younger-testers) and decide whether to allow the AI.
+- **Under 18?** Inkling doesn't check ages. A parent or guardian should read the [privacy notice](docs/PRIVACY.md) and the [install guide](docs/INSTALL.md#younger-testers), install Inkling, and decide whether to allow the AI. Inkling's handling of children's data hasn't been reviewed by a lawyer yet.
+
+Inkling also asks GitHub whether a newer version exists when it starts; GitHub sees your internet address and app version, as with any download.
 
 ## Help, privacy and legal
 
@@ -88,8 +96,8 @@ Saved on your computer as you write, backed up every day, with one-click restore
 |---|---|
 | **Install guide** | [docs/INSTALL.md](docs/INSTALL.md) — downloading, security prompts, checksums, uninstalling |
 | **User guide** | [docs/USER-GUIDE.md](docs/USER-GUIDE.md) — every tool and shortcut |
-| **Feedback and support** | [SUPPORT.md](SUPPORT.md), or *Help → Send Feedback or Report a Problem* in the app |
-| **Privacy** | [docs/PRIVACY.md](docs/PRIVACY.md) (plain-language draft, pending legal review) |
+| **Feedback and support** | [SUPPORT.md](SUPPORT.md) |
+| **Privacy** | [docs/PRIVACY.md](docs/PRIVACY.md): a plain-language **draft**, pending legal review. Who runs Inkling and how to contact them are still to be filled in |
 | **Release notes** | [RELEASE_NOTES.md](RELEASE_NOTES.md) |
 | **Known limitations** | [docs/KNOWN-LIMITATIONS.md](docs/KNOWN-LIMITATIONS.md) |
 | **Licence** | Inkling is pre-release software; all rights reserved — see [LICENSE.txt](LICENSE.txt). Open-source components keep their own licences: [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). |
