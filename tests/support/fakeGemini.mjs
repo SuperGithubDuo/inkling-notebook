@@ -127,6 +127,8 @@ export async function startFakeGemini() {
   const requests = []
   let models = DEFAULT_MODELS
   let autoDelayMs = 0
+  /** When set, every request with a valid key (model list and connection test too) gets this error. */
+  let failing = null
 
   const server = http.createServer((req, res) => {
     let raw = ''
@@ -143,6 +145,7 @@ export async function startFakeGemini() {
         res.end(JSON.stringify(b))
       }
       if (key !== VALID_KEY && key !== VALID_AQ_KEY) return sendError(errors.invalidKey())
+      if (failing) return sendError(failing)
 
       if (req.method === 'GET' && url.pathname === '/v1beta/models') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -194,6 +197,9 @@ export async function startFakeGemini() {
     },
     setDelay(ms) {
       autoDelayMs = ms
+    },
+    failAll(error) {
+      failing = error ?? null
     },
     generated: () => requests.filter((r) => r.model && r.task !== 'test'),
     close: () =>

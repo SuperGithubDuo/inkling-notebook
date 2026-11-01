@@ -20,6 +20,7 @@ import {
   DEFAULT_MODEL,
   OLLAMA_MODELS,
   PROVIDERS,
+  redactKeys,
   type AiProviderId,
   type OllamaState,
   type AiError,
@@ -491,7 +492,7 @@ export class AiService {
     }
     const alt = other(model)
     const altFree = !this.cooldownFor(alt) && this.availability().find((m) => m.id === alt)?.status !== 'missing'
-    if (altFree && (error.code === 'daily_quota' || error.code === 'not_free' || error.code === 'model_unavailable')) return { ...error, suggestModel: alt }
+    if (altFree && (error.code === 'daily_quota' || error.code === 'not_free' || error.code === 'model_unavailable' || error.code === 'server')) return { ...error, suggestModel: alt }
     return error
   }
 
@@ -580,5 +581,6 @@ const notInstalled = (model: string): string => `${model} isn't installed in Oll
 
 function toAiError(err: unknown): AiError {
   if (err instanceof ProviderError) return err.toJSON()
-  return { code: 'unknown', message: `Something went wrong: ${(err as Error)?.message ?? String(err)}` }
+  // Unexpected errors can echo a request; never let a key reach the window or a log.
+  return { code: 'unknown', message: `Something went wrong: ${redactKeys((err as Error)?.message ?? String(err))}` }
 }
