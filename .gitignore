@@ -2,7 +2,11 @@
 node_modules/
 out/
 dist/
-release/
+/release/
+# Second build used by the installer lifecycle test (release.yml)
+/release-next/
+# Built download site (scripts/site/build-site.mjs)
+/_site/
 *.tsbuildinfo
 
 # Cloudflare Wrangler local state and secrets for the beta server
@@ -24,6 +28,14 @@ coverage/
 *.pfx
 credentials*.json
 secrets*.json
+# npm auth tokens
+.npmrc
+# Installers and update files belong on GitHub Releases, never in git
+*.exe
+*.dmg
+*.blockmap
+*.AppImage
+latest*.yml
 
 # Local notebook data (users' notes live in the OS app-data folder, but guard
 # against data dirs created inside the repo during development)
