@@ -1,0 +1,62 @@
+[
+  {
+    "page": 1,
+    "pixel": [
+      255,
+      255,
+      255,
+      255
+    ],
+    "text": "",
+    "width": 239,
+    "height": 337
+  },
+  {
+    "page": 2,
+    "pixel": [
+      255,
+      204,
+      204,
+      255
+    ],
+    "text": "Hermes synthetic fixture PAGE 1",
+    "width": 238,
+    "height": 337
+  },
+  {
+    "page": 3,
+    "pixel": [
+      204,
+      255,
+      204,
+      255
+    ],
+    "text": "Hermes synthetic fixture PAGE 2",
+    "width": 238,
+    "height": 337
+  },
+  {
+    "page": 4,
+    "pixel": [
+      255,
+      204,
+      204,
+      255
+    ],
+    "text": "Hermes synthetic fixture PAGE 1",
+    "width": 238,
+    "height": 337
+  },
+  {
+    "page": 5,
+    "pixel": [
+      204,
+      255,
+      204,
+      255
+    ],
+    "text": "Hermes synthetic fixture PAGE 2",
+    "width": 238,
+    "height": 337
+  }
+]

@@ -1,0 +1,530 @@
+{
+  "started": "2026-10-31T01:43:27.845Z",
+  "installerRun": 41147420893,
+  "artifact": 13021637988,
+  "tests": [
+    {
+      "name": "packaged version",
+      "status": "PASS",
+      "data": {
+        "packaged": true,
+        "version": "0.2.0-beta.2",
+        "userData": "C:\\Users\\shenj\\AppData\\Roaming\\Inkling",
+        "menu": [
+          {
+            "label": "File",
+            "submenu": [
+              "Back Up Library…",
+              "Restore from Backup…",
+              "",
+              "Settings…",
+              "",
+              "Exit"
+            ]
+          },
+          {
+            "label": "Edit",
+            "submenu": [
+              "Undo",
+              "Redo",
+              "",
+              "Cut",
+              "Copy",
+              "Paste",
+              "Delete",
+              "",
+              "Select All"
+            ]
+          },
+          {
+            "label": "View",
+            "submenu": [
+              "Toggle Full Screen"
+            ]
+          },
+          {
+            "label": "Window",
+            "submenu": [
+              "Minimize",
+              "Zoom",
+              "Close"
+            ]
+          },
+          {
+            "label": "Help",
+            "submenu": [
+              "Getting Started",
+              "Send Feedback or Report a Problem…",
+              "Privacy",
+              "",
+              "About Inkling"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "create notebook",
+      "status": "PASS",
+      "data": "3dd34a7c-d326-49e3-ba52-1ca56dc7150f"
+    },
+    {
+      "name": "mouse handwriting autosave",
+      "status": "PASS",
+      "data": 2
+    },
+    {
+      "name": "lasso move undo redo",
+      "status": "PASS",
+      "data": {
+        "before": [
+          120,
+          180
+        ],
+        "after": [
+          190.99,
+          239.95
+        ]
+      }
+    },
+    {
+      "name": "consent decline blocks cloud upload",
+      "status": "PASS",
+      "data": "Send what you ask about to Inkling’s AI?\n\nWhen you ask the tutor something, Inkling sends your question and the context you include — an image of your lasso selection, or text from the current page — over an encrypted connection. Nothing is sent until you ask.\n\nYour question and an image of what you selected go to Inkling’s AI server and are answered by Cloudflare Workers AI. Neither keeps your content: Cloudflare says it does not use it to train models or store it after answering, and Inkling’s server never stores or logs it. To share out the free daily allowance, the server counts answers per installation (a random ID this app made) and per internet connection, in scrambled form that is deleted every day.\n\nThe AI is free, with a limited number of answers per day. It never costs anything: when the day’s free answers are used up, the tutor pauses until midnight UTC and your notebooks work as usual. Don’t include sensitive personal information.\n\nRead Cloudflare’s Workers AI data policy. You can withdraw this permission any time in Settings.\n\nNot now\nAllow"
+    },
+    {
+      "name": "anonymous status and counter",
+      "status": "PASS",
+      "data": {
+        "probe": {
+          "ok": true,
+          "model": "@cf/qwen/qwen3.8-27b",
+          "latencyMs": 196,
+          "models": [
+            {
+              "id": "@cf/qwen/qwen3.8-27b",
+              "status": "available",
+              "vision": true
+            }
+          ]
+        },
+        "quota": {
+          "installUsed": 0,
+          "installLimit": 900,
+          "networkUsed": 319,
+          "networkLimit": 2700,
+          "globalUsed": 1330,
+          "globalLimit": 9000,
+          "approxAnswersLeft": 10,
+          "resetAt": "2026-11-01T00:00:00.000Z"
+        },
+        "footer": "Sent to Inkling’s AI server only when you ask. About 10 answers left today."
+      }
+    },
+    {
+      "name": "window sizes",
+      "status": "PASS",
+      "data": [
+        {
+          "width": 1424,
+          "height": 835,
+          "dpr": 1,
+          "scroll": 1424
+        },
+        {
+          "width": 1008,
+          "height": 703,
+          "dpr": 1,
+          "scroll": 1008
+        },
+        {
+          "width": 944,
+          "height": 535,
+          "dpr": 1,
+          "scroll": 944
+        }
+      ]
+    },
+    {
+      "name": "drawing shape",
+      "status": "FAIL",
+      "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByTestId('tool-shapes')\u001b[22m\n"
+    },
+    {
+      "name": "restart persistence",
+      "status": "PASS",
+      "data": {
+        "objects": 2,
+        "id": "3dd34a7c-d326-49e3-ba52-1ca56dc7150f"
+      }
+    }
+  ],
+  "errors": [],
+  "notes": [],
+  "facts": {
+    "packaged": true,
+    "version": "0.2.0-beta.2",
+    "userData": "C:\\Users\\shenj\\AppData\\Roaming\\Inkling",
+    "menu": [
+      {
+        "label": "File",
+        "submenu": [
+          "Back Up Library…",
+          "Restore from Backup…",
+          "",
+          "Settings…",
+          "",
+          "Exit"
+        ]
+      },
+      {
+        "label": "Edit",
+        "submenu": [
+          "Undo",
+          "Redo",
+          "",
+          "Cut",
+          "Copy",
+          "Paste",
+          "Delete",
+          "",
+          "Select All"
+        ]
+      },
+      {
+        "label": "View",
+        "submenu": [
+          "Toggle Full Screen"
+        ]
+      },
+      {
+        "label": "Window",
+        "submenu": [
+          "Minimize",
+          "Zoom",
+          "Close"
+        ]
+      },
+      {
+        "label": "Help",
+        "submenu": [
+          "Getting Started",
+          "Send Feedback or Report a Problem…",
+          "Privacy",
+          "",
+          "About Inkling"
+        ]
+      }
+    ]
+  },
+  "initial": "Back to library\nToggle sidebar\nMath Notes\nPen · P\nHighlighter · H\nEraser · E\nLasso select · L\nShapes · S\nText · T\nInsert image · or drop / paste\nAudio recording — not yet available\nMore colours\nPen thickness\nHand (pan) · Space\nUndo · Ctrl+Z\nRedo · Ctrl+Shift+Z\nMore\nSaving…\nSaving…\nAI Tutor\nAI Tutor\nExport page as PNG\nSettings\nSearch\nCtrl F\nNotebooks\nAll Notes\nFavourites\nGraph\nShared\nTrash\nMy Notebooks\nMath Notes\nPhysics\nChemistry\nBiology\nPersonal\nNew Notebook\nGrid\nPaper and page size\n1\nAdd handwritten page\nNote\nImport\nZoom out · Ctrl+−\n100%\nZoom in · Ctrl+=\nPen\nHighlighter\nEraser\nShapes\nLasso select\nAsk AI\nAI Tutor\nAI settings\nClose AI Tutor\nChat\nOn Page\nPractice\nAsk about this page\n\nCheck your working, get a concept explained, or ask follow-up questions about the page you are on or a lasso selection.\n\nChats aren’t saved: they clear when you close Inkling. Marks you add to your page are saved with it.\n\nSet up the AI Tutor\n\nAdd a free Google Gemini API key in Settings (18+ only). Nothing from your notebook is sent until you allow it and ask.\n\nOpen AI settings\nGive me a hint\nExplain the concept\nCheck my work\nTry a similar problem\nThis page\nSend\n\nAnswered on this computer by Ollama. Nothing leaves your device.",
+  "status": {
+    "provider": "cloud",
+    "local": false,
+    "model": "@cf/qwen/qwen3.8-27b",
+    "needsKey": true,
+    "hasKey": false,
+    "keyHint": null,
+    "keyProtection": null,
+    "consented": false,
+    "geminiConsented": false,
+    "models": [
+      {
+        "id": "@cf/qwen/qwen3.8-27b",
+        "status": "available",
+        "vision": true
+      }
+    ],
+    "ollama": {
+      "url": "http://127.0.0.1:11434",
+      "running": null,
+      "version": null,
+      "checkedAt": null
+    },
+    "cloud": {
+      "url": "https://inkling-ai-beta.shenjonas9.workers.dev",
+      "urlFromBuild": true,
+      "consented": false,
+      "quota": {
+        "installUsed": 0,
+        "installLimit": 900,
+        "networkUsed": 319,
+        "networkLimit": 2700,
+        "globalUsed": 1330,
+        "globalLimit": 9000,
+        "approxAnswersLeft": 10,
+        "resetAt": "2026-11-01T00:00:00.000Z"
+      },
+      "checkedAt": "2026-10-31T01:43:28.971Z"
+    },
+    "modelsCheckedAt": "2026-10-31T01:43:28.971Z",
+    "cooldown": null
+  },
+  "consent": "Send what you ask about to Inkling’s AI?\n\nWhen you ask the tutor something, Inkling sends your question and the context you include — an image of your lasso selection, or text from the current page — over an encrypted connection. Nothing is sent until you ask.\n\nYour question and an image of what you selected go to Inkling’s AI server and are answered by Cloudflare Workers AI. Neither keeps your content: Cloudflare says it does not use it to train models or store it after answering, and Inkling’s server never stores or logs it. To share out the free daily allowance, the server counts answers per installation (a random ID this app made) and per internet connection, in scrambled form that is deleted every day.\n\nThe AI is free, with a limited number of answers per day. It never costs anything: when the day’s free answers are used up, the tutor pauses until midnight UTC and your notebooks work as usual. Don’t include sensitive personal information.\n\nRead Cloudflare’s Workers AI data policy. You can withdraw this permission any time in Settings.\n\nNot now\nAllow",
+  "statusProbe": {
+    "r": {
+      "ok": true,
+      "model": "@cf/qwen/qwen3.8-27b",
+      "latencyMs": 196,
+      "models": [
+        {
+          "id": "@cf/qwen/qwen3.8-27b",
+          "status": "available",
+          "vision": true
+        }
+      ]
+    },
+    "s": {
+      "provider": "cloud",
+      "local": false,
+      "model": "@cf/qwen/qwen3.8-27b",
+      "needsKey": true,
+      "hasKey": false,
+      "keyHint": null,
+      "keyProtection": null,
+      "consented": false,
+      "geminiConsented": false,
+      "models": [
+        {
+          "id": "@cf/qwen/qwen3.8-27b",
+          "status": "available",
+          "vision": true
+        }
+      ],
+      "ollama": {
+        "url": "http://127.0.0.1:11434",
+        "running": null,
+        "version": null,
+        "checkedAt": null
+      },
+      "cloud": {
+        "url": "https://inkling-ai-beta.shenjonas9.workers.dev",
+        "urlFromBuild": true,
+        "consented": false,
+        "quota": {
+          "installUsed": 0,
+          "installLimit": 900,
+          "networkUsed": 319,
+          "networkLimit": 2700,
+          "globalUsed": 1330,
+          "globalLimit": 9000,
+          "approxAnswersLeft": 10,
+          "resetAt": "2026-11-01T00:00:00.000Z"
+        },
+        "checkedAt": "2026-10-31T01:43:32.964Z"
+      },
+      "modelsCheckedAt": "2026-10-31T01:43:32.964Z",
+      "cooldown": null
+    }
+  },
+  "beforeRestart": {
+    "schemaVersion": 3,
+    "id": "3dd34a7c-d326-49e3-ba52-1ca56dc7150f",
+    "notebookId": "ee8269f7-9b09-4c00-a4fd-4458b4013f6d",
+    "width": 1240,
+    "height": 1754,
+    "paper": {
+      "type": "grid",
+      "spacing": 31,
+      "color": "#e8eaee"
+    },
+    "objects": [
+      {
+        "id": "d24ff2ff-58bb-4c1e-b3f9-ebd4e2f8391a",
+        "createdAt": 1793411009995,
+        "author": "user",
+        "type": "stroke",
+        "tool": "pen",
+        "color": "#1f2430",
+        "size": 4,
+        "opacity": 1,
+        "hasPressure": false,
+        "points": [
+          [
+            190.99,
+            239.95
+          ],
+          [
+            194.74,
+            246.2
+          ],
+          [
+            198.49,
+            252.45
+          ],
+          [
+            202.24,
+            258.7
+          ],
+          [
+            205.99,
+            264.95
+          ],
+          [
+            209.74,
+            271.2
+          ],
+          [
+            213.49,
+            277.45
+          ],
+          [
+            217.24,
+            283.7
+          ],
+          [
+            220.99,
+            289.95
+          ],
+          [
+            224.74,
+            284.32
+          ],
+          [
+            228.49,
+            278.7
+          ],
+          [
+            232.24,
+            273.08
+          ],
+          [
+            235.99,
+            267.45
+          ],
+          [
+            239.74,
+            261.83
+          ],
+          [
+            243.49,
+            256.2
+          ],
+          [
+            247.24,
+            250.57
+          ],
+          [
+            250.99,
+            244.95
+          ],
+          [
+            254.74,
+            250.57
+          ],
+          [
+            258.49,
+            256.2
+          ],
+          [
+            262.24,
+            261.83
+          ],
+          [
+            265.99,
+            267.45
+          ],
+          [
+            269.74,
+            273.08
+          ],
+          [
+            273.49,
+            278.7
+          ],
+          [
+            277.24,
+            284.32
+          ],
+          [
+            280.99,
+            289.95
+          ]
+        ]
+      },
+      {
+        "id": "aead3255-5124-45d6-b545-d920e8ee0f6a",
+        "createdAt": 1793411010133,
+        "author": "user",
+        "type": "stroke",
+        "tool": "pen",
+        "color": "#1f2430",
+        "size": 4,
+        "opacity": 1,
+        "hasPressure": false,
+        "points": [
+          [
+            320.99,
+            239.95
+          ],
+          [
+            324.74,
+            246.2
+          ],
+          [
+            328.49,
+            252.45
+          ],
+          [
+            332.24,
+            258.7
+          ],
+          [
+            335.99,
+            264.95
+          ],
+          [
+            339.74,
+            271.2
+          ],
+          [
+            343.49,
+            277.45
+          ],
+          [
+            347.24,
+            283.7
+          ],
+          [
+            350.99,
+            289.95
+          ],
+          [
+            355.99,
+            284.32
+          ],
+          [
+            360.99,
+            278.7
+          ],
+          [
+            365.99,
+            273.08
+          ],
+          [
+            370.99,
+            267.45
+          ],
+          [
+            375.99,
+            261.83
+          ],
+          [
+            380.99,
+            256.2
+          ],
+          [
+            385.99,
+            250.57
+          ],
+          [
+            390.99,
+            244.95
+          ]
+        ]
+      }
+    ],
+    "background": null,
+    "updatedAt": 1793411012013
+  }
+}

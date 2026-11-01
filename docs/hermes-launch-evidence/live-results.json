@@ -1,0 +1,214 @@
+{
+  "run": 41147420893,
+  "commit": "4ea46be4c38ee912803b672daf08a4bf72706424",
+  "artifact": 13021637988,
+  "requests": [
+    {
+      "name": "incorrect-reply",
+      "before": {
+        "footer": "Sent to Inkling’s AI server only when you ask. About 10 answers left today.",
+        "status": {
+          "provider": "cloud",
+          "local": false,
+          "model": "@cf/qwen/qwen3.8-27b",
+          "needsKey": true,
+          "hasKey": false,
+          "keyHint": null,
+          "keyProtection": null,
+          "consented": true,
+          "geminiConsented": false,
+          "models": [
+            {
+              "id": "@cf/qwen/qwen3.8-27b",
+              "status": "available",
+              "vision": true
+            }
+          ],
+          "ollama": {
+            "url": "http://127.0.0.1:11434",
+            "running": null,
+            "version": null,
+            "checkedAt": null
+          },
+          "cloud": {
+            "url": "https://inkling-ai-beta.shenjonas9.workers.dev",
+            "urlFromBuild": true,
+            "consented": true,
+            "quota": {
+              "installUsed": 0,
+              "installLimit": 900,
+              "networkUsed": 0,
+              "networkLimit": 2700,
+              "globalUsed": 1330,
+              "globalLimit": 9000,
+              "approxAnswersLeft": 10,
+              "resetAt": "2026-11-01T00:00:00.000Z"
+            },
+            "checkedAt": "2026-10-31T01:47:46.985Z"
+          },
+          "modelsCheckedAt": "2026-10-31T01:47:46.985Z",
+          "cooldown": null
+        }
+      },
+      "elapsedMs": 1357,
+      "events": [
+        {
+          "requestId": "fb7d6ace-266a-491b-8a21-3eef7d0eaab8",
+          "type": "error",
+          "error": {
+            "code": "server",
+            "message": "Inkling’s free AI is briefly unavailable from its provider. Try again in about 15 minutes. Your notebooks work as usual, and you can use the tutor on this computer (Ollama) meanwhile.",
+            "retryAfter": 900
+          }
+        },
+        {
+          "type": "status",
+          "status": {
+            "provider": "cloud",
+            "local": false,
+            "model": "@cf/qwen/qwen3.8-27b",
+            "needsKey": true,
+            "hasKey": false,
+            "keyHint": null,
+            "keyProtection": null,
+            "consented": true,
+            "geminiConsented": false,
+            "models": [
+              {
+                "id": "@cf/qwen/qwen3.8-27b",
+                "status": "available",
+                "vision": true
+              }
+            ],
+            "ollama": {
+              "url": "http://127.0.0.1:11434",
+              "running": null,
+              "version": null,
+              "checkedAt": null
+            },
+            "cloud": {
+              "url": "https://inkling-ai-beta.shenjonas9.workers.dev",
+              "urlFromBuild": true,
+              "consented": true,
+              "quota": {
+                "installUsed": 0,
+                "installLimit": 900,
+                "networkUsed": 0,
+                "networkLimit": 2700,
+                "globalUsed": 1330,
+                "globalLimit": 9000,
+                "approxAnswersLeft": 10,
+                "resetAt": "2026-11-01T00:00:00.000Z"
+              },
+              "checkedAt": "2026-10-31T01:47:48.524Z"
+            },
+            "modelsCheckedAt": "2026-10-31T01:47:48.524Z",
+            "cooldown": null
+          }
+        },
+        {
+          "type": "status",
+          "status": {
+            "provider": "cloud",
+            "local": false,
+            "model": "@cf/qwen/qwen3.8-27b",
+            "needsKey": true,
+            "hasKey": false,
+            "keyHint": null,
+            "keyProtection": null,
+            "consented": true,
+            "geminiConsented": false,
+            "models": [
+              {
+                "id": "@cf/qwen/qwen3.8-27b",
+                "status": "available",
+                "vision": true
+              }
+            ],
+            "ollama": {
+              "url": "http://127.0.0.1:11434",
+              "running": null,
+              "version": null,
+              "checkedAt": null
+            },
+            "cloud": {
+              "url": "https://inkling-ai-beta.shenjonas9.workers.dev",
+              "urlFromBuild": true,
+              "consented": true,
+              "quota": {
+                "installUsed": 0,
+                "installLimit": 900,
+                "networkUsed": 0,
+                "networkLimit": 2700,
+                "globalUsed": 1330,
+                "globalLimit": 9000,
+                "approxAnswersLeft": 10,
+                "resetAt": "2026-11-01T00:00:00.000Z"
+              },
+              "checkedAt": "2026-10-31T01:47:48.525Z"
+            },
+            "modelsCheckedAt": "2026-10-31T01:47:48.525Z",
+            "cooldown": null
+          }
+        }
+      ],
+      "after": {
+        "footer": "Sent to Inkling’s AI server only when you ask. About 10 answers left today.",
+        "status": {
+          "provider": "cloud",
+          "local": false,
+          "model": "@cf/qwen/qwen3.8-27b",
+          "needsKey": true,
+          "hasKey": false,
+          "keyHint": null,
+          "keyProtection": null,
+          "consented": true,
+          "geminiConsented": false,
+          "models": [
+            {
+              "id": "@cf/qwen/qwen3.8-27b",
+              "status": "available",
+              "vision": true
+            }
+          ],
+          "ollama": {
+            "url": "http://127.0.0.1:11434",
+            "running": null,
+            "version": null,
+            "checkedAt": null
+          },
+          "cloud": {
+            "url": "https://inkling-ai-beta.shenjonas9.workers.dev",
+            "urlFromBuild": true,
+            "consented": true,
+            "quota": {
+              "installUsed": 0,
+              "installLimit": 900,
+              "networkUsed": 0,
+              "networkLimit": 2700,
+              "globalUsed": 1330,
+              "globalLimit": 9000,
+              "approxAnswersLeft": 10,
+              "resetAt": "2026-11-01T00:00:00.000Z"
+            },
+            "checkedAt": "2026-10-31T01:47:48.525Z"
+          },
+          "modelsCheckedAt": "2026-10-31T01:47:48.525Z",
+          "cooldown": null
+        }
+      },
+      "body": "Back to library\nToggle sidebar\nMath Notes\nPen · P\nHighlighter · H\nEraser · E\nLasso select · L\nShapes · S\nText · T\nInsert image · or drop / paste\nAudio recording — not yet available\nMore colours\nPen thickness\nHand (pan) · Space\nUndo · Ctrl+Z\nRedo · Ctrl+Shift+Z\nMore\nSaved\nAll changes saved on this computer\nAI Tutor\nAI Tutor\nExport page as PNG\nSettings\nSearch\nCtrl F\nNotebooks\nAll Notes\nFavourites\nGraph\nShared\nTrash\nMy Notebooks\nMath Notes\nPhysics\nChemistry\nBiology\nPersonal\nNew Notebook\nGrid\nPaper and page size\n1\nAdd handwritten page\nNote\nImport\nZoom out · Ctrl+−\n100%\nZoom in · Ctrl+=\nPen\nHighlighter\nEraser\nShapes\nLasso select\nAsk AI\nAI Tutor\nNew chat\nAI settings\nClose AI Tutor\nChat\nOn Page\nPractice\n\nChats aren’t saved: they clear when you close Inkling. Marks you add to your page are saved with it.\n\nThis page · Math Notes · page 1\nCheck my handwritten algebra solution on this page. Is every step correct? Identify the first incorrect step if there is one.\nInkling’s free AI is briefly unavailable from its provider. Try again in about 15 minutes. Your notebooks work as usual, and you can use the tutor on this computer (Ollama) meanwhile.\nTry again\nGive me a hint\nExplain the concept\nCheck my work\nTry a similar problem\nThis page\nSend\n\nSent to Inkling’s AI server only when you ask. About 10 answers left today."
+    }
+  ],
+  "errors": [],
+  "installerSha256": "47fcc43b5d60ef22c9a69f48a2592d3897d6ac6e46a548a2ec1a88b2e13969fa",
+  "freshBody": "Back to library\nToggle sidebar\nMath Notes\nPen · P\nHighlighter · H\nEraser · E\nLasso select · L\nShapes · S\nText · T\nInsert image · or drop / paste\nAudio recording — not yet available\nMore colours\nPen thickness\nHand (pan) · Space\nUndo · Ctrl+Z\nRedo · Ctrl+Shift+Z\nMore\nSaving…\nSaving…\nAI Tutor\nAI Tutor\nExport page as PNG\nSettings\nSearch\nCtrl F\nNotebooks\nAll Notes\nFavourites\nGraph\nShared\nTrash\nMy Notebooks\nMath Notes\nPhysics\nChemistry\nBiology\nPersonal\nNew Notebook\nGrid\nPaper and page size\n1\nAdd handwritten page\nNote\nImport\nZoom out · Ctrl+−\n100%\nZoom in · Ctrl+=\nPen\nHighlighter\nEraser\nShapes\nLasso select\nAsk AI\nAI Tutor\nAI settings\nClose AI Tutor\nChat\nOn Page\nPractice\nAsk about this page\n\nCheck your working, get a concept explained, or ask follow-up questions about the page you are on or a lasso selection.\n\nChats aren’t saved: they clear when you close Inkling. Marks you add to your page are saved with it.\n\nSet up the AI Tutor\n\nAdd a free Google Gemini API key in Settings (18+ only). Nothing from your notebook is sent until you allow it and ask.\n\nOpen AI settings\nGive me a hint\nExplain the concept\nCheck my work\nTry a similar problem\nThis page\nSend\n\nAnswered on this computer by Ollama. Nothing leaves your device.",
+  "settingsBody": "Back to library\nToggle sidebar\nMath Notes\nPen · P\nHighlighter · H\nEraser · E\nLasso select · L\nShapes · S\nText · T\nInsert image · or drop / paste\nAudio recording — not yet available\nMore colours\nPen thickness\nHand (pan) · Space\nUndo · Ctrl+Z\nRedo · Ctrl+Shift+Z\nMore\nSaving…\nSaving…\nAI Tutor\nAI Tutor\nExport page as PNG\nSettings\nSearch\nCtrl F\nNotebooks\nAll Notes\nFavourites\nGraph\nShared\nTrash\nMy Notebooks\nMath Notes\nPhysics\nChemistry\nBiology\nPersonal\nNew Notebook\nGrid\nPaper and page size\n1\nAdd handwritten page\nNote\nImport\nZoom out · Ctrl+−\n100%\nZoom in · Ctrl+=\nPen\nHighlighter\nEraser\nShapes\nLasso select\nAsk AI\nAI Tutor\nAI settings\nClose AI Tutor\nChat\nOn Page\nPractice\nAsk about this page\n\nCheck your working, get a concept explained, or ask follow-up questions about the page you are on or a lasso selection.\n\nChats aren’t saved: they clear when you close Inkling. Marks you add to your page are saved with it.\n\nSet up the AI Tutor\n\nAdd a free Google Gemini API key in Settings (18+ only). Nothing from your notebook is sent until you allow it and ask.\n\nOpen AI settings\nGive me a hint\nExplain the concept\nCheck my work\nTry a similar problem\nThis page\nSend\n\nAnswered on this computer by Ollama. Nothing leaves your device.\n\nSettings\nClose settings\nSTORAGE\n\nNotebooks are saved automatically as files on this computer.\n\nC:\\Users\\shenj\\AppData\\Local\\hermes\\cache\\scratch\\inkling-launch-artifacts\\live-fresh/notes\nOpen\n\nBackups\n\nInkling keeps a copy of your whole library every day (the last 7 days), and before restoring or updating. Use Back up now to save a copy somewhere else, such as a USB drive.\n\nThe first daily backup is made a few seconds after Inkling starts.\n\nBack up now…\nRestore from a backup…\nShow backups\nAI TUTOR\nPRIVACY AND HELP\nHow Inkling handles your data\nSend feedback or report a problem\nAbout Inkling",
+  "connection": "Back to library\nToggle sidebar\nMath Notes\nPen · P\nHighlighter · H\nEraser · E\nLasso select · L\nShapes · S\nText · T\nInsert image · or drop / paste\nAudio recording — not yet available\nMore colours\nPen thickness\nHand (pan) · Space\nUndo · Ctrl+Z\nRedo · Ctrl+Shift+Z\nMore\nSaved\nAll changes saved on this computer\nAI Tutor\nAI Tutor\nExport page as PNG\nSettings\nSearch\nCtrl F\nNotebooks\nAll Notes\nFavourites\nGraph\nShared\nTrash\nMy Notebooks\nMath Notes\nPhysics\nChemistry\nBiology\nPersonal\nNew Notebook\nGrid\nPaper and page size\n1\nAdd handwritten page\nNote\nImport\nZoom out · Ctrl+−\n100%\nZoom in · Ctrl+=\nPen\nHighlighter\nEraser\nShapes\nLasso select\nAsk AI\nAI Tutor\nAI settings\nClose AI Tutor\nChat\nOn Page\nPractice\nAsk about this page\n\nCheck your working, get a concept explained, or ask follow-up questions about the page you are on or a lasso selection.\n\nChats aren’t saved: they clear when you close Inkling. Marks you add to your page are saved with it.\n\nInkling AI · Qwen 3.8 27B · free, limited daily\n\nGive me a hint\nExplain the concept\nCheck my work\nTry a similar problem\nThis page\nSend\n\nSent to Inkling’s AI server only when you ask. About 10 answers left today.\n\nSettings\nClose settings\nSTORAGE\n\nNotebooks are saved automatically as files on this computer.\n\nC:\\Users\\shenj\\AppData\\Local\\hermes\\cache\\scratch\\inkling-launch-artifacts\\live-fresh/notes\nOpen\n\nBackups\n\nInkling keeps a copy of your whole library every day (the last 7 days), and before restoring or updating. Use Back up now to save a copy somewhere else, such as a USB drive.\n\nThe first daily backup is made a few seconds after Inkling starts.\n\nBack up now…\nRestore from a backup…\nShow backups\nAI TUTOR\nInkling AI (cloud)\nFREE\nFree and ready to use: nothing to download, no account. A daily limit on answers applies.\nOllama (on this computer)\nPRIVATE\nFree and private: a vision model runs on this computer. No account or API key.\nGoogle Gemini\n18+\nOptional cloud models. Requires a Google API key, and Google only permits users who are 18 or older.\nReady to use: free, nothing to download, no account. Answers come from Qwen 3.8 27B (Cloudflare Workers AI). Inkling’s free AI has a daily limit for each computer and for everyone together, so answers can run out for the day; they never cost anything.\nAbout 10 free answers left today on this computer.\nMore every day at 05:00 PM (midnight UTC). Everyone together has used 15% of today’s free AI.\nTest connection\nConnected (278 ms). Checking uses none of your answers.\nAllow sending what I ask about to Inkling’s AI server. Your question and an image of what you selected go to Inkling’s AI server and are answered by Cloudflare Workers AI. Neither keeps your content: Cloudflare says it does not use it to train models or store it after answering, and Inkling’s server never stores or logs it. To share out the free daily allowance, the server counts answers per installation (a random ID this app made) and per internet connection, in scrambled form that is deleted every day. Don't include sensitive personal information. Cloudflare’s data policy\nPRIVACY AND HELP\nHow Inkling handles your data\nSend feedback or report a problem\nAbout Inkling",
+  "incorrectLines": [
+    "2x + 3 = 7",
+    "2x = 5",
+    "x = 3"
+  ],
+  "failure": "Error: Live AI request failed: incorrect-reply\n    at request (C:\\Users\\shenj\\AppData\\Local\\hermes\\cache\\scratch\\inkling-launch-artifacts\\live-full.cjs:14:625)\n    at async C:\\Users\\shenj\\AppData\\Local\\hermes\\cache\\scratch\\inkling-launch-artifacts\\live-full.cjs:17:1002"
+}

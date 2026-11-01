@@ -43,7 +43,10 @@
 | [Device testing](DEVICE-TESTING.md) | Hands-on checks on real computers, pens and touch screens |
 | [Beta 2 checklist (Windows)](BETA2-CHECKLIST.md) | The short pass before inviting testers |
 | [Windows validation (Hermes)](windows-validation.md) | Hermes's Phase 4.6 checklist |
-| Hermes's Beta 2 launch review | `HERMES-LAUNCH-REVIEW.md`, `HERMES-PRIVACY-REVIEW.md` and `hermes-launch-evidence/`: on branch [`docs/hermes-launch-review`](https://github.com/SuperGithubDuo/inkling-notebook/tree/docs/hermes-launch-review/docs), to be merged (see [approvals](maintainers/APPROVALS.md)) |
+| [Hermes's Beta 2 launch review](HERMES-LAUNCH-REVIEW.md) | Independent QA of the Beta 2 Windows installer: what was tested, findings H-01–H-04, launch decision (31 Oct 2026) |
+| [Hermes's privacy review](HERMES-PRIVACY-REVIEW.md) | All-ages and privacy risk assessment with sources (not legal approval) |
+| [QA evidence](hermes-launch-evidence/README.md) | Screenshots, results, harness scripts and hashes behind the review; `manifest.json` lists every file's SHA-256 |
 | [Live model results](live-results/README.md) | Real-model answers, timings and screenshots |
-| [Feedback form](FEEDBACK-FORM.md) | Tester form text and how to connect it |
+| [Feedback form (Hermes's 10-question version)](HERMES-FEEDBACK-FORM.md) | The short no-contact form recommended for testers |
+| [Feedback form (original draft)](FEEDBACK-FORM.md) | Longer draft and how to connect a form to the app (`INKLING_FEEDBACK_URL`) |
 | [Phase 4.5 notes](history/PHASE-4.5-WINDOWS.md) | Windows stabilisation, kept for history |
