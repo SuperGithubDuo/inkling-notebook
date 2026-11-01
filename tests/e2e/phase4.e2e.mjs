@@ -135,6 +135,8 @@ try {
   await win.fill('[data-testid="ai-key-input"]', BAD_KEY)
   await win.click('[data-testid="ai-key-save"]')
   await testResult().getByText(/The key is saved, but Google didn't accept it\. Google rejected this API key/).waitFor()
+  await win.locator('[data-testid="ai-test-detail"]').getByText('HTTP 400 INVALID_ARGUMENT (API_KEY_INVALID): API key not valid. Please pass a valid API key.').waitFor()
+  assert.ok(!(await win.content()).includes(BAD_KEY), 'the rejected key is never shown in full')
   await win.click('[data-testid="ai-key-remove"]')
   await win.waitForSelector('[data-testid="ai-key-input"]')
   step('rejected key: saved, then Google’s refusal shown as a separate step; removable')
@@ -163,6 +165,32 @@ try {
   await win.locator('[data-testid="ai-model-gemini-3.8-flash"]').getByText('available').waitFor()
   await win.locator('[data-testid="ai-model-gemini-3.5-flash-lite"]').getByText('available').waitFor()
   step('valid key: connection test lists models and sends one tiny request')
+
+  // Settings → Test names the real failure: Google's HTTP status and its (sanitized) message, per kind.
+  const detail = () => win.locator('[data-testid="ai-test-detail"]')
+  fake.requests.length = 0
+  fake.failAll(errors.overloaded())
+  await win.click('[data-testid="ai-test"]')
+  await testResult().getByText(/overloaded or temporarily unavailable \(503\)\. Your key is fine/).waitFor({ timeout: 20000 })
+  await detail().getByText('HTTP 503 UNAVAILABLE: The model is overloaded. Please try again later. (3 attempts)').waitFor()
+  assert.equal(fake.requests.length, 3, 'a 503 is retried, three tries in all')
+  fake.requests.length = 0
+  fake.failAll(errors.perMinute('9s'))
+  await win.click('[data-testid="ai-test"]')
+  await testResult().getByText(/allows only a few requests per minute\. Try again in 9 seconds/).waitFor()
+  await detail().getByText(/^HTTP 429 RESOURCE_EXHAUSTED: /).waitFor()
+  assert.equal(fake.requests.length, 1, 'a rate limit is never retried')
+  fake.requests.length = 0
+  fake.failAll({ status: 403, body: { error: { code: 403, message: 'Generative Language API has not been used in project 1234 before or it is disabled.', status: 'PERMISSION_DENIED', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'SERVICE_DISABLED' }] } } })
+  await win.click('[data-testid="ai-test"]')
+  await testResult().getByText(/the Gemini API \(Generative Language API\) is turned off/).waitFor()
+  await detail().getByText(/^HTTP 403 PERMISSION_DENIED \(SERVICE_DISABLED\): /).waitFor()
+  assert.equal(fake.requests.length, 1, 'a permission error is never retried')
+  assert.ok(!(await win.content()).includes(VALID_KEY), 'the key is never in the window')
+  fake.failAll(null)
+  await win.click('[data-testid="ai-test"]')
+  await testResult().getByText(/Google accepted the key/).waitFor()
+  step('Settings → Test shows Google’s real status and message: 503 (retried ×3), 429 and 403 (not retried)')
 
   // The key never appears in plain text on disk, and never in the notebook folder.
   const configFiles = await readdir(configDir)
@@ -285,6 +313,17 @@ try {
   await lastAnswer().getByText('Stopped.').waitFor()
   await win.waitForSelector('[data-testid="tutor-send"]')
   step('a streaming answer can be stopped')
+
+  // A brief overload is retried behind the scenes; the answer appears once.
+  const sentBefore = fake.generated().length
+  fake.reply({ error: errors.overloaded() })
+  fake.reply({ chunks: ['Recovered after ', 'a retry.'] })
+  await ask('Are you there?')
+  await waitAnswer()
+  assert.equal(await lastAnswer().getByText('Recovered after a retry.').count(), 1)
+  assert.equal((await lastAnswer().innerText()).split('Recovered after').length - 1, 1, 'answer text not duplicated')
+  assert.equal(fake.generated().length - sentBefore, 2, 'one failed try, one retry')
+  step('503 retried with backoff: one answer, shown once')
 
   // Free-tier errors are explained and handled without hammering the API.
   fake.reply({ error: errors.perMinute('3s') })

@@ -38,6 +38,8 @@ export interface FakeGemini {
   reply(answer: FakeAnswer | ((req: FakeRequest) => FakeAnswer | Promise<FakeAnswer>)): void
   setModels(list: unknown[]): void
   setDelay(ms: number): void
+  /** Every request with a valid key (model list and connection test too) gets this error until cleared with null. */
+  failAll(error: FakeError | null): void
   generated(): FakeRequest[]
   close(): Promise<void>
 }
