@@ -1,6 +1,6 @@
 # Repository cleanup plan
 
-**Status: proposal. Nothing here has been done.** No branch has been deleted, no history rewritten, nothing merged to `main`, nothing published. Every action below needs approval; the exact list is in [APPROVALS.md](APPROVALS.md).
+**Status (1 Nov 2026): stages 1–2 done.** The preparation work and Hermes's review were merged by PR (#2, #3), and `main` was fast-forwarded to `2e37ec5` (#4), so `main` is the only branch with current work. **No branch has been deleted.** The deletion list waiting for approval is in [APPROVALS.md](APPROVALS.md#4-branch-deletions). The audit below is kept as it was written on 31 Oct.
 
 Audited 31 Oct 2026 (05:15 UTC) from the remote: 15 branches, 1 pull request, 7 workflows (6 on `beta-release` plus one orphan), 1 release (a draft), no tags.
 

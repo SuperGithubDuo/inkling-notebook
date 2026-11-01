@@ -46,7 +46,7 @@ You need a Cloudflare account on the Workers **Free** plan. Open *Workers & Page
 
 1. In Cloudflare, create an API token (*My Profile → API Tokens → Create Token → Create Custom Token*) with: Account › Workers Scripts: Edit; Account › Account Settings: Read; Account › Billing: Read; Account › Workers AI: Read; User › Memberships: Read; User › User Details: Read. Limit it to your account.
 2. In GitHub, *Settings → Secrets and variables → Actions*, add the secrets `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` and `INKLING_ADMIN_TOKEN` (at least 32 random characters, e.g. `openssl rand -base64 36`).
-3. Push the branch `deploy/beta-server` (on github.com: branch menu → type `deploy/beta-server` → create from `beta-release`).
+3. *Actions → Beta AI server → Run workflow* on `main` (or push the branch `deploy/beta-server` from `main`).
 
 The workflow refuses a Workers Paid account; deploys; runs the security checks (`scripts/abuse-check.mjs security`); runs the real-model scenarios anonymously, as a freshly installed app; deploys a **temporary** copy with tiny limits to check the installation, network, per-minute, one-at-a-time, global-cap and pause limits against the real model, then deletes it; and reports Cloudflare's own Neuron count and the account's plan.
 
