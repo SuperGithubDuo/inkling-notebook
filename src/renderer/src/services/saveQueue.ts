@@ -2,6 +2,8 @@
  * Debounced auto-save. Edits mark a page (or the library) dirty; a short
  * debounce later the latest snapshot is written. `flush()` writes everything
  * immediately (Ctrl+S, window close). Failed saves stay dirty and are retried.
+ * While edits keep arriving (continuous writing or typing), a write still
+ * happens at least every MAX_WAIT, so a crash can't lose more than that.
  */
 import type { Library, NoteDoc, PageDoc } from '@shared/schema'
 import type { FlushResult, SaveResult } from '@shared/ipc'
@@ -21,12 +23,16 @@ interface Deps {
 const PAGE_DELAY = 500
 const LIBRARY_DELAY = 400
 const RETRY_DELAY = 3000
+/** Longest a pending change waits while new edits keep postponing the debounce. */
+export const MAX_WAIT = 2000
 
 export class SaveQueue {
   private dirtyPages = new Set<string>()
   private dirtyNotes = new Set<string>()
   private libraryDirty = false
   private timer: ReturnType<typeof setTimeout> | null = null
+  /** When the current debounce must fire at the latest (set by the first edit after a write). */
+  private deadline: number | null = null
   private running: Promise<void> | null = null
   /** The first error of the last write, if it had any. */
   private lastError: string | null = null
@@ -61,6 +67,7 @@ export class SaveQueue {
   async flush(): Promise<FlushResult> {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    this.deadline = null
     // Wait for an in-flight run, then write whatever became dirty meanwhile.
     while (this.running) await this.running
     if (this.hasPending) await this.run()
@@ -73,11 +80,17 @@ export class SaveQueue {
 
   private schedule(delay: number): void {
     this.deps.onStatus({ state: 'saving' })
+    const now = Date.now()
+    this.deadline ??= now + MAX_WAIT
     if (this.timer) clearTimeout(this.timer)
-    this.timer = setTimeout(() => {
-      this.timer = null
-      void this.run()
-    }, delay)
+    this.timer = setTimeout(
+      () => {
+        this.timer = null
+        this.deadline = null
+        void this.run()
+      },
+      Math.min(delay, Math.max(0, this.deadline - now))
+    )
   }
 
   private async run(): Promise<void> {
