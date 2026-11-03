@@ -24,6 +24,8 @@
    *   itself is an Intel build running under Rosetta, so it decides first.
    * - uaArch: User-Agent Client Hints architecture ('arm', 'x86' or '' when unavailable).
    *   An Intel (x86) browser on an Apple-silicon Mac reports 'x86', which is why it comes second.
+   * So 'x86' alone never means Intel: it takes an Intel or AMD GPU name to say so. With 'x86'
+   * and no usable GPU name (WebGL off or unavailable), it could be either Mac: unknown.
    * Safari masks the renderer as "Apple GPU" and has no client hints: unknown, so both Macs are offered.
    */
   function macArch(opts) {
@@ -33,7 +35,6 @@
     if (/\bApple M\d/i.test(renderer)) return 'arm';
     if (uaArch === 'arm') return 'arm';
     if (uaArch === 'x86' && /Intel|AMD|Radeon/i.test(renderer)) return 'intel';
-    if (uaArch === 'x86' && !renderer) return 'intel';
     return 'unknown';
   }
 

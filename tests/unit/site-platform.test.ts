@@ -3,6 +3,8 @@
  * and which file name the Mac install steps show. Regressions from the 2 Nov 2026 site audit:
  * - an Intel browser on an Apple-silicon Mac (Chrome under Rosetta) reported 'x86' and the
  *   page skipped the GPU check, so it recommended the Intel build;
+ * - an x86 browser with WebGL unavailable was assumed to be on an Intel Mac, though it may be
+ *   an Intel browser under Rosetta on Apple silicon (now unknown: both Macs offered);
  * - when the Mac type was unknown (every Safari visitor) or the visitor wasn't on a Mac, the
  *   Mac steps named only the Apple-silicon file.
  */
@@ -55,7 +57,9 @@ describe('download page: which computer the visitor has', () => {
     // A real Intel Mac.
     expect(P.macArch({ uaArch: 'x86', renderer: 'ANGLE (Intel Inc., Intel(R) Iris(TM) Plus Graphics 655, OpenGL 4.1)' })).toBe('intel')
     expect(P.macArch({ uaArch: 'x86', renderer: 'AMD Radeon Pro 5500M OpenGL Engine' })).toBe('intel')
-    expect(P.macArch({ uaArch: 'x86', renderer: '' })).toBe('intel')
+    // Regression: 'x86' with no GPU name (WebGL off) could be an Intel browser under Rosetta on Apple silicon.
+    expect(P.macArch({ uaArch: 'x86', renderer: '' })).toBe('unknown')
+    expect(P.macArch({ uaArch: 'x86' })).toBe('unknown')
     // Safari masks the GPU and has no client hints: don't guess.
     expect(P.macArch({ renderer: 'Apple GPU' })).toBe('unknown')
     expect(P.macArch({ uaArch: 'x86', renderer: 'Apple GPU' })).toBe('unknown')

@@ -4,7 +4,8 @@
  *
  * Covers, for a published verified release and for "no release yet":
  * - which installer is recommended (hero button and "Your computer" card), including an
- *   Intel browser on an Apple-silicon Mac (regression, 2 Nov 2026 audit);
+ *   Intel browser on an Apple-silicon Mac, and an x86 browser with WebGL unavailable, which
+ *   gets both Macs (regressions, 2 Nov 2026 audit);
  * - the Mac install steps name the right file, or both when the Mac type is unknown (regression);
  * - every download link is one of the three verified installers; none before a release;
  * - no sideways scrolling at 320, 375, 768 and 1280 px.
@@ -82,6 +83,7 @@ const VISITORS = {
   macArmChrome: { ua: UA.macChrome, uaArch: 'arm', renderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)', touch: 0 },
   macRosettaChrome: { ua: UA.macChrome, uaArch: 'x86', renderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)', touch: 0 },
   macIntelChrome: { ua: UA.macChrome, uaArch: 'x86', renderer: 'ANGLE (Intel Inc., Intel(R) Iris(TM) Plus Graphics 655, OpenGL 4.1)', touch: 0 },
+  macX86NoWebgl: { ua: UA.macChrome, uaArch: 'x86', renderer: null, touch: 0 },
   macSafari: { ua: UA.macSafari, uaArch: null, renderer: 'Apple GPU', touch: 0 },
   iphone: { ua: UA.iphone, uaArch: null, renderer: 'Apple GPU', touch: 5 },
   linux: { ua: UA.linux, uaArch: 'x86', renderer: 'Mesa Intel(R) UHD Graphics', touch: 0 }
@@ -97,6 +99,7 @@ function describeBrowser(v) {
   const original = HTMLCanvasElement.prototype.getContext
   HTMLCanvasElement.prototype.getContext = function (kind, ...rest) {
     if (kind !== 'webgl') return original.call(this, kind, ...rest)
+    if (v.renderer === null) return null // WebGL switched off or unavailable
     return { getExtension: (n) => (n === 'WEBGL_debug_renderer_info' ? { UNMASKED_RENDERER_WEBGL: 37446 } : null), getParameter: (p) => (p === 37446 ? v.renderer : null) }
   }
 }
@@ -156,7 +159,11 @@ try {
   assert.deepEqual(r.hero, [url('macIntel')])
   assert.deepEqual(r.recommended, ['Mac with Intel'])
   assert.equal(r.macGuide, names.macIntel)
-  step('Mac: Apple silicon and Intel told apart, including an Intel browser under Rosetta')
+  r = await visit('released', 'macX86NoWebgl')
+  assert.deepEqual(r.hero, [url('macArm'), url('macIntel')], 'x86 without a GPU name could be either Mac: both offered')
+  assert.deepEqual(r.recommended, [])
+  assert.equal(r.macGuide, `${names.macArm} or ${names.macIntel}`)
+  step('Mac: Apple silicon and Intel told apart, including an Intel browser under Rosetta; x86 without WebGL offers both')
 
   r = await visit('released', 'macSafari')
   assert.deepEqual(r.hero, [url('macArm'), url('macIntel')], 'unsure which Mac: both offered')
