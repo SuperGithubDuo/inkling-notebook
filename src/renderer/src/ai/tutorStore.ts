@@ -4,11 +4,12 @@
  * placeholder, and streams the answer into it.
  */
 import { create } from 'zustand'
-import type { AiError, AiModelId, AiPart } from '@shared/ai'
+import type { AiError, AiModelId, AiPart, AiProviderId } from '@shared/ai'
 import { useStore } from '@/store/store'
 import { buildContext, hasSelection, type ContextKind, type ImageRegion } from './context'
 import { cancelAi, preflight, startAi } from './client'
-import { buildTurns, type ThreadEntry } from './turns'
+import { buildTurns, historyFor, type ThreadEntry } from './turns'
+import { useAi } from './aiStore'
 
 export type QuickAction = 'hint' | 'explain' | 'check' | 'similar'
 export type TutorTab = 'chat' | 'page' | 'practice'
@@ -33,6 +34,8 @@ export interface ChatMessage {
   region?: ImageRegion
   quick?: QuickAction
   model?: AiModelId
+  /** The AI service the message was sent to or answered by; history goes only to the same one. */
+  provider?: AiProviderId
 }
 
 interface TutorState {
@@ -71,10 +74,12 @@ export const useTutor = create<TutorState>((set, get) => {
 
   /** Sends a user message already in the thread and streams the answer into a new model message. */
   const ask = async (key: string, user: ChatMessage): Promise<void> => {
+    const provider = useAi.getState().status?.provider
+    update(key, user.id, { provider })
     const thread = get().threads[key] ?? []
-    const before = thread.slice(0, thread.findIndex((m) => m.id === user.id))
+    const before = historyFor(thread.slice(0, thread.findIndex((m) => m.id === user.id)), provider)
     const history: ThreadEntry[] = before.map((m) => ({ role: m.role, parts: m.role === 'user' ? (m.parts ?? []) : [{ text: m.text }], ok: m.status === 'done' || (m.status === 'canceled' && !!m.text) }))
-    const answer: ChatMessage = { id: newId(), role: 'model', text: '', status: 'pending' }
+    const answer: ChatMessage = { id: newId(), role: 'model', text: '', status: 'pending', provider }
     append(key, answer)
     set({ running: { key, messageId: answer.id, requestId: null } })
     const finish = (patch: Partial<ChatMessage>): void => {

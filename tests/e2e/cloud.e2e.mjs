@@ -3,7 +3,8 @@
  * through the real Electron app. The server is the real beta-server code
  * (handler + ledger) on a local port, in front of a fake Workers AI model
  * (tests/support/fakeBeta.mjs). Covers: a fresh install ready on the cloud
- * AI with no code or account, consent before the first upload, streaming
+ * AI with no code or account, nothing at all sent (not even a status check)
+ * before consent, declining sends nothing, consent before the first upload, streaming
  * chat about a handwritten selection, practice, approved on-page marks, the
  * daily allowance shown and enforced, and switching to the local tutor.
  *
@@ -120,18 +121,37 @@ try {
   await openSettings()
   assert.equal(await win.getAttribute('[data-testid="ai-settings"]', 'data-provider'), 'cloud', 'a fresh install starts on the cloud AI')
   assert.equal(await win.locator('[data-testid="ai-beta-url"], [data-testid="ai-beta-token"]').count(), 0, 'no address or code to enter')
-  await win.locator('[data-testid="ai-cloud-quota"]').getByText(/About \d+ free answers? left today on this computer/).waitFor()
+  // Before consent the app sends nothing at all: not even the allowance check (readiness audit B1).
+  await win.locator('[data-testid="ai-cloud-quota-unconsented"]').waitFor()
+  await sleep(500)
+  assert.deepEqual(server.requests, [], 'launching and opening AI settings sent nothing to the server')
+  // A connection check asks for permission first, with the full notice; declining sends nothing.
   await win.click('[data-testid="ai-test"]')
-  await win.locator('[data-testid="ai-test-result"]').getByText(/uses none of your answers/).waitFor()
-  assert.equal(server.ai.calls.length, 0, 'the status check calls no model')
+  await win.waitForSelector('[data-testid="ai-consent"][data-provider="cloud"]')
+  const items = await win.locator('[data-testid="ai-consent-sent"] li').evaluateAll((els) => els.map((e) => e.getAttribute('data-item')))
+  assert.deepEqual(items, ['question', 'context', 'history', 'tasks', 'metadata'], 'the notice lists everything that is sent')
+  await win.locator('[data-testid="ai-consent-sent"]').getByText(/recent conversation on this page/).waitFor()
+  await win.locator('[data-testid="ai-consent-scope"]').getByText(/does not verify a parent’s or guardian’s consent/).waitFor()
+  await win.screenshot({ path: join(shots, 'cloud-consent-notice.png') })
+  await win.getByRole('button', { name: 'Not now' }).click()
+  await win.waitForSelector('[data-testid="ai-consent"]', { state: 'detached' })
+  await sleep(300)
+  assert.deepEqual(server.requests, [], 'declining sent nothing')
+  assert.equal(await win.isChecked('[data-testid="ai-consent-toggle"]'), false)
   const settings = JSON.parse(await readFile(join(configDir, 'ai-settings.json'), 'utf8'))
   assert.match(settings.installId, /^inst_[A-Za-z0-9_-]{22,64}$/, 'a random installation ID was created')
+  assert.equal(settings.cloudConsent, null, 'no consent was recorded')
   installId = settings.installId
   assert.equal((await readdir(configDir)).includes('beta-access.bin'), false)
   await win.screenshot({ path: join(shots, 'cloud-settings.png') })
   await closeSettings()
-  const leftAtStart = await shownMatchesServer('before any question')
-  step('a fresh install is ready on the cloud AI: no code, key, account or download; today’s allowance shown; no model call')
+  // A restart without consent sends nothing either.
+  await app.close()
+  await launch()
+  await win.getByText(/Inkling AI · Qwen/).first().waitFor()
+  await sleep(500)
+  assert.deepEqual(server.requests, [], 'a restart without consent sent nothing')
+  step('a fresh install is ready on the cloud AI with no code, key, account or download, and sends nothing — not even a status check — before consent; declining sends nothing')
 
   // ================================================================ chat
   console.log('chat')
@@ -145,8 +165,10 @@ try {
   server.ai.reply({ chunks: ['I read: $x^2+5x+6=0$, $(x+2)(x+3)=0$, $x = 2, 3$.\n\n', 'The factorisation is right, but each factor is zero when ', '$x = -2$ or $x = -3$.'], chunkDelayMs: 250, usage: { inputTokens: 1600, outputTokens: 90 } })
   await ask('Is this right?')
   await win.waitForSelector('[data-testid="ai-consent"][data-provider="cloud"]')
-  await win.getByText(/does not use it to train models/).first().waitFor()
-  assert.equal(server.ai.calls.length, 0, 'nothing is sent before consent')
+  await win.getByText(/does not use them to train models/).first().waitFor()
+  assert.deepEqual(server.requests, [], 'nothing is sent before consent')
+  // The count before the first answer, read by the test itself (the app hasn't asked yet).
+  const leftAtStart = (await serverQuota()).approxAnswersLeft
   await win.click('[data-testid="ai-consent-allow"]')
   await waitAnswer('streaming')
   await waitAnswer('done')
@@ -235,8 +257,10 @@ try {
   await closeSettings()
   await ask('Is (x+2)(x+3) right?')
   await waitAnswer()
-  assert.ok(ollama.requests.some((r) => r.path === '/api/chat'), 'the local tutor answered')
-  step('one click switches to the local Ollama tutor, which still works')
+  const localChat = ollama.requests.filter((r) => r.path === '/api/chat').at(-1)
+  assert.ok(localChat, 'the local tutor answered')
+  assert.doesNotMatch(JSON.stringify(localChat.body), /Explain everything about quadratics|Is this right\?/, 'the cloud conversation is not sent to the other provider')
+  step('one click switches to the local Ollama tutor, which still works and gets none of the cloud conversation')
 
   console.log('\nCloud AI acceptance: all checks passed')
 } catch (err) {

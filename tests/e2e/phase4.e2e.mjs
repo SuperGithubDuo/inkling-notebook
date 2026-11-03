@@ -131,6 +131,29 @@ try {
   assert.equal(fake.requests.length, 0)
   step('malformed key refused locally')
 
+  // Before consent nothing reaches Google, not even the key check: saving a key asks first.
+  await win.fill('[data-testid="ai-key-input"]', VALID_KEY)
+  await win.click('[data-testid="ai-key-save"]')
+  await win.waitForSelector('[data-testid="ai-consent"]:not([data-provider="cloud"])')
+  const items = await win.locator('[data-testid="ai-consent-sent"] li').evaluateAll((els) => els.map((e) => e.getAttribute('data-item')))
+  assert.deepEqual(items, ['question', 'context', 'history', 'tasks'], 'the Gemini notice lists everything that is sent')
+  await win.locator('[data-testid="ai-consent-sent"]').getByText(/recent conversation on this page/).waitFor()
+  await win.getByRole('button', { name: 'Not now' }).click()
+  await testResult().getByText(/Not checked: Inkling contacts Google only after you allow it/).waitFor()
+  await win.getByText(`Key ending in …${VALID_KEY.slice(-4)}`).waitFor()
+  assert.equal(fake.requests.length, 0, 'declining sent nothing to Google')
+  await win.click('[data-testid="ai-key-remove"]')
+  await win.waitForSelector('[data-testid="ai-key-input"]')
+  // Allowing from the checkbox shows the same notice; the box is ticked only after Allow.
+  assert.equal(await win.isChecked('[data-testid="ai-consent-toggle"]'), false)
+  await win.click('[data-testid="ai-consent-toggle"]')
+  await win.waitForSelector('[data-testid="ai-consent"]')
+  await win.click('[data-testid="ai-consent-allow"]')
+  await win.waitForSelector('[data-testid="ai-consent"]', { state: 'detached' })
+  await win.waitForFunction(() => document.querySelector('[data-testid="ai-consent-toggle"]')?.checked === true)
+  assert.equal(fake.requests.length, 0, 'allowing itself sends nothing')
+  step('before consent no request reaches Google (not even the key check); declining sends nothing; allowing shows the full notice')
+
   // A key Google rejects: saved, but the connection test says why.
   await win.fill('[data-testid="ai-key-input"]', BAD_KEY)
   await win.click('[data-testid="ai-key-save"]')
@@ -227,10 +250,8 @@ try {
   ])
   step('unavailable model flagged; switching to Flash-Lite is the user’s choice')
 
-  // Consent is off until given, and remembered.
-  assert.equal(await win.isChecked('[data-testid="ai-consent-toggle"]'), false)
-  await win.check('[data-testid="ai-consent-toggle"]')
-  await sleep(100)
+  // Consent, given above, is remembered.
+  assert.equal(await win.isChecked('[data-testid="ai-consent-toggle"]'), true)
   await closeSettings()
   assert.equal(await win.getAttribute('[data-testid="ai-status"]', 'data-state'), 'ready')
   await win.getByText(/Connected · Gemini 3.5 Flash-Lite/).waitFor()

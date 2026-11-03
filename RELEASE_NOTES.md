@@ -8,11 +8,17 @@ Fixes from independent QA of the Beta 1 Windows installer. Beta 1 was never publ
 - **Windows 10/11** (x64; ARM PCs run it through Windows' emulation): `Inkling-Setup-0.2.0-beta.2-x64.exe`.
 - **Mac, Apple silicon:** `Inkling-0.2.0-beta.2-arm64.dmg`. **Mac, Intel:** `Inkling-0.2.0-beta.2-x64.dmg`. macOS 12 or later.
 - **Not code-signed:** Windows and macOS warn on first open and can't verify the publisher. Install only from the link you were sent, and compare the SHA-256 checksums.
-- Free AI tutor with no account or key: about 10 answers a day per computer, resetting at 00:00 UTC. Notebooks stay on your computer; only what you ask about is sent, after you allow it.
+- Free AI tutor with no account or key: about 10 answers a day per computer, resetting at 00:00 UTC. Notebooks stay on your computer; nothing is sent to the AI before you allow it.
 - Google Gemini is not offered in this build (its terms are adults-only and are being reviewed for an all-ages app); the cloud AI and the local Ollama tutor remain. Developer builds still accept Gemini keys in both Google AI Studio formats (`AIza…` and the newer `AQ.…`).
 
 **Fixed**
 - **Free AI answers left:** the count under the tutor now updates after every answer, including page markups, practice sets and answer checks, instead of staying the same until Inkling was restarted. It uses the AI server's own figures, refreshes after a stopped answer, and refreshes after the daily reset at midnight UTC.
+
+**Privacy**
+- **Nothing reaches the cloud AI before you allow it** — not even the check of how many free answers are left. Earlier, opening the tutor or AI settings asked the server for that count (sending the installation ID and internet address, no notebook content) before permission was given. The same now applies to Google Gemini in developer builds: its key isn't checked with Google until you allow it.
+- **The permission notice lists everything that is sent:** your question, what you include, the recent conversation on the page (up to 5 earlier questions, the answers and the most recent earlier image), the extra fields of markups, practice and answer checks, and the installation ID and internet address. It also says that one *Allow* covers everyone on the computer account and is not verified parental consent. Because the notice changed, Inkling asks once more on computers that had already allowed the cloud AI.
+- **Ticking the permission box in Settings** now shows the same notice before anything is allowed; unticking still withdraws at once.
+- **History goes only to the service that answered it:** after switching between the cloud AI and Ollama, the earlier conversation stays on screen but isn't sent to the other service.
 
 **Clarified**
 - **Tutor chats aren't saved.** The chat now says that it clears when you close Inkling. Marks and corrections you add to your page are saved with the notebook, as before.

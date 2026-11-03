@@ -3,6 +3,8 @@
 What Inkling doesn't do yet, or does with caveats. The current release-readiness status is in [READINESS.md](READINESS.md).
 
 - The cloud AI's free allowance is small: about 110 typical interactions a day for everyone together (measured; see [Cloud beta results](AI-PROVIDERS.md#cloud-beta-results)). It is shared through one Cloudflare account and resets at midnight UTC, which is the afternoon or evening in the Americas.
+- **Permission for the cloud AI is per computer account, not per person, and is not age-checked.** One *Allow* covers everyone who uses Inkling on that computer account. Inkling doesn't ask for ages, and clicking *Allow* doesn't verify a parent's or guardian's consent; the notice says so. A process for verifiable parental consent has not been decided or built (see [PRIVACY.md](PRIVACY.md#children-and-students)).
+- Existing installations that allowed the cloud AI under an earlier version of the notice are asked again (once) before anything more is sent, because the notice now lists more of what is sent.
 - The cloud beta's model has no JSON mode on Workers AI, so practice sets, answer checks and markups rely on the instructions plus Inkling's validation: an answer in the wrong format is rejected with "Try again" and still costs allowance.
 - The beta server can only declare, not verify, that its Cloudflare account is on the Workers Free plan (`ACCOUNT_PLAN`). On a Workers Paid account, usage beyond the free allowance would be billed, though the server's own cap still stops at 9,000 Neurons a day.
 - The local tutor's quality and speed depend on the model and the computer. Small models (2B) misread handwriting more often; see [Local model results](AI-PROVIDERS.md#local-model-results) for what has actually been measured.

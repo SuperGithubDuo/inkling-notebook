@@ -166,10 +166,19 @@ export async function startBetaServer(options = {}) {
     p.finally(() => pending.delete(p))
   }
 
+  /** Every HTTP request the app made, in memory only: method, path, headers and JSON body. */
+  const requests = []
   const server = http.createServer(async (req, res) => {
     const chunks = []
     for await (const c of req) chunks.push(c)
     const body = Buffer.concat(chunks)
+    let json
+    try {
+      json = body.length ? JSON.parse(body.toString('utf8')) : undefined
+    } catch {
+      json = undefined
+    }
+    requests.push({ method: req.method, path: (req.url ?? '').split('?')[0], headers: { ...req.headers }, body: json })
     // Like Cloudflare: the client's address is set by the edge, never taken from the client.
     // Tests simulate different networks with x-test-ip.
     const headers = { ...req.headers }
@@ -199,6 +208,7 @@ export async function startBetaServer(options = {}) {
   return {
     url,
     ai,
+    requests,
     ledger,
     config,
     adminToken,

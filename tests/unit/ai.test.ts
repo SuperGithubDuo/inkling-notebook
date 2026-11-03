@@ -346,7 +346,7 @@ describe('AI service', () => {
   })
 
   it('tests the connection with a tiny request and validates available models', async () => {
-    const { service } = await makeService({ consent: false })
+    const { service } = await makeService()
     const result = await service.test()
     expect(result).toMatchObject({ ok: true, model: 'gemini-3.8-flash' })
     expect(service.status().models).toEqual([

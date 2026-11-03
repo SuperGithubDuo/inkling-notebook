@@ -1,7 +1,8 @@
 /**
  * AI section of Settings: which provider answers (Inkling's free cloud AI,
  * local Ollama, or Google Gemini for adults), then that provider's setup.
- * Cloud AI: today's allowance, a connection check and consent. Ollama: whether it
+ * Cloud AI: today's allowance, a connection check and consent (no request of any
+ * kind reaches the server before consent; allowing always shows the full notice). Ollama: whether it
  * runs, which vision models are installed and how to install one, model
  * choice and a connection test. Gemini: key, model choice (free models only,
  * checked against the models the key can use), connection test and consent.
@@ -12,6 +13,8 @@ import { CircleAlert, CircleCheck, Cloud, Copy, Cpu, KeyRound, LoaderCircle, Ref
 import {
   CLOUD_DATA_NOTE,
   CLOUD_MODEL_LABEL,
+  CLOUD_PERMISSION_SCOPE,
+  CLOUD_SENT,
   CLOUD_TERMS_URL,
   GEMINI_ELIGIBILITY,
   GEMINI_MODELS,
@@ -28,6 +31,7 @@ import {
 } from '@shared/ai'
 import { cx } from '@/components/ui/primitives'
 import { GET_KEY_URL, GEMINI_TERMS_URL, OLLAMA_DOWNLOAD_URL, useAi } from './aiStore'
+import { SentList } from './ConsentDialog'
 
 type TestState = { kind: 'idle' } | { kind: 'running' } | { kind: 'ok'; latencyMs: number } | { kind: 'error'; error: AiError }
 
@@ -100,19 +104,21 @@ export function quotaText(q: CloudQuota): string {
 const resetTime = (iso: string): string => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
 function CloudSettings({ status }: { status: AiStatus }) {
-  const { setStatus } = useAi.getState()
+  const { setStatus, ensureConsent } = useAi.getState()
   const cloud = status.cloud
   const [test, setTest] = useState<TestState>({ kind: 'idle' })
 
   const runTest = async (): Promise<void> => {
+    // Checking reaches the server too, so it asks for permission first, with the full notice.
+    if (!(await ensureConsent())) return setTest({ kind: 'idle' })
     setTest({ kind: 'running' })
     const result = await window.inkling.ai.test()
     setStatus(await window.inkling.ai.status())
     setTest(result.ok ? { kind: 'ok', latencyMs: result.latencyMs } : { kind: 'error', error: result.error })
   }
-  // Show today's allowance without waiting for a question.
+  // Show today's allowance without waiting for a question, once the user has allowed the AI.
   useEffect(() => {
-    if (cloud.url && !cloud.quota) void runTest()
+    if (cloud.url && cloud.consented && !cloud.quota) void runTest()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -144,8 +150,12 @@ function CloudSettings({ status }: { status: AiStatus }) {
               today’s free AI.
             </span>
           </>
-        ) : (
+        ) : cloud.consented ? (
           <span className="text-ink-3">Today’s allowance appears once Inkling has reached the AI server.</span>
+        ) : (
+          <span className="text-ink-3" data-testid="ai-cloud-quota-unconsented">
+            About 10 free answers a day on each computer. Inkling doesn’t contact its AI server, even to check this, until you allow it below.
+          </span>
         )}
       </div>
 
@@ -157,15 +167,23 @@ function CloudSettings({ status }: { status: AiStatus }) {
             type="checkbox"
             data-testid="ai-consent-toggle"
             checked={cloud.consented}
-            onChange={async (e) => setStatus(await window.inkling.ai.setConsent(e.target.checked))}
+            // Allowing shows the full notice (what is sent, who it covers); withdrawing takes effect at once.
+            onChange={async (e) => {
+              if (e.target.checked) return void (await ensureConsent())
+              setStatus({ ...status, consented: false, cloud: { ...cloud, consented: false } })
+              setStatus(await window.inkling.ai.setConsent(false))
+            }}
             className="mt-0.5 accent-[var(--color-accent)]"
           />
           <span className="text-ink-2">
-            <span className="font-medium text-ink">Allow sending what I ask about to Inkling’s AI server.</span> {CLOUD_DATA_NOTE} Don't include sensitive personal
-            information.{' '}
-            <a href={CLOUD_TERMS_URL} target="_blank" rel="noreferrer" className="text-accent hover:underline">
-              Cloudflare’s data policy
-            </a>
+            <span className="font-medium text-ink">Allow sending what I ask about to Inkling’s AI server.</span> It receives:
+            <SentList items={CLOUD_SENT} testId="ai-settings-sent" />
+            <span className="mt-1 block">
+              {CLOUD_DATA_NOTE} {CLOUD_PERMISSION_SCOPE} Don't include sensitive personal information.{' '}
+              <a href={CLOUD_TERMS_URL} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                Cloudflare’s data policy
+              </a>
+            </span>
           </span>
         </label>
       </div>
@@ -356,7 +374,7 @@ function TestRow({ test, disabled, onTest, okText }: { test: TestState; disabled
 // ------------------------------------------------------------------ Gemini
 
 function GeminiSettings({ status }: { status: AiStatus }) {
-  const { setStatus } = useAi.getState()
+  const { setStatus, ensureConsent } = useAi.getState()
   const [key, setKey] = useState('')
   const [keyError, setKeyError] = useState<string | null>(null)
   // Saving (encrypted, on this computer) and Google accepting the key are separate steps, reported separately.
@@ -365,6 +383,10 @@ function GeminiSettings({ status }: { status: AiStatus }) {
   const [busy, setBusy] = useState(false)
 
   const runTest = async (): Promise<void> => {
+    // Checking the key reaches Google, so it asks for permission first, with the full notice.
+    if (!(await ensureConsent())) {
+      return setTest({ kind: 'error', error: { code: 'consent_required', message: 'Not checked: Inkling contacts Google only after you allow it.' } })
+    }
     setTest({ kind: 'running' })
     const result = await window.inkling.ai.test()
     setStatus(await window.inkling.ai.status())
@@ -452,7 +474,15 @@ function GeminiSettings({ status }: { status: AiStatus }) {
         <div className="mb-1.5 flex items-center justify-between">
           <span className="text-[13.5px] font-medium">Model</span>
           {status.hasKey && (
-            <button type="button" onClick={async () => { await window.inkling.ai.refreshModels(); setStatus(await window.inkling.ai.status()) }} className="flex items-center gap-1 text-[12.5px] text-ink-3 hover:text-ink">
+            <button
+              type="button"
+              onClick={async () => {
+                if (!(await ensureConsent())) return
+                await window.inkling.ai.refreshModels()
+                setStatus(await window.inkling.ai.status())
+              }}
+              className="flex items-center gap-1 text-[12.5px] text-ink-3 hover:text-ink"
+            >
               <RefreshCw size={12} /> Check availability
             </button>
           )}
@@ -502,10 +532,11 @@ function GeminiSettings({ status }: { status: AiStatus }) {
             type="checkbox"
             data-testid="ai-consent-toggle"
             checked={status.geminiConsented}
+            // Allowing shows the full notice (what is sent, the age requirement); withdrawing takes effect at once.
             onChange={async (e) => {
-              const checked = e.target.checked
-              setStatus({ ...status, consented: checked, geminiConsented: checked })
-              setStatus(await window.inkling.ai.setConsent(checked))
+              if (e.target.checked) return void (await ensureConsent())
+              setStatus({ ...status, consented: false, geminiConsented: false })
+              setStatus(await window.inkling.ai.setConsent(false))
             }}
             className="mt-0.5 accent-[var(--color-accent)]"
           />
