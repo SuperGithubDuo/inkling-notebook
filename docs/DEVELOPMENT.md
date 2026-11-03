@@ -93,7 +93,7 @@ Each step is one or two requests, well inside the free per-minute limits.
 
 ## Continuous integration
 
-- **CI** (`.github/workflows/ci.yml`) runs the typecheck, unit tests, the production build and the AI server's typecheck and bundle on every push to `main` and on every pull request.
+- **CI** (`.github/workflows/ci.yml`) runs on every push to `main` and on every pull request: the typecheck, unit tests, the production build and the AI server's typecheck and bundle, and, in parallel, the Electron acceptance suites on Linux under a virtual display (about 5 minutes; screenshots are uploaded when a suite fails).
 - **Release** (`.github/workflows/release.yml`) builds the Windows and macOS installers on real GitHub-hosted Windows and macOS machines and runs every acceptance suite there, plus a packaged-app smoke test and an install → update → uninstall → reinstall check. See [RELEASING.md](RELEASING.md).
 - **Download site** (`.github/workflows/pages.yml`) rebuilds the download page from the newest approved release. See [Download site](RELEASING.md#download-site).
 
