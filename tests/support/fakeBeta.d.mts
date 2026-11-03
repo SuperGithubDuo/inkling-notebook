@@ -46,9 +46,17 @@ export interface BetaServerOptions {
   imagePatch?: number
   port?: number
 }
+export interface RecordedRequest {
+  method: string
+  path: string
+  headers: Record<string, string | string[] | undefined>
+  body?: any
+}
 export interface BetaServer {
   url: string
   ai: FakeWorkersAi
+  /** Every HTTP request received (status checks included), in memory only. */
+  requests: RecordedRequest[]
   ledger: any
   config: any
   adminToken: string

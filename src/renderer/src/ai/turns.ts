@@ -16,6 +16,18 @@ export interface ThreadEntry {
 export const HISTORY_ENTRIES = 10
 export const MAX_ANSWER_CHARS = 4000
 
+/**
+ * The earlier messages that may go with a new question to `provider`: only those
+ * this same provider handled. After a switch (say from Ollama, on this computer,
+ * to a cloud AI) the earlier conversation stays on screen but is not sent, so
+ * nothing written for one service reaches another. Messages with no recorded
+ * provider are left out too.
+ */
+export function historyFor<T extends { provider?: string }>(messages: T[], provider: string | undefined): T[] {
+  if (!provider) return []
+  return messages.filter((m) => m.provider === provider)
+}
+
 export function buildTurns(history: ThreadEntry[], current: AiPart[]): AiTurn[] {
   // Keep only complete exchanges: a user entry followed by a usable answer.
   const pairs: [ThreadEntry, ThreadEntry][] = []

@@ -20,7 +20,7 @@ Free for everyone who installs Inkling, with nothing to set up: no account, acce
 
 The panel shows roughly how many answers are left, using the server's own count: it updates after every answer (chat, markup, practice and checks), after a stopped answer, and again after the midnight UTC reset. The app never estimates or counts down by itself. When an allowance runs out, the tutor says so plainly, notebooks work as usual, and it offers a one-click switch to the local Ollama tutor. Inkling never switches by itself and never moves to paid usage.
 
-**What is sent and kept.** Your question, and an image of your selection or the page's typed/PDF text plus an image of its handwriting. The app sends only the task and the conversation; the server adds Inkling's instructions and limits, so it can't be used as a general AI service. Inkling's server doesn't keep or log the content, and Cloudflare states that it doesn't either ([Cloudflare's data usage](https://developers.cloudflare.com/workers-ai/platform/privacy/)). To enforce the limits, the server counts usage per installation (a random ID the app creates) and per network address, stored only as hashes with a salt that changes daily and deleted at the end of each UTC day. There is no credential in the app, and no Cloudflare API token anywhere: the server reaches Workers AI through its built-in binding.
+**What is sent and kept.** Nothing at all, not even the allowance check, before you allow it in the permission dialog, which lists what is sent (`CLOUD_SENT` in `src/shared/ai.ts`). Then: your question; an image of your selection, or the page's title, typed/PDF text and an image of its handwriting; and the recent conversation on that page (up to 5 earlier exchanges and the most recent earlier image; messages answered by another provider are left out). The app sends only the task and the conversation; the server adds Inkling's instructions and limits, so it can't be used as a general AI service. Inkling's server doesn't keep or log the content, and Cloudflare states that it doesn't either ([Cloudflare's data usage](https://developers.cloudflare.com/workers-ai/platform/privacy/)). To enforce the limits, the server counts usage per installation (a random ID the app creates) and per network address, stored only as hashes with a salt that changes daily; the salt and counts are replaced with the first request after 00:00 UTC. There is no credential in the app, and no Cloudflare API token anywhere: the server reaches Workers AI through its built-in binding.
 
 Running the server (deploying, limits, emergency pause) is described in [`beta-server/README.md`](../beta-server/README.md).
 
@@ -50,9 +50,9 @@ Google's Gemini API terms require users to be 18 or older and don't allow it in 
 
 **Set up.**
 1. Create a free API key in [Google AI Studio](https://aistudio.google.com/apikey). No billing is needed. To be sure you stay free, use a key from a Google Cloud project **without billing enabled**: Inkling can't see your project's billing, and Google charges for any project that has it.
-2. Open Settings → AI Tutor, choose **Google Gemini**, paste the key and press Save. Inkling runs a connection test: it lists the models your key can use and sends one tiny request. No notebook content is sent.
+2. Open Settings → AI Tutor, choose **Google Gemini**, paste the key and press Save. Inkling first asks you to confirm you are 18 or older and agree to send notebook content to Google; nothing, not even the key check, reaches Google before that. Then it runs a connection test: it lists the models your key can use and sends one tiny request. No notebook content is sent.
 3. Choose a model: **Gemini 3.8 Flash** (default, best quality) or **Gemini 3.5 Flash-Lite** (lighter, more generous free limits). Models your key can't use are flagged.
-4. The first time you ask something, Inkling asks you to confirm you are 18 or older and agree to send notebook content to Google.
+4. If you declined in step 2, Inkling asks again the first time you test the key or ask something.
 
 ### Privacy, Gemini limits and keys
 

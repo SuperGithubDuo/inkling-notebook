@@ -732,6 +732,7 @@ describe('app on the cloud AI', () => {
 
   it('the connection test spends no allowance', async () => {
     await makeService()
+    await service.setConsent(true)
     expect(await service.test()).toMatchObject({ ok: true, model: CLOUD_MODEL })
     expect(server.ai.calls).toHaveLength(0)
     expect(service.status().cloud.quota).toMatchObject({ installUsed: 0, installLimit: 900 })

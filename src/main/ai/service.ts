@@ -5,9 +5,12 @@
  * to the renderer and validates structured answers before they are delivered.
  *
  * Local Ollama needs no key or consent, since nothing leaves the computer.
- * For Gemini it also checks the key and the user's consent and guards the
+ * A cloud provider (Gemini or Inkling's cloud AI) is never contacted — no
+ * request, status, model list or connection check — before the user has
+ * agreed to its current notice (mayContact).
+ * For Gemini it also checks the key and guards the
  * free quota (a per-minute budget, waiting out rate limits). For the cloud
- * AI it checks consent, paces requests, and keeps the
+ * AI it paces requests, and keeps the
  * allowance the server reports with every answer; the server enforces the
  * daily limits itself. It never changes provider or model by itself; it may
  * only suggest one.
@@ -177,10 +180,26 @@ export class AiService {
     this.emit({ type: 'status', status: this.status() })
   }
 
-  /** Asks the server for today's allowance. Costs no model usage; never throws. */
+  /**
+   * Whether the active provider may be contacted at all. A cloud provider (Inkling's AI
+   * server or Google) gets no request of any kind — not a status, model list or connection
+   * check — until the user has agreed to its current notice. Ollama runs on this computer.
+   */
+  private mayContact(): boolean {
+    const p = this.config.provider
+    return p === 'cloud' ? this.config.cloudConsented : p === 'gemini' ? this.config.consented : true
+  }
+
+  private consentRequired(): AiError {
+    return this.config.provider === 'cloud'
+      ? { code: 'consent_required', message: 'Allow Inkling to send what you ask about to its AI server first. Nothing has been sent.' }
+      : { code: 'consent_required', message: 'Allow Inkling to send notebook content to Google Gemini first (AI settings). Nothing has been sent.' }
+  }
+
+  /** Asks the server for today's allowance. Costs no model usage; never throws. Never before consent. */
   private async refreshCloudQuota(): Promise<void> {
-    // Switched to another provider meanwhile: nothing to show, so nothing to ask.
-    const beta = this.config.provider === 'cloud' ? this.getCloud() : null
+    // Switched to another provider meanwhile, or no permission: nothing to show, so nothing to ask.
+    const beta = this.config.provider === 'cloud' && this.config.cloudConsented ? this.getCloud() : null
     if (!beta) return
     try {
       const st = await beta.status()
@@ -272,8 +291,13 @@ export class AiService {
   /** Consent for the active cloud provider (Gemini or the cloud AI). */
   async setConsent(accepted: boolean): Promise<AiStatus> {
     if (!accepted) this.cancelActive()
-    if (this.config.provider === 'cloud') await this.config.setCloudConsent(accepted)
-    else await this.config.setConsent(accepted)
+    if (this.config.provider === 'cloud') {
+      await this.config.setCloudConsent(accepted)
+      // Withdrawn: what the server said earlier no longer applies here.
+      if (!accepted) this.cloudInfo = { quota: null, checkedAt: null }
+      // Just allowed: show today's allowance (a status check, no model call).
+      else void this.refreshCloudQuota()
+    } else await this.config.setConsent(accepted)
     return this.status()
   }
 
@@ -284,6 +308,7 @@ export class AiService {
       if (this.ollama.running === false) return { ok: false, error: offline() }
       return { ok: true, models: this.availability() }
     }
+    if (!this.mayContact()) return { ok: false, error: this.consentRequired() }
     if (this.config.provider === 'cloud') {
       const beta = this.getCloud()
       if (!beta) return { ok: false, error: noCloud() }
@@ -313,6 +338,8 @@ export class AiService {
    */
   async test(): Promise<AiTestResult> {
     const providerId = this.config.provider
+    // A connection check reaches the provider too, so it waits for permission like everything else.
+    if (!this.mayContact()) return { ok: false, error: this.consentRequired() }
     if (providerId === 'cloud') {
       // The server's status check proves the address works; a model call would spend the allowance.
       const beta = this.getCloud()
@@ -364,12 +391,7 @@ export class AiService {
 
   /** Starts a streamed request. Results arrive as AiEvents with the returned id. */
   start(request: AiRequest): AiStartResult {
-    if (this.config.provider === 'gemini' && !this.config.consented) {
-      return { error: { code: 'consent_required', message: 'Allow Inkling to send notebook content to Google Gemini first (AI settings).' } }
-    }
-    if (this.config.provider === 'cloud' && !this.config.cloudConsented) {
-      return { error: { code: 'consent_required', message: 'Allow Inkling to send notebook content to its AI server first.' } }
-    }
+    if (!this.mayContact()) return { error: this.consentRequired() }
     const provider = this.config.provider === 'cloud' ? this.getCloud() : this.getProvider()
     if (!provider) return { error: this.config.provider === 'cloud' ? noCloud() : noKey() }
     const model = this.config.model

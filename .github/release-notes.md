@@ -38,8 +38,8 @@ Windows (PowerShell): `Get-FileHash .\Downloads\<file>` · macOS (Terminal): `sh
 
 - **Notebooks stay on your computer.** No account, no cloud storage; we can't see them. Updating or uninstalling keeps them.
 - **The AI tutor is free but limited:** about 10 answers a day per computer (resetting at 00:00 UTC), and about 110 in any 24 hours for everyone together.
-- **Only what you ask about is sent**, after you click *Allow*: your question and the selection or page text you include, to Inkling's server on Cloudflare (model: Qwen on Workers AI). Inkling's server doesn't store it, and Cloudflare says it doesn't keep it or train on it. An anonymous installation ID and your internet address go with it for the daily limits, kept only as scrambled counts deleted every day. Don't send personal or sensitive information. AI answers can be wrong.
-- **Under 18?** Inkling doesn't check ages. A parent or guardian should read the privacy notice (a draft pending legal review), install Inkling and decide whether to allow the AI (see the install guide).
+- **Nothing is sent until you click *Allow*** — not even a check of how many answers are left. Then each question sends Inkling's server on Cloudflare (model: Qwen on Workers AI) your question, the selection or page you include (image, title, typed and PDF text), and the recent conversation on that page. Inkling's server doesn't store it, and Cloudflare says it doesn't keep it or train on it. An anonymous installation ID and your internet address go with it for the daily limits, kept only as scrambled counts replaced every day. Don't send personal or sensitive information. AI answers can be wrong.
+- **Under 18?** Inkling doesn't check ages, and clicking *Allow* isn't verified parental consent; one *Allow* covers everyone on that computer account. A parent or guardian should read the privacy notice (a draft pending legal review), install Inkling and decide whether to allow the AI (see the install guide).
 
 ### What's new
 

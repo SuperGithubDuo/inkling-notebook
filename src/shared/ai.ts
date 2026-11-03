@@ -32,9 +32,54 @@ export const PROVIDERS: Record<AiProviderId, { label: string; local: boolean; de
 /** The model behind the cloud AI. The server decides; this is what it is configured with. */
 export const CLOUD_MODEL = '@cf/qwen/qwen3.8-27b'
 export const CLOUD_MODEL_LABEL = 'Qwen 3.8 27B (Cloudflare Workers AI)'
-/** What the cloud AI does with notebook content, shown wherever it can be chosen. */
+/**
+ * What a cloud AI provider receives with a request, item by item. Shown in the
+ * consent dialog, AI settings and the privacy screen, so every place that asks
+ * for permission describes the same thing. Each item matches what the app
+ * actually sends (tests/unit/consent.test.ts ties them to the requests):
+ *   question  – the typed question, or the prompt of a quick action
+ *   context   – src/renderer/src/ai/context.ts (selection, page, note page)
+ *   history   – src/renderer/src/ai/turns.ts (recent exchanges, one earlier image)
+ *   tasks     – markup, practice and answer-check requests
+ *   metadata  – the installation ID header and the connection's IP address (Inkling's server only)
+ */
+export interface SentItem {
+  id: 'question' | 'context' | 'history' | 'tasks' | 'metadata'
+  text: string
+}
+const SENT_CONTENT: readonly SentItem[] = [
+  { id: 'question', text: 'Your question, or the quick action you chose (such as “Check my work”).' },
+  {
+    id: 'context',
+    text: 'What you include with it: an image of your lasso selection and any typed text in it; or the current page — its title, typed text, PDF text and an image of its handwriting (of the whole page when it has a PDF); or a note page’s title and text.'
+  },
+  {
+    id: 'history',
+    text: 'The recent conversation on this page: up to your last 5 questions with the text they included, the tutor’s answers, and the most recent earlier image. Earlier messages answered by a different AI service are not sent.'
+  },
+  {
+    id: 'tasks',
+    text: 'For markups, practice and answer checks: the image or answer being checked, the practice problem and its expected answer, the topic and difficulty you chose, and the tutor’s earlier explanation when you choose “Show this on my page”.'
+  }
+]
+/** Sent to Inkling's AI server. */
+export const CLOUD_SENT: readonly SentItem[] = [
+  ...SENT_CONTENT,
+  {
+    id: 'metadata',
+    text: 'This installation’s random ID (made by this app, not linked to your name) and your internet (IP) address, which every connection carries. The server uses them only to count the free daily allowance.'
+  }
+]
+/** Sent to Google with the user's own key (development builds only). */
+export const GEMINI_SENT: readonly SentItem[] = SENT_CONTENT
+/** When anything is sent: shown with the lists above. */
+export const CLOUD_WHEN_SENT = 'Nothing is sent — not even a check of today’s allowance — until you allow it. After that, something is sent only when you ask the tutor, and when Inkling checks how many free answers are left.'
+/** What the cloud AI does with what it receives, shown wherever it can be chosen. */
 export const CLOUD_DATA_NOTE =
-  'Your question and an image of what you selected go to Inkling’s AI server and are answered by Cloudflare Workers AI. Neither keeps your content: Cloudflare says it does not use it to train models or store it after answering, and Inkling’s server never stores or logs it. To share out the free daily allowance, the server counts answers per installation (a random ID this app made) and per internet connection, in scrambled form that is deleted every day.'
+  'Requests go to Inkling’s AI server and are answered by Cloudflare Workers AI. Cloudflare says it does not use them to train models or store them after answering, and Inkling’s server never stores or logs their content. To share out the free daily allowance, the server counts answers per installation and per internet connection, in scrambled form that is deleted every day.'
+/** Who the permission covers and what it is not: shown wherever cloud permission is asked. */
+export const CLOUD_PERMISSION_SCOPE =
+  'This permission covers everyone who uses Inkling on this computer account. Inkling does not check ages, and clicking Allow does not verify a parent’s or guardian’s consent: if you are under 18, ask a parent or guardian before allowing. Notebooks work fully without the AI.'
 export const CLOUD_TERMS_URL = 'https://developers.cloudflare.com/workers-ai/platform/privacy/'
 
 /** The AI server address: https, or http on this computer (for testing). */
@@ -112,10 +157,18 @@ export const OLLAMA_DEFAULT_URL = 'http://127.0.0.1:11434'
 export const modelLabel = (id: string): string =>
   id === CLOUD_MODEL ? 'Qwen 3.8 27B' : ([...GEMINI_MODELS, ...OLLAMA_MODELS].find((m) => m.id === id)?.label ?? id.replace(/^qwen3-vl:(\d+)b$/, 'Qwen3-VL $1B (thinking)'))
 
-/** Version of the data-use notice. Raising it asks the user to agree again. */
-export const CONSENT_VERSION = 2
-/** Version of the cloud AI's data notice (CLOUD_DATA_NOTE). 2: public access, anonymous IDs. */
-export const CLOUD_CONSENT_VERSION = 2
+/**
+ * Version of Gemini's data-use notice. Raising it asks the user to agree again.
+ * 2: age confirmation. 3: lists everything sent (GEMINI_SENT), including recent conversation.
+ */
+export const CONSENT_VERSION = 3
+/**
+ * Version of the cloud AI's data notice. Raising it asks the user to agree again; an
+ * older agreement is kept in the settings file but no longer counts.
+ * 2: public access, anonymous IDs. 3: lists everything sent (CLOUD_SENT), including
+ * recent conversation; nothing, not even the allowance check, before agreeing.
+ */
+export const CLOUD_CONSENT_VERSION = 3
 
 /** This installation's anonymous ID for the cloud AI's fair-use limits (not secret, not an account). */
 export const installIdSchema = z.string().regex(/^inst_[A-Za-z0-9_-]{22,64}$/)
