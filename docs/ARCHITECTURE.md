@@ -1,6 +1,6 @@
 # Inkling architecture
 
-How Inkling is put together, for contributors. See also [Developing Inkling](DEVELOPMENT.md) and [AI providers](AI-PROVIDERS.md).
+How Inkling is put together, for contributors. See also [Developing Inkling](DEVELOPMENT.md) and [AI providers](AI.md).
 
 ## Notebook context API
 

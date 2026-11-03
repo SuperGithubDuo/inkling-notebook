@@ -15,7 +15,7 @@ Thank you for trying Inkling. Here's how to get help or tell us what you think.
 - **Windows says "Windows protected your PC" / macOS says it can't verify the developer.** Expected for this beta, which isn't code-signed yet. See [the install guide](docs/INSTALL.md#about-the-security-warnings-please-read).
 - **Where are my notes?** On your computer: `%APPDATA%\Inkling` (Windows) or `~/Library/Application Support/Inkling` (macOS). *Settings → Storage* shows the folder, your daily backups and *Restore*.
 - **The AI tutor says it's paused.** The free daily allowance has run out, or the AI provider is briefly unavailable. Everything else keeps working; try again later.
-- **Something else?** See [known limitations](docs/KNOWN-LIMITATIONS.md) and the [user guide](docs/USER-GUIDE.md).
+- **Something else?** See [known limitations](docs/USER-GUIDE.md#known-limitations) and the [user guide](docs/USER-GUIDE.md).
 
 ## Security problems
 

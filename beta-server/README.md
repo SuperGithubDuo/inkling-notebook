@@ -77,7 +77,7 @@ npm run admin -- pause                      # stop all AI answers now
 npm run admin -- resume
 ```
 
-Without a terminal: push the branch `ops/pause` or `ops/resume` (`.github/workflows/beta-server-ops.yml`), then delete it.
+Without a terminal: *Actions → AI server emergency switch → Run workflow* and choose `pause`, `resume` or `summary` (`.github/workflows/beta-server-ops.yml`).
 
 To change a limit, edit `wrangler.jsonc` and redeploy.
 

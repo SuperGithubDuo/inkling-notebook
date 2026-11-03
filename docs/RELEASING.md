@@ -8,7 +8,7 @@ The version in `package.json` is the app version, shown in About and used by upd
 - Beta builds use pre-release versions: `0.2.0-beta.1`, `0.2.0-beta.2`, …
 - Beta builds follow pre-releases; stable builds (`1.0.0`) don't.
 
-To change the version: `npm version 0.2.0-beta.2 --no-git-tag-version`, commit, then tag (below).
+To change the version: `npm version 0.2.0-beta.3 --no-git-tag-version`, then commit. A published version can't be rebuilt: the workflow refuses to touch it, so bump the version first.
 
 ## Build on GitHub (recommended)
 
@@ -16,23 +16,23 @@ The workflow is `.github/workflows/release.yml`. It runs on GitHub's Windows and
 
 ### Start a build
 
-GitHub's *Run workflow* button only lists workflows that exist on the **default branch** (`main`). Until the release work is merged, start builds by pushing a branch whose name starts with `build/`. The branch name picks the platforms:
+*Actions → Release → Run workflow*, branch `main`, and choose:
 
-| Push | Builds |
+| Choice | Builds |
 |---|---|
-| `build/windows` | Windows installer |
-| `build/macos` | macOS installers |
-| `build/all` (or any other `build/…` name) | both |
-| `build/draft-release` | both, **and uploads them to the draft release `v<version>`** (see *Publish* below) |
+| `windows` | Windows installer |
+| `macos` | macOS installers |
+| `both` | both |
+| `draft-release` | both, **and uploads them to the draft release `v<version>`** (see *Publish* below) |
 
-**Recommended:** *Actions → Release → Run workflow*, branch `main`, and choose `windows`, `macos`, `both` or `draft-release`. No extra branches needed.
-
-Or push a trigger branch from a clone (it's left behind afterwards; delete it when done):
+Fallback without the button: push a branch named `build/windows`, `build/macos`, `build/draft-release` (any other `build/…` name builds both), and delete it afterwards:
 
 ```bash
 git fetch origin
-git push origin origin/main:refs/heads/build/windows --force   # Windows from the current main
+git push origin origin/main:refs/heads/build/windows && git push origin --delete build/windows
 ```
+
+Pushing a `v*` tag does **not** start a build: pressing Publish creates the tag.
 
 ### Get the installers
 
@@ -54,7 +54,7 @@ When a step fails, its key error lines appear as annotations on the run summary,
 
 ### Publish a release (only with approval)
 
-**Draft without a public tag (used for Beta 2).** *Actions → Release → Run workflow*, branch `main`, platforms **draft-release**. (Pushing `build/draft-release` from the commit to ship does the same.)
+**Make the draft.** *Actions → Release → Run workflow*, branch `main`, platforms **draft-release**.
 
 The workflow creates the draft pre-release `v<version>` (or reuses it, pointing it at the new commit; it refuses to touch a published one), builds and tests both installers on real Windows and macOS machines, and uploads them. When every job has passed, *Draft release notes* runs `scripts/release/finalize-draft.mjs`, which:
 
@@ -64,18 +64,9 @@ The workflow creates the draft pre-release `v<version>` (or reuses it, pointing 
 - replaces the two per-OS checksum files with one `Inkling-<version>-SHA256SUMS.txt`;
 - writes user-friendly notes from `.github/release-notes.md` (download table with direct links, the security prompt, checksums, privacy, feedback), ending with a hidden **verified-build marker**.
 
-If anything failed, the draft says **DO NOT PUBLISH** instead and carries no marker. The git tag is only created when someone presses **Publish**. Pushing again replaces the files (and changes their checksums).
+If anything failed, the draft says **DO NOT PUBLISH** instead and carries no marker. The git tag is only created when someone presses **Publish**. Running it again replaces the draft's files (and changes their checksums).
 
-**Publishing is the approval.** Nothing publishes automatically. Review the draft, then press **Publish** (tick *Set as a pre-release* for betas). The download site then follows within minutes: it offers the newest published release that has the verified-build marker, whose tag points at the verified commit and whose installers still match the verified checksums. A release published without the marker, or one whose notes say DO NOT PUBLISH or WITHDRAWN, is never offered. To take a release off the download page, add its tag to `withdrawn` in `site/config.json` (or write WITHDRAWN in its notes). See [maintainers/DOWNLOAD-SITE.md](maintainers/DOWNLOAD-SITE.md).
-
-**Or with a tag.** Tag the commit and push the tag (the tag is visible in the public repository at once, though the release stays a draft):
-
-```bash
-git tag v0.2.0-beta.1
-git push origin v0.2.0-beta.1
-```
-
-The workflow builds both installers and uploads them to a **draft** GitHub release, together with the `latest*.yml` files that in-app updates read. A draft is invisible to users. Review it, tick *Set as a pre-release* for betas, then press **Publish**. Only published releases reach users or their update checks.
+**Publishing is the approval.** Nothing publishes automatically. Review the draft, then press **Publish** (tick *Set as a pre-release* for betas). The download site then follows within minutes: it offers the newest published release that has the verified-build marker, whose tag points at the verified commit and whose installers still match the verified checksums. A release published without the marker, or one whose notes say DO NOT PUBLISH or WITHDRAWN, is never offered. To take a release off the download page, add its tag to `withdrawn` in `site/config.json` (or write WITHDRAWN in its notes). See [Download site](#download-site) below.
 
 ### Repository settings the workflow reads
 
@@ -108,7 +99,7 @@ To export the Mac certificate for the workflow, export it from Keychain Access a
 
 ```bash
 npm ci
-npm run dist:win     # on Windows → release/Inkling-Setup-<version>-x64.exe (and arm64)
+npm run dist:win     # on Windows → release/Inkling-Setup-<version>-x64.exe
 npm run dist:mac     # on macOS   → release/Inkling-<version>-arm64.dmg, -x64.dmg, and .zip files for updates
 npm run dist:linux   # on Linux, for testing only → release/linux-unpacked/, AppImage
 ```
@@ -144,24 +135,105 @@ The Windows uninstaller is configured with `deleteAppDataOnUninstall: false`. Re
 
 ## Watching and pausing the free AI server
 
-Push one of these branches from any branch (and delete it afterwards so it can be pushed again). The workflow is `.github/workflows/beta-server-ops.yml`; it uses the `INKLING_ADMIN_TOKEN` secret, so nobody else can run these against the server.
+*Actions → AI server emergency switch → Run workflow* (`.github/workflows/beta-server-ops.yml`). It uses the `INKLING_ADMIN_TOKEN` secret, so nobody else can run these against the server.
 
-| Push | Does |
+| Choice | Does |
 |---|---|
-| `ops/summary` | Read-only: today's (UTC) Neurons used of the 9,000 cap, answers, installations, networks, whether paused. Shown as the run's annotation and summary. |
-| `ops/pause` | Stops all AI answers at once (the app says the AI is paused; notebooks work). |
-| `ops/resume` | Turns AI answers back on. |
+| `summary` | Read-only: Neurons used in the last 24 h of the 9,000 cap, today's use, answers, installations, networks, whether paused. Shown as the run's annotation and summary. |
+| `pause` | Stops all AI answers at once (the app says the AI is paused; notebooks work). |
+| `resume` | Turns AI answers back on. |
 
-```bash
-git push origin origin/main:refs/heads/ops/summary && git push origin --delete ops/summary
-```
-
-On github.com: open any branch's menu, type `ops/summary`, *Create branch*, then read *Actions → AI server emergency switch*. With the token on your own computer, `cd beta-server && npm run admin -- summary` does the same. Cloudflare's dashboard (*Workers AI → Usage*) shows the account's own Neuron count.
+Fallback: push a branch `ops/summary`, `ops/pause` or `ops/resume`, then delete it. With the token on your own computer, `cd beta-server && npm run admin -- summary` does the same. *Actions → Cloudflare AI diagnostics → Run workflow* shows the account's hourly Workers AI use and whether Cloudflare accepts requests right now; Cloudflare's dashboard (*Workers AI → Usage*) shows its own count.
 
 ## Release checklist
 
 1. All workflow jobs green. The Windows and macOS jobs run on real systems (virtual machines), but without real pens or touch screens.
 2. Install the built `.exe` and `.dmg` on a real Windows PC and Mac, and go through `docs/DEVICE-TESTING.md`.
 3. Update `RELEASE_NOTES.md`. Bump the version.
-4. Tag, wait for the draft, check its assets: `.exe` ×2, `.dmg` ×2, `.zip` ×2, `latest.yml`, `latest-mac.yml`, `.blockmap` files.
-5. Publish as a pre-release. Announce to testers with `docs/INSTALL.md`.
+4. *Run workflow → draft-release*; when it's green, check the draft's assets: one `.exe`, two `.dmg`, two `.zip`, `Inkling-<version>-SHA256SUMS.txt`, `latest.yml`, `latest-mac.yml`, `.blockmap` files, and that the notes contain no DO NOT PUBLISH.
+5. Publish as a pre-release. The download site follows within minutes. Announce to testers with `docs/INSTALL.md`.
+
+## Download site
+
+How an approved build reaches a first-time user in one click, and why an unapproved or failed build never can.
+
+**Status:** live since 3 Nov 2026 (GitHub Pages, deployed from `main`). It has offered `v0.2.0-beta.2` since that release was published on 3 Nov 2026, 05:17 UTC.
+
+- Address (GitHub Pages, free): `https://supergithubduo.github.io/inkling-notebook/`
+- Source: `site/` (one page, no frameworks, no third-party requests, fonts and images self-hosted)
+- Build: `scripts/site/build-site.mjs` · Deploy gate: `scripts/site/check-site.mjs` · Rules: `scripts/release/rules.mjs`
+- Workflow: `.github/workflows/pages.yml` · Tests: `tests/unit/release-site.test.ts` and `tests/unit/site-platform.test.ts` (part of `npm test`); `tests/e2e/site.e2e.mjs` (`npm run test:e2e:site`: the built page in Chromium as Windows, Mac, phone and Linux visitors, 320–1280 px)
+- Which installer is recommended: `site/assets/platform.js` (Windows; Apple-silicon vs Intel Mac from the GPU name, then the browser's own architecture; both Macs when unsure, as in Safari; all three on other computers; none at the top on phones)
+
+### From commit to download
+
+```
+ Run workflow →                    Release workflow                        You                      Download site workflow
+ "draft-release"             ┌──────────────────────────────┐                                ┌───────────────────────────────┐
+                        ───▶ │ build + test on Windows/macOS │                                │ newest PUBLISHED release that: │
+                             │ upload to DRAFT v<version>    │      review the draft          │  • has the verified marker     │
+                             │ finalize-draft.mjs:           │ ───▶ press **Publish**  ───▶   │  • tag = verified commit       │
+                             │  version, commit, SHA-256,    │      (the approval)            │  • installers = verified SHA   │
+                             │  update metadata, one sums    │                                │  • not DO NOT PUBLISH/withdrawn│
+                             │  file, notes + marker         │                                │ → page with 3 direct links     │
+                             │ any failure → DO NOT PUBLISH  │                                │ none → "no download yet"       │
+                             └──────────────────────────────┘                                └───────────────────────────────┘
+```
+
+1. **Build.** Unchanged from today: installers are built and every acceptance suite, the packaged-app test and the install → update → uninstall → reinstall check run on real Windows and macOS runners, then upload to a **draft** release.
+2. **Verify** (`scripts/release/finalize-draft.mjs`, only when every job passed). It refuses, and marks the draft **DO NOT PUBLISH**, unless:
+   - the draft targets the commit that was built, and is still a draft;
+   - every file carries the version (the two `latest*.yml` excepted), and the three installers are present;
+   - each installer's SHA-256 equals the one computed on the build machine *and* GitHub's own asset digest;
+   - `latest.yml` and `latest-mac.yml` name this version, and every file they point at exists with the SHA-512 and size they claim (so in-app update checks won't break).
+   Then it replaces the two per-OS checksum files with **one** `Inkling-<version>-SHA256SUMS.txt` and writes the notes (below) with a hidden marker recording version, commit, run and the three SHA-256s.
+3. **Approve.** You press **Publish** on the draft. Nothing in any workflow publishes; the `draft` job refuses to modify an already published release.
+4. **Site follows.** Publishing (or editing, unpublishing, deleting) a release triggers the *Download site* workflow, which hands over to a run on `main`, rebuilds the page and deploys it. A 3-hourly run is a safety net. The page embeds the chosen release at build time; visitors' browsers never query GitHub.
+
+### Why a bad build can't be downloaded from the site
+
+| Situation | Result |
+|---|---|
+| Draft | Not offered: drafts are never public and the rules skip them |
+| Failed build ("DO NOT PUBLISH") | No marker, and the phrase itself blocks it, even if someone presses Publish |
+| Published by hand without the Release workflow | No marker → not offered |
+| Installer replaced after verification | GitHub's digest no longer matches the marker → not offered |
+| Tag moved to another commit | Tag commit ≠ verified commit → not offered |
+| Release later found bad | Add its tag to `withdrawn` in `site/config.json` (or write WITHDRAWN in its notes): the page falls back to the previous good release, or to "no download yet" |
+| Anything else on the page | `check-site.mjs` fails the deploy if the page links to workflow runs/artifacts, draft (`untagged-`) URLs, any download link outside the verified data, or has preview mode on |
+
+Every row is a unit test in `tests/unit/release-site.test.ts`, including the real shape of the failed Beta 2 draft of 31 Oct.
+
+### What users see
+
+**Page** (`site/index.html`):
+- Hero with the version, a *Beta* label, release date and release-notes link, and **one big button for the visitor's computer** (Windows, or the right Mac when the browser can tell; otherwise both Mac buttons with "Which Mac do I have?").
+- Three platform cards with file name, size, requirements and SHA-256.
+- Install guide (Windows and Mac tabs) with the unsigned-build warning, system requirements, privacy summary, feedback.
+- No approved release: buttons are shown disabled with "No download is available yet" and a plain explanation.
+- Phones and tablets: a note that Inkling is for Windows and Mac, with *Copy this page's link*; the downloads stay listed.
+- Light and dark themes, keyboard navigation, no horizontal scrolling at phone width.
+
+**Release page** (`.github/release-notes.md`): a download table with direct links at the top, then the security-prompt explanation, checksums folded away, privacy and feedback. It tells readers to ignore `.zip`, `.blockmap` and `.yml` files. Those must stay on the release: electron-updater reads `latest*.yml`, signed macOS updates need the `.zip`, and `.blockmap` files make updates smaller.
+
+### Preview locally
+
+```bash
+node scripts/site/build-site.mjs --out _site     # live data from GitHub
+# then open site/index.html in a browser and add ?preview=sample to the address
+# to see the layout with made-up data (download buttons switched off)
+```
+
+The `?preview=sample` mode exists only in the unbuilt source; the build turns it off and `check-site.mjs` enforces that.
+
+### Settings
+
+*Settings → Pages → Source: GitHub Actions* is the switch: every run checks it and only deploys when it's on (switched on 3 Nov 2026). Optional variables: `INKLING_FEEDBACK_URL` (the page shows a *Send feedback* button once it's set) and `INKLING_DOWNLOAD_PAGE_URL` (only for a custom domain).
+
+**Kill switch:** set the repository variable `INKLING_SITE_ENABLED` to `false` to stop deploys, and unpublish in *Settings → Pages* to take the site down.
+
+### Later (not done)
+
+- **Point the app at the site.** Unsigned builds' "new version available" link goes to the GitHub release page (`RELEASES_URL` in `src/shared/product.ts`). Pointing it at the download page would be a one-line app change; left alone here because this milestone doesn't change the app.
+- **Custom domain** (e.g. `getinkling.app`), after the trademark check in the [launch kit](archive/LAUNCH.md).
+- **Signed builds** remove the security prompts and turn on self-installing updates; the release workflow already uses the certificates when the secrets exist.

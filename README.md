@@ -16,12 +16,12 @@ Handwritten notes on your computer, with an AI tutor that reads your working and
 
 Free beta · Windows 10/11 · macOS 12 or later
 
-**Status:** invited beta. Public downloads open when a release passes testing and is approved; until then the download page says *Coming soon*.
+**Status:** public beta. Beta 2 (`0.2.0-beta.2`) is available from the download page.
 
 </div>
 
 <p align="center">
-  <img src="docs/live-results/app-4b-preview.png" alt="Inkling showing handwritten algebra with the AI tutor's proposed corrections previewed on the page, each with a checkbox to keep or drop it" width="860">
+  <img src="docs/images/app-4b-preview.png" alt="Inkling showing handwritten algebra with the AI tutor's proposed corrections previewed on the page, each with a checkbox to keep or drop it" width="860">
 </p>
 
 ## Download
@@ -38,8 +38,6 @@ Free beta · Windows 10/11 · macOS 12 or later
 
 > [!IMPORTANT]
 > **The beta isn't code-signed yet**, so the first time you open it Windows shows *"Windows protected your PC"* (click **More info → Run anyway**) and macOS says it can't verify the developer (open **System Settings → Privacy & Security → Open Anyway**). Only download Inkling from the download page above or this repository's [Releases](https://github.com/SuperGithubDuo/inkling-notebook/releases). The [install guide](docs/INSTALL.md) walks you through it, including how to check your download's SHA-256 checksum.
-
-If the download page says *Coming soon*, no release has been approved yet. Please check back soon.
 
 ## What you can do with Inkling
 
@@ -73,11 +71,11 @@ Saved on your computer as you write, backed up every day, with one-click restore
 </table>
 
 <p align="center">
-  <img src="docs/live-results/app-4b-chat.png" alt="The AI tutor explaining a sign mistake in a handwritten quadratic equation" width="49%">
-  <img src="docs/live-results/app-4b-applied.png" alt="The tutor's approved corrections written onto the page in a handwriting font" width="49%">
+  <img src="docs/images/app-4b-chat.png" alt="The AI tutor explaining a sign mistake in a handwritten quadratic equation" width="49%">
+  <img src="docs/images/app-4b-applied.png" alt="The tutor's approved corrections written onto the page in a handwriting font" width="49%">
 </p>
 
-**Not yet:** handwriting isn't searchable, audio recording and sharing aren't built (the screenshots show their menu entries, which are marked as unavailable in the app), and there's no iPad, Android or web version. Real pens and touch screens haven't been tested on physical devices yet. More in [known limitations](docs/KNOWN-LIMITATIONS.md).
+**Not yet:** handwriting isn't searchable, audio recording and sharing aren't built (the screenshots show their menu entries, which are marked as unavailable in the app), and there's no iPad, Android or web version. Real pens and touch screens haven't been tested on physical devices yet. More in [known limitations](docs/USER-GUIDE.md#known-limitations).
 
 ## The AI tutor, in plain words
 
@@ -85,7 +83,7 @@ Saved on your computer as you write, backed up every day, with one-click restore
 - **Nothing is sent until you click *Allow*** — not even a check of how many answers are left. Then, when you ask, Inkling sends Inkling's AI server your question, what you include with it (an image of your selection, or the page's title, typed text, PDF text and an image of its handwriting), and the recent conversation on that page (up to your last 5 questions, the tutor's answers and the most recent earlier image). The server gets the answer from an AI model (Qwen) on Cloudflare Workers AI. Inkling's server doesn't store or log your questions, images or answers. Cloudflare states that it doesn't store them after answering or use them for training.
 - **What else goes with a question:** an anonymous installation ID (a random number the app makes) and your internet address, used only to share out the free daily limits. The server keeps them only as scrambled counts, replaced every day.
 - **One *Allow* covers everyone on that computer account,** and it doesn't verify a parent's or guardian's consent.
-- **Prefer nothing to leave your computer?** Use the [local Ollama option](docs/AI-PROVIDERS.md#local-ollama-default-in-development-builds) instead. It needs a separate free app (Ollama) and a 2–6 GB model download.
+- **Prefer nothing to leave your computer?** Use the [local Ollama option](docs/AI.md#local-ollama-default-in-development-builds) instead. It needs a separate free app (Ollama) and a 2–6 GB model download.
 - **AI answers can be wrong.** Check them. Please don't send personal or sensitive information.
 - **Under 18?** Inkling doesn't check ages, and clicking *Allow* isn't verified parental consent. A parent or guardian should read the [privacy notice](docs/PRIVACY.md) and the [install guide](docs/INSTALL.md#younger-testers), install Inkling, and decide whether to allow the AI. Inkling's handling of children's data hasn't been reviewed by a lawyer yet.
 
@@ -100,7 +98,7 @@ Inkling also asks GitHub whether a newer version exists when it starts; GitHub s
 | **Feedback and support** | [SUPPORT.md](SUPPORT.md) |
 | **Privacy** | [docs/PRIVACY.md](docs/PRIVACY.md): a plain-language **draft**, pending legal review. Who runs Inkling and how to contact them are still to be filled in |
 | **Release notes** | [RELEASE_NOTES.md](RELEASE_NOTES.md) |
-| **Known limitations** | [docs/KNOWN-LIMITATIONS.md](docs/KNOWN-LIMITATIONS.md) |
+| **Known limitations** | [docs/USER-GUIDE.md](docs/USER-GUIDE.md#known-limitations) |
 | **Licence** | Inkling is pre-release software; all rights reserved — see [LICENSE.txt](LICENSE.txt). Open-source components keep their own licences: [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). |
 
 ## For developers
@@ -109,9 +107,9 @@ Inkling is a desktop app built with Electron, React and TypeScript. Everything t
 
 - [Developing Inkling](docs/DEVELOPMENT.md) — requirements, running from source, all test suites
 - [Architecture](docs/ARCHITECTURE.md) — storage, command layer, rendering, security
-- [AI providers](docs/AI-PROVIDERS.md) — cloud, local (Ollama) and Gemini, with measured results
-- [Building and releasing](docs/RELEASING.md) — installers, signing, the approval-gated release flow
-- [Roadmap](docs/ROADMAP.md) and [release readiness](docs/READINESS.md)
+- [AI Tutor](docs/AI.md) — how it works, providers (cloud, local Ollama, Gemini), guarantees, measured results
+- [Building and releasing](docs/RELEASING.md) — installers, signing, the approval-gated release flow, the download site
+- [Roadmap](docs/ROADMAP.md) — what's verified and what's left
 - [AI server](beta-server/README.md) — the small Cloudflare Worker behind the free tutor
 
 ```bash
