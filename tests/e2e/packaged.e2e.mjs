@@ -90,7 +90,11 @@ try {
     const card = (await win.locator('[data-testid="ai-status"]').first().textContent()) ?? ''
     assert.equal(await win.getAttribute('[data-testid="ai-status"] >> nth=0', 'data-state'), 'ready', `the tutor is ready at once: ${card}`)
     assert.doesNotMatch(card, /access code|Start Ollama|Install Qwen|API key/i, 'the tutor asks for nothing')
-    // The installed app reaches the real server anonymously (a status check: no model call, nothing charged).
+    // Before consent the installed app sends nothing, not even a status check (PR #7, audit B1).
+    const refused = await win.evaluate(() => window.inkling.ai.test())
+    assert.equal(refused?.error?.code, 'consent_required', `no request before consent: ${JSON.stringify(refused)}`)
+    // After the user allows it, the app reaches the real server anonymously (a status check: no model call, nothing charged).
+    await win.evaluate(() => window.inkling.ai.setConsent(true))
     const probe = await win.evaluate(() => window.inkling.ai.test())
     assert.equal(probe?.ok, true, `the AI server answered: ${JSON.stringify(probe)}`)
     const quota = (await win.evaluate(() => window.inkling.ai.status())).cloud.quota
