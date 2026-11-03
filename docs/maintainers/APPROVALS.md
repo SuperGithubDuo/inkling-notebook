@@ -15,7 +15,9 @@ Status on 1 Nov 2026. What's done is listed first so this page stays the single 
 
 ## Waiting for you
 
-### 1. Switch on the download site (one click)
+### 1. Switch on the download site (one click) — done 3 Nov 2026
+
+Done: Pages is on, and *Download site* deploys from `main` (first deploy run [41562297790](https://github.com/SuperGithubDuo/inkling-notebook/actions/runs/41562297790)). Kept below as the record.
 
 *Settings → Pages → Build and deployment → Source: **GitHub Actions*** ([settings](https://github.com/SuperGithubDuo/inkling-notebook/settings/pages)). Repository settings can't be changed from Claude's session. After the click, *Actions → Download site → Run workflow* (or the next change to `site/` on `main`) deploys `https://supergithubduo.github.io/inkling-notebook/`, which shows *Coming soon / No download is available yet* until step 3.
 

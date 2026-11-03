@@ -2,12 +2,13 @@
 
 How an approved build reaches a first-time user in one click, and why an unapproved or failed build never can.
 
-**Status: built and tested on `prep/download-experience`; not live.** The site goes live only after the approvals in [APPROVALS.md](APPROVALS.md).
+**Status: live since 3 Nov 2026, 01:50 UTC** (GitHub Pages switched on; first deploy: *Download site* run [41562297790](https://github.com/SuperGithubDuo/inkling-notebook/actions/runs/41562297790), from `main`). No release has been published, so it shows *Coming soon / No download is available yet*. It offers downloads only once a verified release is published (below).
 
 - Address (GitHub Pages, free): `https://supergithubduo.github.io/inkling-notebook/`
 - Source: `site/` (one page, no frameworks, no third-party requests, fonts and images self-hosted)
 - Build: `scripts/site/build-site.mjs` · Deploy gate: `scripts/site/check-site.mjs` · Rules: `scripts/release/rules.mjs`
-- Workflow: `.github/workflows/pages.yml` · Tests: `tests/unit/release-site.test.ts` (part of `npm test`)
+- Workflow: `.github/workflows/pages.yml` · Tests: `tests/unit/release-site.test.ts` and `tests/unit/site-platform.test.ts` (part of `npm test`); `tests/e2e/site.e2e.mjs` (`npm run test:e2e:site`: the built page in Chromium as Windows, Mac, phone and Linux visitors, 320–1280 px)
+- Which installer is recommended: `site/assets/platform.js` (Windows; Apple-silicon vs Intel Mac from the GPU name, then the browser's own architecture; both Macs when unsure, as in Safari; all three on other computers; none at the top on phones)
 
 ## From commit to download
 
@@ -70,7 +71,9 @@ node scripts/site/build-site.mjs --out _site     # live data from GitHub (shows 
 
 The `?preview=sample` mode exists only in the unbuilt source; the build turns it off and `check-site.mjs` enforces that.
 
-## Switching it on (needs approval)
+## Switching it on (done 3 Nov 2026)
+
+Kept as the record of how it was switched on:
 
 1. Merge to `main` (the workflow deploys only from there).
 2. *Settings → Pages → Build and deployment → Source: **GitHub Actions***. This one setting is the switch: every run checks it and only deploys when it's on. (Repository variables and the Pages settings can't be changed from Claude's session, so this click is yours.)

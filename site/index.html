@@ -93,6 +93,7 @@ p { margin: 0; }
 .hero h1 .hand { color: var(--lav); font-size: 1.12em; letter-spacing: 0; display: inline-block; transform: rotate(-2deg); }
 .lede { margin-top: 18px; font-size: 1.15rem; color: var(--ink-soft); max-width: 34em; }
 
+.nowrap { white-space: nowrap; }
 .ver { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 24px; font-size: .88rem; color: var(--ink-soft); }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; font-size: .82rem; }
 .chip.beta { background: var(--lav-soft); color: var(--lav); }
@@ -361,6 +362,7 @@ footer a { color: var(--ink-soft); }
   </div>
 </footer>
 
+<script src="assets/platform.js"></script>
 <script>
 (function () {
   'use strict';
@@ -409,33 +411,29 @@ footer a { color: var(--ink-soft); }
     return a;
   }
 
+  var P = window.InklingPlatform;
+
   async function detect() {
-    var ua = navigator.userAgent || '';
-    var os = /Windows NT/.test(ua) ? 'windows' : /Macintosh|Mac OS X/.test(ua) ? 'mac' : 'other';
-    if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (os === 'mac' && navigator.maxTouchPoints > 1)) os = 'mobile';
+    var os = P.classifyOs(navigator.userAgent, navigator.maxTouchPoints);
     var arch = 'unknown';
     if (os === 'mac') {
+      var uaArch = '', renderer = '';
       try {
         var uad = navigator.userAgentData;
-        if (uad && uad.getHighEntropyValues) {
-          var hv = await uad.getHighEntropyValues(['architecture']);
-          if (hv.architecture === 'arm') arch = 'arm'; else if (hv.architecture === 'x86') arch = 'intel';
-        }
+        if (uad && uad.getHighEntropyValues) uaArch = String((await uad.getHighEntropyValues(['architecture'])).architecture || '');
       } catch (e) {}
-      if (arch === 'unknown') {
-        try {
-          var gl = document.createElement('canvas').getContext('webgl');
-          var ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
-          var r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
-          if (/Apple M\d/i.test(r)) arch = 'arm';
-        } catch (e) {}
-      }
+      try {
+        var gl = document.createElement('canvas').getContext('webgl');
+        var ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+        renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+      } catch (e) {}
+      arch = P.macArch({ uaArch: uaArch, renderer: renderer });
     }
     return { os: os, arch: arch };
   }
 
   function render(env) {
-    var rec = env.os === 'windows' ? 'windows' : env.os === 'mac' ? (env.arch === 'arm' ? 'macArm' : env.arch === 'intel' ? 'macIntel' : 'mac') : null;
+    var rec = P.recommend(env.os, env.arch);
 
     // Version line
     if (available) {
@@ -443,7 +441,7 @@ footer a { color: var(--ink-soft); }
       var date = '';
       try { date = new Date(release.publishedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); } catch (e) {}
       ver.innerHTML = '<span class="chip">Version ' + esc(release.version) + '</span>' + (release.prerelease ? '<span class="chip beta">Beta</span>' : '') +
-        (date ? '<span>Released ' + esc(date) + '</span>' : '') + '<span>·</span><a href="' + (preview ? '#' : esc(release.releaseUrl)) + '">Release notes</a>';
+        (date ? '<span>Released ' + esc(date) + '</span>' : '') + '<a class="nowrap" href="' + (preview ? '#' : esc(release.releaseUrl)) + '">Release notes</a>';
       ver.hidden = false;
       document.getElementById('foot-ver').textContent = 'Inkling ' + release.version + ' · built from ' + String(release.commit).slice(0, 7);
     } else {
@@ -494,7 +492,7 @@ footer a { color: var(--ink-soft); }
     // Install guide: file names and the visitor's tab
     if (available) {
       document.querySelector('[data-file="windows"]').textContent = release.downloads.windows.file;
-      document.querySelector('[data-file="mac"]').textContent = rec === 'macIntel' ? release.downloads.macIntel.file : release.downloads.macArm.file;
+      document.querySelector('[data-file="mac"]').textContent = P.macGuideFile(rec, release.downloads);
     }
     if (env.os === 'mac') select('mac');
 

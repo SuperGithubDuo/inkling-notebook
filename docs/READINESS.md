@@ -2,7 +2,11 @@
 
 Status as of 31 Oct 2026, 01:00 UTC, on branch `beta-release`, commit `4ea46be` (Beta 2). Earlier entries refer to `974177b` (Beta 1). Builds run on GitHub Actions; results come from the check runs on that commit.
 
-## Pre-release privacy fixes (2 Nov 2026, branch `fix/pre-consent-privacy`, not merged)
+## Download site live (3 Nov 2026)
+
+GitHub Pages is on and the *Download site* workflow deploys from `main` (first deploy 01:50 UTC, run [41562297790](https://github.com/SuperGithubDuo/inkling-notebook/actions/runs/41562297790)). With no published release it shows *Coming soon*. Checked offline by building the page from the real `v0.2.0-beta.2` draft marked as published: it offers exactly the three verified installers; with the tag on another commit, or as a draft, it offers none. Privacy fixes (below) were merged in PR #7.
+
+## Pre-release privacy fixes (2 Nov 2026, merged in PR #7)
 
 From the public-beta readiness audit (B1, B2): no request of any kind reaches the cloud AI (or Gemini) before consent; the permission notice lists everything sent and says it isn't verified parental consent; consent versions raised (cloud 2 → 3, Gemini 2 → 3), so earlier agreements are asked again once; tutor history goes only to the provider that answered it. Verified by unit tests (`tests/unit/consent.test.ts`) and the Electron `cloud` and `phase4` acceptance tests on Linux. **Not yet in any installer:** the `v0.2.0-beta.2` draft below was built before this change, so its files and checksums are superseded once this is merged and the draft is rebuilt. Not yet checked on a real Windows PC or Mac.
 
