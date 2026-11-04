@@ -39,10 +39,10 @@
     "DISABLE_THINKING": "true",
     "STRUCTURED": "prompt",
     "IMAGE_PATCH": "28",
-    // Text-only routing (src/route.ts), OFF while MODEL_TEXT is empty. To turn it on, set
-    // MODEL_TEXT to "@cf/google/gemma-4-26b-a4b-it" (prices below, Neurons per M).
-    // Requests with any handwriting context stay on MODEL either way.
-    "MODEL_TEXT": "",
+    // Text-only routing (src/route.ts): practice generation goes to Gemma 4 26B A4B (Apache 2.0,
+    // Cloudflare Workers AI, same free allocation and data notice); every other task, and anything
+    // with handwriting, stays on MODEL. To turn routing off (rollback), set MODEL_TEXT to "".
+    "MODEL_TEXT": "@cf/google/gemma-4-26b-a4b-it",
     "TEXT_INPUT_NEURONS_PER_M": "9091",
     "TEXT_OUTPUT_NEURONS_PER_M": "27273",
     // Which text-only tasks it may answer: practice generation only for the first trial. Chat and

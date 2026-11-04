@@ -143,9 +143,11 @@ describe('routing rule', () => {
       expect(textModelFrom({ ...env, TEXT_MODEL_TASKS: 'annotate,check,bogus' }, CLOUD_MODEL)?.tasks).toEqual(['check'])
       expect(textModelFrom({ ...env, TEXT_MODEL_TASKS: 'annotate' }, CLOUD_MODEL)?.tasks).toEqual(['practice'])
     })
-    it('the shipped wrangler.jsonc leaves it off', async () => {
+    it('the shipped wrangler.jsonc routes practice generation only, to Gemma 4 26B A4B', async () => {
       const raw = await readFile(join(import.meta.dirname, '../../beta-server/wrangler.jsonc'), 'utf8')
-      expect(raw).toMatch(/"MODEL_TEXT":\s*""/)
+      expect(raw).toMatch(/"MODEL_TEXT":\s*"@cf\/google\/gemma-4-26b-a4b-it"/)
+      expect(raw).toMatch(/"TEXT_INPUT_NEURONS_PER_M":\s*"9091"/)
+      expect(raw).toMatch(/"TEXT_OUTPUT_NEURONS_PER_M":\s*"27273"/)
       expect(raw).toMatch(/"TEXT_MODEL_TASKS":\s*"practice"/)
     })
   })

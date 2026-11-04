@@ -1,0 +1,134 @@
+name: AI routing smoke test (production)
+
+# After a production deploy with text-only routing (MODEL_TEXT set), checks the
+# live server "inkling-ai-beta" with a handful of real requests:
+#   - health: the root page and /v1/status answer, the service is not paused;
+#   - the security checks (scripts/abuse-check.mjs security, ~100–300 Neurons);
+#   - one practice-generation request and one ordinary typed tutoring request
+#     (scripts/routing-killswitch.mjs): both answered, and the operator summary
+#     shows the practice request on Gemma and the tutoring request on Qwen;
+#   - Neuron accounting and quota: the installation's allowance and the service's
+#     use move by what the answers cost.
+# If the routing smoke test fails, the Worker is redeployed at once with routing off
+# (MODEL_TEXT not a model id → every request on Qwen, exactly as before).
+#
+# Start it by pushing the branch `deploy/ai-routing-smoke`.
+# Secrets: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, INKLING_ADMIN_TOKEN.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['deploy/ai-routing-smoke']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-server
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+      URL: https://inkling-ai-beta.shenjonas9.workers.dev
+      GEMMA: '@cf/google/gemma-4-26b-a4b-it'
+      QWEN: '@cf/qwen/qwen3.8-27b'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
+
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm --prefix beta-server ci
+
+      - name: Health and today's use
+        shell: bash
+        run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          root=$(curl -sS "$URL/")
+          echo "ROOT: $root"
+          [[ "$root" == *"Inkling AI server"* ]] || { echo "::error title=Health::$root"; exit 1; }
+          st=$(curl -sS "$URL/v1/status" -H "x-inkling-install: inst_smokesmokesmokesmokesmoke1")
+          echo "STATUS: $st"
+          [ "$(echo "$st" | jq -r .paused)" = false ] || { echo "::error title=Health::service paused or status unreadable"; exit 1; }
+          curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN" > /tmp/before.json
+          echo "BEFORE: $(jq -c '{globalUsed, todayUsed, answers, models: .models.today}' /tmp/before.json)"
+          echo "WORKERS AI BY UTC DAY: $(node scripts/cf-usage.mjs 30 | jq -c .utcDays)"
+
+      - name: Security checks on production
+        shell: bash
+        run: node scripts/abuse-check.mjs security "$URL"
+
+      - name: Routing smoke test (practice → Gemma, tutoring → Qwen)
+        id: smoke
+        shell: bash
+        run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN" > /tmp/s0.json
+          r=$(node scripts/routing-killswitch.mjs "$URL" production)
+          echo "SMOKE: $r"
+          sleep 5
+          curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN" > /tmp/s1.json
+          d() { jq -r --arg m "$1" --arg t "$2" "(.models.today[\$m].tasks[\$t] // 0)" "$3"; }
+          gp=$(( $(d "$GEMMA" practice /tmp/s1.json) - $(d "$GEMMA" practice /tmp/s0.json) ))
+          qc=$(( $(d "$QWEN" chat /tmp/s1.json) - $(d "$QWEN" chat /tmp/s0.json) ))
+          qp=$(( $(d "$QWEN" practice /tmp/s1.json) - $(d "$QWEN" practice /tmp/s0.json) ))
+          gc=$(( $(d "$GEMMA" chat /tmp/s1.json) - $(d "$GEMMA" chat /tmp/s0.json) ))
+          echo "ROUTED: practice on Gemma +$gp, on Qwen +$qp; chat on Qwen +$qc, on Gemma +$gc"
+          used0=$(jq -r .todayUsed /tmp/s0.json); used1=$(jq -r .todayUsed /tmp/s1.json)
+          pn=$(echo "$r" | jq -r .practice.neurons); cn=$(echo "$r" | jq -r .chat.neurons)
+          echo "NEURONS: practice $pn, chat $cn; service today $used0 → $used1"
+          echo "MODELS AFTER: $(jq -c .models.today /tmp/s1.json)"
+          ok=$(echo "$r" | jq -r '.practice.answered and .chat.answered')
+          if [ "$ok" = true ] && [ "$gp" -ge 1 ] && [ "$qp" -eq 0 ] && [ "$qc" -ge 1 ] && [ "$gc" -eq 0 ]; then
+            echo "SMOKE PASSED"
+          else
+            echo "::error title=Routing smoke test::failed: $r; practice Gemma +$gp Qwen +$qp; chat Qwen +$qc Gemma +$gc"
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Quota and accounting
+        shell: bash
+        run: |
+          # A fresh installation's allowance after one answer reflects that answer's cost.
+          id=inst_$(openssl rand -hex 16)
+          q0=$(curl -sS "$URL/v1/status" -H "x-inkling-install: $id" | jq -c .quota)
+          r=$(curl -sS -X POST "$URL/v1/tutor" -H 'content-type: application/json' -H "x-inkling-install: $id" -d '{"task":"practice","turns":[{"role":"user","parts":[{"text":"Create 1 practice problems at easy difficulty on: fractions."}]}]}')
+          n=$(printf '%s' "$r" | grep '^data:' | tail -1 | sed 's/^data: //' | jq -r .neurons)
+          q1=$(curl -sS "$URL/v1/status" -H "x-inkling-install: $id" | jq -c .quota)
+          echo "QUOTA: before $q0; after one practice answer ($n Neurons): $q1"
+          used=$(echo "$q1" | jq -r .installUsed); lim=$(echo "$q1" | jq -r .installLimit)
+          [ "$used" -ge 1 ] && [ "$lim" = 900 ] || { echo "::error title=Quota::installation use not recorded ($q1)"; exit 1; }
+
+      - name: Roll back to Qwen-only if the routing smoke test failed
+        if: failure() && steps.smoke.outputs.failed == 'true'
+        working-directory: beta-server
+        shell: bash
+        run: |
+          for a in 1 2 3; do npx wrangler deploy --var MODEL_TEXT:off > /tmp/r.log 2>&1 && break; sleep 15; done
+          grep -E 'MODEL_TEXT|Deployed|Current Version' /tmp/r.log
+          echo "::warning title=Rolled back::MODEL_TEXT disabled; every request is on Qwen again. Set MODEL_TEXT to \"\" in beta-server/wrangler.jsonc on main to match."
+
+      - name: Cloudflare's count
+        if: always()
+        shell: bash
+        run: |
+          sleep 180
+          echo "CLOUDFLARE NEURONS TODAY: $(node scripts/cf-neurons.mjs "$(date -u +%FT00:00:00Z)")"
+          subs=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/subscriptions")
+          echo "SUBSCRIPTIONS: $(echo "$subs" | jq -c '[.result[]? | {plan: .rate_plan.id, price: .price}]')"
