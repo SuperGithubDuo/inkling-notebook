@@ -1,0 +1,6 @@
+# Workers AI models to benchmark, one per line, in this order:
+#   model | input,output Neurons per million tokens (Cloudflare pricing page, 4 Nov 2026) | Neuron budget | reasoning_effort (or none) | thinking (off or on)
+# Budgets cap what each run may use; the workflow also refuses to start a run that would
+# leave production less than its share of today's free 10,000 Neurons.
+@cf/google/gemma-4-26b-a4b-it | 9091,27273 | 600 | none | off
+@cf/qwen/qwen3.8-27b | 40909,290909 | 2000 | low | off
