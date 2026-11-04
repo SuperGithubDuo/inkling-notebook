@@ -109,7 +109,7 @@ jobs:
           node scripts/abuse-check.mjs security "$URL" | tee test-results/security-free.txt
 
       - name: Real-model scenarios (quality, latency, reliability)
-        if: success() || failure()
+        if: (success() || failure()) && steps.deploy.outputs.url != ''
         shell: bash
         env:
           INKLING_BETA_URL: ${{ steps.deploy.outputs.url }}
