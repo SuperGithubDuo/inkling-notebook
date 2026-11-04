@@ -54,7 +54,6 @@ Every automated suite runs on Linux in this repository, and on real Windows and 
     - Audio and sharing, which are labelled as unavailable.
     - Note images across notebooks.
     - The production page security policy still allows `ws://localhost` (used only in development).
-    - The `regressions` acceptance suite is occasionally flaky on Linux at the recovery-notice step (1 failure in 3 runs on 3 Nov 2026; passed on re-run).
 
 ## Known data-loss risks
 

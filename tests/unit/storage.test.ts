@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile, utimes } from 'node:fs/promi
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Storage } from '../../src/main/storage'
-import { createPageDoc, createStarterLibrary } from '../../src/shared/factory'
+import { createNoteDoc, createPageDoc, createStarterLibrary } from '../../src/shared/factory'
 import type { PageDoc } from '../../src/shared/schema'
 
 let root: string
@@ -84,6 +84,50 @@ describe('Storage', () => {
     expect(loaded.page?.objects).toHaveLength(1)
     const files = await readdir(join(root, 'notebooks', page.notebookId, 'pages'))
     expect(files.some((f) => f.includes('.corrupt-'))).toBe(true)
+  })
+
+  // The startup search-index pass reads every page in the background. If it reaches a
+  // damaged page first, it repairs it; the user must still be told when the page opens.
+  it('reports a repair made by a background read on the next real load, once', async () => {
+    const page = samplePage()
+    await storage.savePage(page)
+    await storage.savePage({ ...page, updatedAt: page.updatedAt + 1 })
+    await writeFile(storage.pagePath(page.notebookId, page.id), '{"schemaVersion":1, "id": trunc')
+
+    const fresh = new Storage(root)
+    const background = await fresh.loadPage(page.notebookId, page.id, { background: true })
+    expect(background.page?.objects).toHaveLength(1)
+
+    const opened = await fresh.loadPage(page.notebookId, page.id)
+    expect(opened.recovered).toBe(true)
+    expect(opened.page?.objects).toHaveLength(1)
+    expect((await fresh.loadPage(page.notebookId, page.id)).recovered).toBe(false)
+  })
+
+  it('reports an unreadable page found by a background read instead of opening it blank silently', async () => {
+    const page = samplePage()
+    await storage.savePage(page) // first save: no .bak exists yet
+    await writeFile(storage.pagePath(page.notebookId, page.id), '{"schemaVersion":1, "id": trunc')
+
+    const fresh = new Storage(root)
+    await fresh.loadPage(page.notebookId, page.id, { background: true })
+    const opened = await fresh.loadPage(page.notebookId, page.id)
+    expect(opened.page).toBeNull()
+    expect(opened.recovered).toBe(true)
+  })
+
+  it('reports a note repaired by a background read too', async () => {
+    const nb = createStarterLibrary().notebooks[0]!
+    const note = createNoteDoc(nb.id, nb.pages[0]!.id)
+    expect((await storage.saveNote(note)).status).toBe('saved')
+    expect((await storage.saveNote({ ...note, updatedAt: note.updatedAt + 1 })).status).toBe('saved')
+    await writeFile(storage.notePath(nb.id, note.id), '{"schemaVersion":1, trunc')
+
+    const fresh = new Storage(root)
+    await fresh.loadNote(nb.id, note.id, { background: true })
+    const opened = await fresh.loadNote(nb.id, note.id)
+    expect(opened.recovered).toBe(true)
+    expect(opened.note?.id).toBe(note.id)
   })
 
   it('saves normally after recovering a page from its backup (no false conflict)', async () => {

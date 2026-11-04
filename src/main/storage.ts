@@ -86,11 +86,23 @@ export interface LoadResult<T> {
   newer?: boolean
 }
 
+export interface LoadOptions {
+  /** A read the user didn't ask for (e.g. indexing): any repair is reported on the next normal load instead. */
+  background?: boolean
+}
+
 export class Storage {
   /** mtime of each file as of our last read or write, for conflict detection. */
   private readonly stamps = new Map<string, number>()
   /** Serialises writes per file so concurrent saves can't interleave. */
   private readonly queues = new Map<string, Promise<unknown>>()
+  /**
+   * Files a background read (the startup search-index pass) found damaged and
+   * repaired, or set aside, before the user opened them. The repair itself is
+   * done at once; the report waits for the next foreground load, which would
+   * otherwise see a healthy file (or none) and say nothing.
+   */
+  private readonly unreported = new Set<string>()
 
   constructor(readonly root: string) {}
 
@@ -128,8 +140,8 @@ export class Storage {
     return this.writeValidated(this.libraryPath(), librarySchema, library)
   }
 
-  async loadPage(notebookId: string, pageId: string): Promise<{ page: PageDoc | null; recovered: boolean; newer?: boolean }> {
-    const { data, recovered, newer } = await this.readValidated(this.pagePath(notebookId, pageId), pageFileSchema, PAGE_SCHEMA_VERSION)
+  async loadPage(notebookId: string, pageId: string, opts: LoadOptions = {}): Promise<{ page: PageDoc | null; recovered: boolean; newer?: boolean }> {
+    const { data, recovered, newer } = await this.load(this.pagePath(notebookId, pageId), pageFileSchema, PAGE_SCHEMA_VERSION, opts)
     return { page: data, recovered, ...(newer ? { newer } : {}) }
   }
 
@@ -141,8 +153,8 @@ export class Storage {
     return join(this.notebookDir(notebookId), 'notes', `${idSchema.parse(pageId)}.json`)
   }
 
-  async loadNote(notebookId: string, pageId: string): Promise<{ note: NoteDoc | null; recovered: boolean; newer?: boolean }> {
-    const { data, recovered, newer } = await this.readValidated(this.notePath(notebookId, pageId), noteDocSchema, NOTE_SCHEMA_VERSION)
+  async loadNote(notebookId: string, pageId: string, opts: LoadOptions = {}): Promise<{ note: NoteDoc | null; recovered: boolean; newer?: boolean }> {
+    const { data, recovered, newer } = await this.load(this.notePath(notebookId, pageId), noteDocSchema, NOTE_SCHEMA_VERSION, opts)
     return { note: data, recovered, ...(newer ? { newer } : {}) }
   }
 
@@ -200,6 +212,7 @@ export class Storage {
         await fs.rm(file, { force: true })
         await fs.rm(`${file}.bak`, { force: true })
         this.stamps.delete(file)
+        this.unreported.delete(file)
       })
     }
   }
@@ -212,6 +225,16 @@ export class Storage {
 
   static emptyLibrary(): Library {
     return { schemaVersion: LIBRARY_SCHEMA_VERSION, notebooks: [], folders: [] }
+  }
+
+  /** readValidated, plus holding a background read's repair report for the next foreground load. */
+  private async load<T>(file: string, schema: ZodType<T>, supported: number, opts: LoadOptions): Promise<LoadResult<T>> {
+    const result = await this.readValidated(file, schema, supported)
+    if (opts.background) {
+      if (result.recovered) this.unreported.add(file)
+      return result
+    }
+    return this.unreported.delete(file) ? { ...result, recovered: true } : result
   }
 
   private async readValidated<T>(file: string, schema: ZodType<T>, supported: number): Promise<LoadResult<T>> {

@@ -84,10 +84,10 @@ async function buildIndex(library: Library): Promise<void> {
       if (index.has(meta.id)) continue
       try {
         if (meta.kind === 'note') {
-          const { note } = await storage.loadNote(nb.id, meta.id)
+          const { note } = await storage.loadNote(nb.id, meta.id, { background: true })
           if (note && !index.has(meta.id)) index.upsertNote(note)
         } else {
-          const { page } = await storage.loadPage(nb.id, meta.id)
+          const { page } = await storage.loadPage(nb.id, meta.id, { background: true })
           if (page && !index.has(meta.id)) index.upsertPage(page)
         }
       } catch {
