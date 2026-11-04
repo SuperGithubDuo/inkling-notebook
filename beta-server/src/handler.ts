@@ -49,6 +49,12 @@ export interface ServerConfig {
    */
   minNoticeVersion?: number
   rates: Rates
+  /**
+   * Multiplier on the input estimate when reserving (default 1). A provider's tokenizer and
+   * image accounting can count more input than the server's estimate; the margin keeps the
+   * worst case reserved before the call above what the provider will bill.
+   */
+  inputMargin?: number
   /** Reasoning effort sent to the model ('low' keeps hidden, billed reasoning short). Empty: not sent. */
   reasoningEffort: string
   /** Sends chat_template_kwargs.enable_thinking = false. */
@@ -74,6 +80,8 @@ export interface Deps {
 }
 
 const MIN_CHAT_TOKENS = 300
+/** Characters per output token beyond which an answer has clearly passed its token cap (real text averages 3–4). */
+export const RUNAWAY_CHARS_PER_TOKEN = 8
 /**
  * Output tokens a typical answer uses, per task: what an installation needs room for.
  * Measured with the real model (docs/archive/live-results/cloud-qwen3.8-27b.md).
@@ -222,7 +230,7 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   const inputTokens = estimateInputTokens(spec.system, body.turns, config.imagePatch)
   if (inputTokens > config.maxInputTokens) return tooLarge()
   const outRate = config.rates.outputPerM / 1e6
-  const inputCost = inputTokens * (config.rates.inputPerM / 1e6)
+  const inputCost = inputTokens * (config.rates.inputPerM / 1e6) * Math.max(1, config.inputMargin ?? 1)
 
   // Reserve the worst case against the service's cap; the installation and network need room for a typical answer.
   // Near the cap a chat answer may be shortened to fit; a structured answer can't be.
@@ -266,7 +274,9 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   } catch (err) {
     const { kind } = classifyUpstream(err)
     // The kind only: an error message could in principle quote what was sent.
+    // Operator problems are errors (alert-worthy): a refused key, or the provider account out of credit.
     if (kind === 'auth') console.error(`${providerName} refused the API key`)
+    else if (kind === 'credits') console.error(`${providerName} account has no credit: answers paused`)
     else console.warn(`${providerName} error`, kind)
     // An error before any answer: the model did no work (charge only what timed-out retries may have cost).
     const exhausted = kind === 'free_allocation' || kind === 'credits'
@@ -293,6 +303,7 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     let finishReason: string | undefined
     let firstTokenMs: number | undefined
     let failed: string | null = null
+    let runaway = false
     try {
       if (streamed && upstream instanceof ReadableStream) {
         for await (const ev of readSse(upstream as ReadableStream<Uint8Array>)) {
@@ -309,6 +320,14 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
             text += ev.text
             await send('delta', { text: ev.text })
             if (clientGone) break
+          }
+          // A provider that ignores the token cap would spend past the reservation: stop reading
+          // (which cancels the upstream answer) and charge the whole reservation.
+          if (text.length + reasoningChars > maxTokens * RUNAWAY_CHARS_PER_TOKEN) {
+            runaway = true
+            finishReason = 'length'
+            console.warn('stream stopped', 'runaway_output')
+            break
           }
           if (ev.usage) usage = ev.usage
           if (ev.finishReason) finishReason = ev.finishReason
@@ -332,7 +351,7 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     // A finished stream with nothing in it is a failure too (an empty answer helps no one).
     if (!failed && !text && !clientGone) failed = 'empty'
     const cost =
-      retryCharge + (usage ? costFor(usage, config.rates) : clientGone || (failed && !text) ? reserved : Math.min(reserved, inputCost + ((text.length + reasoningChars) / 3) * outRate))
+      retryCharge + (runaway ? reserved : usage ? costFor(usage, config.rates) : clientGone || (failed && !text) ? reserved : Math.min(reserved, inputCost + ((text.length + reasoningChars) / 3) * outRate))
     await ledger.settle(reservationId, cost, { answered: !failed && !clientGone && !!text })
     const quota = await ledger.quota(id)
     if (failed && !text) {

@@ -279,6 +279,7 @@ describe('AI server on an external provider', () => {
   })
 
   it('the provider account running out of credit pauses everyone briefly, like Cloudflare’s free allocation', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     await start()
     fake!.fail({ status: 402, body: { error: { message: 'Insufficient balance' } } })
     const r = await post(chat('hi'))
@@ -288,6 +289,8 @@ describe('AI server on an external provider', () => {
     const other = await post(chat('hello'), { install: INSTALL_B, ip: '198.51.100.7' })
     expect(other.json.error.scope).toBe('upstream_unavailable')
     expect(fake!.completions()).toHaveLength(1)
+    // An operator alert, as DeepInfra's real 402 body says: "You need positive balance to do inference".
+    expect(JSON.stringify(error.mock.calls)).toMatch(/no credit/)
   })
 
   it('a malformed stream is an error, charged conservatively; garbage is never shown as an answer', async () => {
@@ -324,6 +327,32 @@ describe('AI server on an external provider', () => {
     expect(r.events.map((e) => e.event)).toEqual(['delta', 'done'])
     await server!.settled()
     expect((await status()).quota.installUsed).toBeGreaterThan(0)
+  })
+
+  it('a provider that ignores the token cap is cut off and charged its reservation, never more', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    await start()
+    // 900-token cap; the fake streams ~12,000 characters and reports 3,000 output tokens.
+    fake!.model.reply({ chunks: Array.from({ length: 100 }, () => 'x'.repeat(120)), usage: { inputTokens: 300, outputTokens: 3000 } })
+    const r = await post(chat('hi'))
+    const shown = r.events.filter((e) => e.event === 'delta').map((e) => e.data.text).join('')
+    expect(shown.length).toBeLessThanOrEqual(900 * 8 + 120)
+    expect(r.events.at(-1)!).toMatchObject({ event: 'done', data: { finishReason: 'MAX_TOKENS' } })
+    // Charged the reservation (≈ input estimate + 900 × $2.50/M), not the 3,000 tokens reported.
+    expect(r.events.at(-1)!.data.neurons).toBeLessThan(300 * 0.2 + 900 * 2.5 + 200)
+    expect(r.events.at(-1)!.data.neurons).toBeGreaterThan(900 * 2.5)
+    expect(JSON.stringify(warn.mock.calls)).toMatch(/runaway_output/)
+  })
+
+  it('reserves the input with a margin, so a provider counting more input than estimated stays inside the reservation', async () => {
+    await start({ server: { inputMargin: 1.5 } })
+    const q = await status()
+    fake!.model.reply({ text: 'ok', usage: { inputTokens: 1, outputTokens: 1 } })
+    await post(chat('hi'))
+    // The reservation shows while the answer runs; afterwards the real (tiny) cost replaces it.
+    await server!.settled()
+    expect((await status()).quota.installUsed).toBeLessThan(5)
+    expect(q.quota.installUsed).toBe(0)
   })
 
   it('uses OpenRouter’s reported cost, with its credit fee', async () => {
@@ -494,7 +523,7 @@ describe('Worker configuration', () => {
     expect(providerOf(env)).toBe('workers-ai')
     const inf = inference(env)
     if (typeof inf === 'string') throw new Error(inf)
-    expect(inf).toMatchObject({ provider: 'workers-ai', model: '@cf/qwen/qwen3.8-27b', rates: { unit: 'neurons' }, minNotice: 0 })
+    expect(inf).toMatchObject({ provider: 'workers-ai', model: '@cf/qwen/qwen3.8-27b', rates: { unit: 'neurons' }, minNotice: 0, inputMargin: 1 })
     expect(limitsFromEnv(env).globalDailyNeurons).toBe(9000)
     expect(inference(baseEnv({ ACCOUNT_PLAN: 'paid' }))).toMatch(/ACCOUNT_PLAN/)
   })
@@ -512,7 +541,7 @@ describe('Worker configuration', () => {
     const env = baseEnv({ ...deepinfra, ACCOUNT_PLAN: 'paid', INSTALL_MONTHLY_USD: '0.5' })
     const inf = inference(env)
     if (typeof inf === 'string') throw new Error(inf)
-    expect(inf).toMatchObject({ provider: 'deepinfra', model: 'Qwen/Qwen3.8-27B', publicModel: 'qwen3.8-27b', minNotice: 4, rates: { unit: 'usd', inputPerM: 200_000, outputPerM: 2_500_000, costMultiplier: 1 } })
+    expect(inf).toMatchObject({ provider: 'deepinfra', model: 'Qwen/Qwen3.8-27B', publicModel: 'qwen3.8-27b', minNotice: 4, inputMargin: 1.5, rates: { unit: 'usd', inputPerM: 200_000, outputPerM: 2_500_000, costMultiplier: 1 } })
     expect(limitsFromEnv(env)).toMatchObject({ unit: 'usd', globalDailyNeurons: 5_000_000, globalMonthly: 100_000_000, installDailyNeurons: 100_000, networkDailyNeurons: 300_000, installMonthly: 500_000, softFraction: 0.8, softFactor: 0.5 })
   })
 

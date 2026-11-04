@@ -199,9 +199,16 @@ lines.push('')
   lines.push(`Response headers seen: \`${JSON.stringify(all[0].headers)}\`. Non-stream usage object: \`${JSON.stringify(all[0].json?.usage)}\`.`, '')
 }
 
+// A DeepInfra account with no balance refuses every answer (402): say so plainly; nothing else can be measured.
+const noBalance = off.status === 402
+if (noBalance) lines.splice(3, 0, '> **BLOCKER: the DeepInfra account has no balance.** Every inference request returned HTTP 402 ("You need positive balance to do inference"). DeepInfra is prepaid: add credit in the DeepInfra dashboard (keep auto top-up off), then run again. Only the error handling below could be checked.', '')
 const total = Object.values(results).reduce((s, r) => s + (r?.usage ? usd(r.usage) : 0) + (r?.u ? usd(r.u) : 0), 0) + (results.burst?.cost ?? 0)
 lines.push(`Probe spend at list price: about $${total.toFixed(4)}.`)
 const file = process.argv[2] ?? join(root, 'test-results', 'deepinfra-probe.md')
 await writeFile(file, lines.join('\n') + '\n')
 await writeFile(file.replace(/\.md$/, '.json'), JSON.stringify(results, (k, v) => (k === 'answer' || k === 'reasoning' || k === 'text' ? undefined : v), 2))
 console.log(lines.join('\n'))
+if (noBalance) {
+  console.log('::error title=DeepInfra account has no balance::Every inference request returned 402. Add credit to the development account (auto top-up off) and run again.')
+  process.exit(3)
+}

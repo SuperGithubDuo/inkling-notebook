@@ -45,6 +45,7 @@ export interface BetaServerOptions {
   provider?: 'workers-ai' | 'deepinfra' | 'openrouter' | 'openai-compatible'
   publicModel?: string
   minNoticeVersion?: number
+  inputMargin?: number
   /** Extra ledger limits (unit, globalMonthly, installMonthly, softFraction, softFactor, duplicateWindowMs). */
   limits?: Record<string, unknown>
   reasoningEffort?: string

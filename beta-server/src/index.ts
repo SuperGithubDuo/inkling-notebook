@@ -79,6 +79,7 @@ export default {
       provider: inf.provider,
       publicModel: inf.publicModel,
       minNoticeVersion: inf.minNotice,
+      inputMargin: inf.inputMargin,
       rates: inf.rates,
       reasoningEffort: env.REASONING_EFFORT ?? '',
       disableThinking: env.DISABLE_THINKING === 'true',

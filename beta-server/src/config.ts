@@ -59,6 +59,8 @@ export interface Env {
   UPSTREAM_MAX_ATTEMPTS?: string
   UPSTREAM_TIMEOUT_MS?: string
   UPSTREAM_IDLE_TIMEOUT_MS?: string
+  /** Reservation margin on the input estimate (default 1.5 on an external provider). */
+  INPUT_ESTIMATE_MARGIN?: string
   /** Oldest app data notice accepted. Default: 4 with an external provider (its notice names it), 0 on Workers AI. */
   MIN_NOTICE_VERSION?: string
   /** Secret (wrangler secret put ADMIN_TOKEN): the operator's pause switch and summary. Without it the admin API is off. */
@@ -131,7 +133,7 @@ export function limits(env: Env): LedgerLimits {
 }
 
 /** Who answers, and at what price, from the Worker's settings; a string explains a setting that is missing (serve nothing). */
-export function inference(env: Env): { ai: AiBinding; provider: ProviderId; model: string; publicModel: string; rates: ServerConfig['rates']; minNotice: number } | string {
+export function inference(env: Env): { ai: AiBinding; provider: ProviderId; model: string; publicModel: string; rates: ServerConfig['rates']; minNotice: number; inputMargin: number } | string {
   const provider = providerOf(env)
   if (provider === 'workers-ai') {
     // Refuse rather than risk billed usage on a Workers Paid account.
@@ -142,7 +144,9 @@ export function inference(env: Env): { ai: AiBinding; provider: ProviderId; mode
       model: env.MODEL,
       publicModel: env.MODEL,
       rates: { unit: 'neurons', inputPerM: Number(env.INPUT_NEURONS_PER_M), outputPerM: Number(env.OUTPUT_NEURONS_PER_M) },
-      minNotice: num(env.MIN_NOTICE_VERSION, 0)
+      minNotice: num(env.MIN_NOTICE_VERSION, 0),
+      // Measured: the server's count matches Cloudflare's to 0.1 Neuron.
+      inputMargin: num(env.INPUT_ESTIMATE_MARGIN, 1)
     }
   }
   const id = provider as ExternalProviderId
@@ -193,7 +197,8 @@ export function inference(env: Env): { ai: AiBinding; provider: ProviderId; mode
     },
     // DeepInfra is named in the app's data notice from version 4. Any other host isn't named in a
     // shipped notice yet: it needs a new notice (and CLOUD_CONSENT_VERSION) before real users reach it.
-    minNotice: num(env.MIN_NOTICE_VERSION, id === 'deepinfra' ? 4 : NOTICE_NOT_YET_SHIPPED)
+    minNotice: num(env.MIN_NOTICE_VERSION, id === 'deepinfra' ? 4 : NOTICE_NOT_YET_SHIPPED),
+    inputMargin: num(env.INPUT_ESTIMATE_MARGIN, 1.5)
   }
 }
 

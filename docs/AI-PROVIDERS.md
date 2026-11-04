@@ -27,7 +27,14 @@
 | Training on prompts | No | No (except Google/Anthropic models, not used here) | Depends on endpoint; `data_collection: deny` enforced | Not stated on the data page | Not stated explicitly for API |
 | Production suitability | Production, but the free allowance is ~120 answers/day | **Production** (SOC 2, ISO 27001 stated) | Production gateway; extra hop | **Preview** — not for production | Production; price |
 
-Commercial use: the Qwen 3.8 weights are Apache-2.0; all five are commercial APIs. **Not verified:** each provider's terms on minors/children's data and on services likely used by under-18s (the Gemini API forbids these; see AI.md). **The operator must check DeepInfra's terms of service on this before switching**, because Inkling is likely used by students.
+Commercial use: the Qwen 3.8 weights are Apache-2.0; all five are commercial APIs.
+
+**DeepInfra's terms, checked 3 Nov 2026** ([terms of service](https://deepinfra.com/terms), [privacy policy](https://deepinfra.com/privacy)):
+- **Retention and training** (section 7(b), "Zero Data Retention"): no retaining, storing or logging of customer content beyond processing; no training or improving models on it. Exceptions: support cases (deleted within 30 days), non-content metadata (request counts, billing), records for legal compliance or fraud/abuse investigations, and opt-in features (batch, paid cache retention). These terms override the privacy policy and docs.
+- **DPA**: incorporated by section 5(a) (trust.deepinfra.com) for personal data in customer content.
+- **Users under 18**: the terms set **no minimum age** for a customer's end users and no rule against services for children (unlike the Gemini API). The customer is "solely responsible" for everyone using the service under its account and must follow applicable law (sections 5(b), 10). The privacy policy says DeepInfra's own site is not for under-18s; that concerns DeepInfra's account holders, not Inkling's users. So Inkling may serve students, but COPPA/GDPR-K obligations stay with Inkling (see PRIVACY.md).
+- **Commercial terms**: customer keeps its IP in its content; no competing service, no resale, no circumventing usage limits; liability capped at six months of fees; customer indemnifies DeepInfra for its users' conduct.
+- **Billing**: in practice **prepaid** — a development key with no balance got HTTP 402 "You need positive balance to do inference" on every request (3 Nov 2026). Keep auto top-up off and set the account spending limit (`POST /payment/config`, `limit` in USD) so the provider balance is a hard backstop under Inkling's own caps. The server treats 402 as "out of credit": everyone is paused 15 minutes and the Worker logs `deepinfra account has no credit` as an error.
 
 Reliability: no provider publishes an SLA for this model on the pages checked, and no outage history was measured. The adapter's retries cover short hiccups; a long DeepInfra outage is handled by the operator rolling back to Workers AI (below).
 

@@ -156,6 +156,7 @@ export async function startBetaServer(options = {}) {
     provider: options.provider ?? 'workers-ai',
     publicModel: options.publicModel,
     minNoticeVersion: options.minNoticeVersion ?? 0,
+    inputMargin: options.inputMargin ?? 1,
     rates: options.rates ?? RATES,
     reasoningEffort: options.reasoningEffort ?? 'low',
     disableThinking: options.disableThinking ?? true,
