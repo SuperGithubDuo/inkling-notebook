@@ -158,7 +158,9 @@ export async function startBetaServer(options = {}) {
     imagePatch: options.imagePatch ?? 28,
     maxBodyBytes: 3_500_000,
     maxInputTokens: options.maxInputTokens ?? 12_000,
-    adminTokenHash: await mod.sha256Hex(adminToken)
+    adminTokenHash: await mod.sha256Hex(adminToken),
+    // The text-only model (beta-server/src/route.ts); unset = off, as in production by default.
+    textModel: options.textModel ?? null
   }
   const pending = new Set()
   const waitUntil = (p) => {

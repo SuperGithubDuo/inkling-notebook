@@ -1,0 +1,153 @@
+name: Workers AI model benchmark (test)
+
+# Benchmarks other Cloudflare Workers AI models against the production model
+# (@cf/qwen/qwen3.8-27b) on Inkling's 13 real AI Tutor scenarios and their 50
+# checks, through the app's own AiService and the AI server's code running on
+# the GitHub runner, which reaches Workers AI over Cloudflare's REST API
+# (tests/live/cloud.live.test.ts, direct mode).
+#
+# Nothing is deployed: no Worker is created or changed, production
+# ("inkling-ai-beta"), its settings, secrets and main are untouched. It spends
+# the account's free Workers AI allocation (Workers Free fails rather than
+# bills), so each run has a Neuron budget, and a run is skipped if today's use
+# plus its budget would leave production less than 5,000 of today's 10,000.
+#
+# Models and budgets: .github/bench-models.txt. Start it by pushing the branch
+# `deploy/workers-ai-bench`. Secrets: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['deploy/workers-ai-bench']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workers-ai-bench
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # Leave production at least this much of today's free allocation.
+      PRODUCTION_RESERVE: '5000'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
+
+      - name: Required secrets
+        shell: bash
+        run: |
+          missing=()
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
+          if [ ${#missing[@]} -gt 0 ]; then echo "::error title=Missing secrets::${missing[*]}"; exit 1; fi
+
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm --prefix beta-server ci
+          mkdir -p test-results
+
+      - name: Account is on Workers Free
+        shell: bash
+        run: |
+          subs=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/subscriptions")
+          echo "$subs" | jq -c '[.result[]? | {product: .rate_plan.public_name, price: .price, state: .state}]' | tee test-results/subscriptions.json
+          paid=$(echo "$subs" | jq '[.result[]? | select((.price // 0) > 0)] | length')
+          if [ "${paid:-0}" != "0" ]; then echo "::error title=Paid subscription found::not benchmarking on a paid account"; exit 1; fi
+
+      - name: Workers AI catalog
+        shell: bash
+        run: |
+          node scripts/cf-models.mjs test-results/workers-ai-catalog.md
+          # Artifacts may not be reachable: the catalog's text models also go to an annotation.
+          jq -r 'if .ok then ([.rows[] | "\(.name) | images \(.vision) | ctx \(.context // "") | price \(.price // "") | beta \(.beta) | deprecation \(.deprecated // "")"] | join("%0A")) else .error end' test-results/workers-ai-catalog.json > /tmp/cat.txt 2>/dev/null || echo "catalog unreadable" > /tmp/cat.txt
+          echo "::notice title=Workers AI catalog (text generation)::$(cat /tmp/cat.txt)"
+          cat test-results/workers-ai-catalog.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Benchmark each model
+        shell: bash
+        run: |
+          set +e
+          echo "| Model | Started | Budget | Day use before | Result |" > test-results/runs.md
+          echo "|---|---|---|---|---|" >> test-results/runs.md
+          grep -v '^\s*#' .github/bench-models.txt | grep -v '^\s*$' | while IFS='|' read -r model rates budget reasoning thinking textmodel textrates scenarios; do
+            model=$(echo $model); rates=$(echo $rates | tr -d ' '); budget=$(echo $budget); reasoning=$(echo $reasoning); thinking=$(echo $thinking)
+            textmodel=$(echo $textmodel); textrates=$(echo $textrates | tr -d ' '); scenarios=$(echo ${scenarios:-all})
+            # The report's name, as tests/live/cloud.live.test.ts builds it.
+            slug=${model##*/}; [ -n "$textmodel" ] && slug="$slug+${textmodel##*/}"; [ "$scenarios" != all ] && slug="$slug-$scenarios"
+            node scripts/cf-usage.mjs 30 > /tmp/usage.json
+            today=$(date -u +%F)
+            used=$(jq -r --arg d "$today" '.utcDays[$d] // 0' /tmp/usage.json)
+            if [ "$(jq -r .ok /tmp/usage.json)" != true ]; then echo "::error title=Usage unknown::$(jq -r .error /tmp/usage.json)"; echo "| $model | – | $budget | unknown | not run: usage unknown |" >> test-results/runs.md; continue; fi
+            if [ $((used + budget + PRODUCTION_RESERVE)) -gt 10000 ]; then
+              echo "::warning title=$model not run::today's use $used + budget $budget would leave production under $PRODUCTION_RESERVE"
+              echo "| $model | – | $budget | $used | not run: would leave production under $PRODUCTION_RESERVE |" >> test-results/runs.md
+              continue
+            fi
+            # The settings probe (six small requests) only for a plain model comparison.
+            probe=0; [ -z "$textmodel" ] && [ "$scenarios" = all ] && probe=1
+            start=$(date -u +%FT%TZ)
+            echo "::group::$model (budget $budget, reasoning $reasoning, thinking $thinking)"
+            INKLING_LIVE_MODEL="$model" INKLING_LIVE_RATES="$rates" INKLING_LIVE_BUDGET="$budget" \
+              INKLING_LIVE_TEXT_MODEL="$textmodel" INKLING_LIVE_TEXT_RATES="$textrates" INKLING_LIVE_SCENARIOS="$scenarios" \
+              INKLING_LIVE_REASONING="$reasoning" INKLING_LIVE_THINKING="$thinking" INKLING_LIVE_PROBE="$probe" \
+              npm run test:live:cloud > "test-results/live-$slug.log" 2>&1
+            code=$?
+            grep -E '^\s+(\[|probe|installation|Workers AI)|Tests |passed|failed' "test-results/live-$slug.log" | head -60
+            echo "::endgroup::"
+            LIVE_SUMMARY_TEXTS=1 node scripts/live-summary.mjs "test-results/live-cloud-$slug.json"
+            end=$(date -u +%FT%TZ)
+            echo "$model $start $end" >> test-results/windows.txt
+            [ -n "$textmodel" ] && echo "$textmodel $start $end" >> test-results/windows.txt
+            echo "| $model | $start | $budget | $used | test exit $code |" >> test-results/runs.md
+            sleep 30
+          done
+          cat test-results/runs.md >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Neurons as Cloudflare counted them
+        shell: bash
+        run: |
+          # Analytics arrive a few minutes late.
+          sleep 240
+          echo "| Model | Window | Requests (all callers) | Neurons (all callers) |" > test-results/cf-neurons.md
+          echo "|---|---|---|---|" >> test-results/cf-neurons.md
+          [ -f test-results/windows.txt ] || exit 0
+          while read -r model start end; do
+            end2=$(date -u -d "$end + 2 minutes" +%FT%TZ)
+            out=$(node scripts/cf-neurons.mjs "$start" "$end2")
+            echo "$out" > "test-results/cf-neurons-${model##*/}.json"
+            echo "| $model | $start → $end2 | $(echo "$out" | jq -r --arg m "$model" '.byModel[$m].requests // "–"') | $(echo "$out" | jq -r --arg m "$model" '.byModel[$m].neurons // "–"') |" >> test-results/cf-neurons.md
+          done < test-results/windows.txt
+          node scripts/cf-usage.mjs 30 > test-results/usage-after.json
+          echo "Production shares @cf/qwen/qwen3.8-27b, so its row also counts any student traffic in that window." >> test-results/cf-neurons.md
+          cat test-results/cf-neurons.md >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Neurons as Cloudflare counted them::$(sed -n '3,$p' test-results/cf-neurons.md | tr '\n' '~' | sed 's/~/%0A/g')"
+          echo "::notice title=Workers AI use by UTC day::$(jq -c .utcDays test-results/usage-after.json)"
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workers-ai-bench-reports
+          path: |
+            test-results/*.md
+            test-results/*.json
+            test-results/*.log
+            test-results/*.txt
+          if-no-files-found: ignore

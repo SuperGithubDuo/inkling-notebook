@@ -36,6 +36,8 @@ import { CLOUD_MODEL, aiReady, type AiEvent, type AiRequest, type CloudQuota } f
 import { parseTaskResult } from '../../src/shared/tutor'
 import { taskSpec } from '../../src/main/ai/prompts'
 import { registerScenarios, img, selection, type Run } from './scenarios'
+import { registerTextScenarios } from './scenarios-text'
+import { practiceTally, registerPracticeScenarios } from './scenarios-practice'
 import { startBetaServer, RATES, type BetaServer } from '../support/fakeBeta.mjs'
 import { workersAiRest } from '../support/workersAiRest.mjs'
 
@@ -44,6 +46,34 @@ const env = process.env
 const direct = !!(env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN)
 const deployed = !!env.INKLING_BETA_URL && env.INKLING_LIVE_CLOUD === '1'
 const enabled = deployed || direct
+/**
+ * Benchmarking another Workers AI model (direct mode only): INKLING_LIVE_MODEL picks it and
+ * INKLING_LIVE_RATES="input,output" gives its published Neurons per million tokens, so the
+ * server's accounting (and every Neuron figure below) uses that model's price. The report is
+ * named after the model. Unset: the production model and rates.
+ */
+const MODEL = env.INKLING_LIVE_MODEL?.trim() || CLOUD_MODEL
+const LIVE_RATES: { inputPerM: number; outputPerM: number } = (() => {
+  const [i, o] = (env.INKLING_LIVE_RATES ?? '').split(',').map(Number)
+  return i !== undefined && o !== undefined && i > 0 && o > 0 ? { inputPerM: i, outputPerM: o } : RATES
+})()
+if (MODEL !== CLOUD_MODEL && LIVE_RATES === RATES) throw new Error(`INKLING_LIVE_RATES must be set for ${MODEL}`)
+/**
+ * Text-only routing (beta-server/src/route.ts), direct mode: INKLING_LIVE_TEXT_MODEL with its
+ * INKLING_LIVE_TEXT_RATES="input,output" turns the rule on; requests with handwriting stay on MODEL.
+ */
+const TEXT_MODEL = (() => {
+  const model = env.INKLING_LIVE_TEXT_MODEL?.trim()
+  const [i, o] = (env.INKLING_LIVE_TEXT_RATES ?? '').split(',').map(Number)
+  if (!model) return null
+  if (!(i !== undefined && o !== undefined && i > 0 && o > 0)) throw new Error('INKLING_LIVE_TEXT_RATES must be set with INKLING_LIVE_TEXT_MODEL')
+  // INKLING_LIVE_TEXT_TASKS: which tasks it may answer (default: the server's, practice and check).
+  const tasks = (env.INKLING_LIVE_TEXT_TASKS ?? '').split(',').map((t) => t.trim()).filter((t) => t === 'chat' || t === 'practice' || t === 'check') as Array<'chat' | 'practice' | 'check'>
+  return { model, rates: { inputPerM: i, outputPerM: o }, ...(tasks.length ? { tasks } : {}) }
+})()
+/** Which scenarios run: "all" (default), "core" (the original 13 answers), "text" (scenarios-text.ts) or "practice" (scenarios-practice.ts). */
+const SCENARIOS = (['core', 'text', 'practice'] as const).find((s) => s === env.INKLING_LIVE_SCENARIOS) ?? 'all'
+const SLUG = (MODEL.split('/').at(-1)! + (TEXT_MODEL ? `+${TEXT_MODEL.model.split('/').at(-1)}` : '') + (SCENARIOS === 'all' ? '' : `-${SCENARIOS}`)).replace(/[^A-Za-z0-9.+_-]/g, '_')
 if (!enabled) console.log('\n  Live cloud tests skipped: set INKLING_BETA_URL + INKLING_LIVE_CLOUD=1, or CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (see the comment at the top of this file).\n')
 
 const memoryCipher: SecretCipher = {
@@ -74,10 +104,11 @@ let installations = 0
 let installLimitHits = 0
 let capacityRetries = 0
 
-describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
+describe.skipIf(!enabled)(`live cloud AI, ${MODEL}`, () => {
   let server: BetaServer | null = null
   let service: AiService
   let url = ''
+  let liveAi: ReturnType<typeof workersAiRest> | null = null
   const events: AiEvent[] = []
 
   /** A freshly installed app: new data folder, new installation ID, no credentials. */
@@ -94,9 +125,10 @@ describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
     installations++
     const s = service.status()
     if (s.provider !== 'cloud' || !aiReady(s)) throw new Error(`A fresh install is not ready on the cloud AI: ${JSON.stringify(s)}`)
+    // Nothing (not even a connection check) is sent before the cloud notice is accepted.
+    await service.setConsent(true)
     const t = await service.test()
     if (!t.ok) throw new Error(`Anonymous status check failed: ${JSON.stringify(t)}`)
-    await service.setConsent(true)
   }
 
   beforeAll(async () => {
@@ -105,20 +137,25 @@ describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
     if (env.INKLING_LIVE_PROBE === '1' && direct) await probe(workersAiRest({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN }))
     if (!deployed) {
       const ai = workersAiRest({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN })
+      liveAi = ai
       server = await startBetaServer({
         ai,
+        model: MODEL,
+        rates: LIVE_RATES,
+        textModel: TEXT_MODEL,
+        ...(env.INKLING_LIVE_IMAGE_PATCH ? { imagePatch: Number(env.INKLING_LIVE_IMAGE_PATCH) } : {}),
         // The whole test may use at most this much of today's allowance.
         globalDailyNeurons: Number(env.INKLING_LIVE_BUDGET ?? 4000),
         installDailyNeurons: Number(env.INKLING_LIVE_BUDGET ?? 4000),
         networkDailyNeurons: Number(env.INKLING_LIVE_BUDGET ?? 4000),
         installPerMinute: 30,
         networkPerMinute: 30,
-        reasoningEffort: env.INKLING_LIVE_REASONING ?? 'low',
+        reasoningEffort: env.INKLING_LIVE_REASONING === 'none' ? '' : (env.INKLING_LIVE_REASONING ?? 'low'),
         disableThinking: env.INKLING_LIVE_THINKING !== 'on',
         structured: env.INKLING_LIVE_STRUCTURED === 'json_schema' ? 'json_schema' : 'prompt'
       })
       url = server.url
-      mode = `AI server code on this computer → Workers AI REST API (reasoning_effort=${server.config.reasoningEffort || 'unset'}, enable_thinking=${server.config.disableThinking ? 'false' : 'default'}, structured=${server.config.structured})`
+      mode = `AI server code on this computer → Workers AI REST API (${TEXT_MODEL ? `text-only routing to ${TEXT_MODEL.model}, ` : ''}reasoning_effort=${server.config.reasoningEffort || 'unset'}, enable_thinking=${server.config.disableThinking ? 'false' : 'default'}, structured=${server.config.structured})`
     } else {
       mode = `deployed AI server ${url}, anonymous (no code or key)`
     }
@@ -133,8 +170,8 @@ describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
     void t
     await server?.close()
     await mkdir(join(root, 'test-results'), { recursive: true })
-    const base = join(root, 'test-results', 'live-cloud-qwen3.8-27b')
-    await writeFile(`${base}.json`, JSON.stringify({ model: CLOUD_MODEL, mode, at: new Date().toISOString(), quotaBefore, quotaAfter, probes, runs }, null, 2))
+    const base = join(root, 'test-results', `live-cloud-${SLUG}`)
+    await writeFile(`${base}.json`, JSON.stringify({ model: MODEL, textModel: TEXT_MODEL, scenarios: SCENARIOS, practiceTally, rates: LIVE_RATES, mode, at: new Date().toISOString(), quotaBefore, quotaAfter, probes, runs }, null, 2))
     await writeFile(`${base}.md`, report())
     console.log(`\n  Report: ${base}.md`)
   })
@@ -143,6 +180,7 @@ describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
     const started = Date.now()
     let end: AiEvent | undefined
     let id = ''
+    const callsBefore = liveAi?.calls.length ?? 0
     for (let attempt = 0; ; attempt++) {
       // The server paces requests; wait out a pause rather than fail the scenario.
       let r = service.start(request)
@@ -182,6 +220,7 @@ describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
       inputTokens: end.type === 'done' ? end.usage.inputTokens : undefined,
       outputTokens: end.type === 'done' ? end.usage.outputTokens : undefined,
       neurons: end.type === 'done' ? end.usage.neurons : undefined,
+      model: liveAi && liveAi.calls.length > callsBefore ? liveAi.calls.at(-1)!.model : undefined,
       validated: request.task === 'chat' ? undefined : end.type === 'done' && parseTaskResult(request.task, end.text) !== null,
       checks: []
     }
@@ -194,9 +233,11 @@ describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
     expect.soft(pass, `${r.scenario}/${r.task}: ${name}${detail ? ` — ${detail}` : ''}`).toBe(true)
   }
 
-  registerScenarios({ run, check, timeout: 300_000 })
+  if (SCENARIOS === 'all' || SCENARIOS === 'core') registerScenarios({ run, check, timeout: 300_000 })
+  if (SCENARIOS === 'all' || SCENARIOS === 'text') registerTextScenarios({ run, check, timeout: 300_000 })
+  if (SCENARIOS === 'all' || SCENARIOS === 'practice') registerPracticeScenarios({ run, check, timeout: 300_000 })
 
-  it('F: a follow-up question carries the conversation', { timeout: 300_000 }, async () => {
+  it.skipIf(SCENARIOS !== 'all' && SCENARIOS !== 'core')('F: a follow-up question carries the conversation', { timeout: 300_000 }, async () => {
     const image = await img('scenario-a.jpg')
     const first = await run('F', { task: 'chat', turns: [{ role: 'user', parts: [selection, image, { text: 'Give me a hint for the next step.' }] }] })
     check(first, 'answered', first.ok, first.error)
@@ -225,16 +266,19 @@ async function probe(ai: ReturnType<typeof workersAiRest>): Promise<void> {
     ['model defaults (reasoning xhigh)', { ...base }],
     ['reasoning_effort low', { ...base, reasoning_effort: 'low' }],
     ['low + enable_thinking false', { ...base, reasoning_effort: 'low', chat_template_kwargs: { enable_thinking: false } }],
-    ['low + no thinking + JSON mode', { ...base, reasoning_effort: 'low', chat_template_kwargs: { enable_thinking: false }, response_format: { type: 'json_schema', json_schema: spec.jsonSchema } }]
+    ['low + no thinking + JSON mode', { ...base, reasoning_effort: 'low', chat_template_kwargs: { enable_thinking: false }, response_format: { type: 'json_schema', json_schema: spec.jsonSchema } }],
+    // For models that don't take reasoning_effort (e.g. Gemma): the thinking switch alone, and nothing at all.
+    ['enable_thinking false only', { ...base, chat_template_kwargs: { enable_thinking: false } }],
+    ['no thinking settings, JSON mode', { ...base, response_format: { type: 'json_schema', json_schema: spec.jsonSchema } }]
   ]
   for (const [name, inputs] of variants) {
     const started = Date.now()
     try {
-      const out = (await ai.run(CLOUD_MODEL, inputs)) as Record<string, any>
+      const out = (await ai.run(MODEL, inputs)) as Record<string, any>
       const msg = out.choices?.[0]?.message ?? {}
       const text: string = typeof msg.content === 'string' ? msg.content : typeof out.response === 'string' ? out.response : JSON.stringify(out.response ?? '')
       const usage = out.usage ?? {}
-      const neurons = ((usage.prompt_tokens ?? 0) * RATES.inputPerM + (usage.completion_tokens ?? 0) * RATES.outputPerM) / 1e6
+      const neurons = ((usage.prompt_tokens ?? 0) * LIVE_RATES.inputPerM + (usage.completion_tokens ?? 0) * LIVE_RATES.outputPerM) / 1e6
       probes.push({ name, inputs: { ...inputs, messages: '(check task)' }, ok: true, ms: Date.now() - started, text, reasoningChars: String(msg.reasoning_content ?? msg.reasoning ?? '').length, usage, neurons, validJson: parseTaskResult('check', text) !== null })
     } catch (err) {
       probes.push({ name, inputs: { ...inputs, messages: '(check task)' }, ok: false, ms: Date.now() - started, error: (err as Error).message })
@@ -247,16 +291,16 @@ async function probe(ai: ReturnType<typeof workersAiRest>): Promise<void> {
 function report(): string {
   const s = (ms?: number): string => (ms === undefined ? '–' : `${(ms / 1000).toFixed(1)} s`)
   const mean = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN)
-  const lines = [`# Live cloud AI results: ${CLOUD_MODEL}`, '', `${mode}, ${new Date().toISOString()}. Images: tests/fixtures/handwriting/ (as Inkling sends them).`, '']
+  const lines = [`# Live cloud AI results: ${MODEL}`, '', `${mode}, ${new Date().toISOString()}. Images: tests/fixtures/handwriting/ (as Inkling sends them).`, '']
   if (probes.length) {
     lines.push('## Model settings probe (one small check request each)', '', '| Settings | Result | Output tokens | Reasoning chars | Valid JSON | Neurons | Time |', '|---|---|---|---|---|---|---|')
     for (const p of probes) lines.push(`| ${p.name} | ${p.ok ? 'ok' : `error: ${p.error}`} | ${p.usage?.completion_tokens ?? '–'} | ${p.reasoningChars ?? '–'} | ${p.validJson === undefined ? '–' : p.validJson ? 'yes' : 'no'} | ${p.neurons?.toFixed(1) ?? '–'} | ${s(p.ms)} |`)
     lines.push('')
   }
-  lines.push('## Scenarios', '', '| Scenario | Task | Result | Chunks | First text | Total | Tokens in/out | Neurons | Structured | Checks |', '|---|---|---|---|---|---|---|---|---|---|')
+  lines.push('## Scenarios', '', '| Scenario | Task | Model | Result | Chunks | First text | Total | Tokens in/out | Neurons | Structured | Checks |', '|---|---|---|---|---|---|---|---|---|---|---|')
   for (const r of runs) {
     const passed = r.checks.filter((c) => c.pass).length
-    lines.push(`| ${r.scenario} | ${r.task} | ${r.ok ? 'answered' : `error: ${r.error}`} | ${r.chunks} | ${s(r.firstTokenMs)} | ${s(r.totalMs)} | ${r.inputTokens ?? '–'}/${r.outputTokens ?? '–'} | ${r.neurons?.toFixed(1) ?? '–'} | ${r.validated === undefined ? 'n/a' : r.validated ? 'valid' : 'INVALID'} | ${passed}/${r.checks.length} |`)
+    lines.push(`| ${r.scenario} | ${r.task} | ${r.model?.split('/').at(-1) ?? '–'} | ${r.ok ? 'answered' : `error: ${r.error}`} | ${r.chunks} | ${s(r.firstTokenMs)} | ${s(r.totalMs)} | ${r.inputTokens ?? '–'}/${r.outputTokens ?? '–'} | ${r.neurons?.toFixed(1) ?? '–'} | ${r.validated === undefined ? 'n/a' : r.validated ? 'valid' : 'INVALID'} | ${passed}/${r.checks.length} |`)
   }
   const done = runs.filter((r) => r.ok && r.neurons !== undefined)
   const byTask = (t: string): number[] => done.filter((r) => r.task === t).map((r) => r.neurons!)
@@ -264,7 +308,7 @@ function report(): string {
   const allChecks = runs.flatMap((r) => r.checks)
   lines.push('', '## Allowance', '')
   lines.push(`- Answers: ${done.length} of ${runs.length} succeeded; checks passed: ${allChecks.filter((c) => c.pass).length} of ${allChecks.length}.`)
-  lines.push(`- Neurons used by this run (from the model’s token counts × Cloudflare’s published rates): **${total.toFixed(0)}**.`)
+  lines.push(`- Neurons used by this run (from the model’s token counts × Cloudflare’s published rates, ${LIVE_RATES.inputPerM}/${LIVE_RATES.outputPerM} per M): **${total.toFixed(0)}**.`)
   if (quotaBefore && quotaAfter) lines.push(`- Server ledger, whole service, before → after: ${quotaBefore.globalUsed} → ${quotaAfter.globalUsed} of ${quotaAfter.globalLimit}. Installations used: ${installations}; per-installation limit reached ${installLimitHits} time(s); Workers AI capacity errors retried: ${capacityRetries}.`)
   lines.push('- Compare with the Cloudflare dashboard (Workers AI → Neurons used today) before and after the run.', '')
   lines.push('| Interaction | Answers | Mean Neurons | Mean first text | Mean total |', '|---|---|---|---|---|')
