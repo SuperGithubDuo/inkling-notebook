@@ -73,6 +73,9 @@ jobs:
         shell: bash
         run: |
           export OPENROUTER_API_KEY=$(printf '%s' "$OPENROUTER_API_KEY" | tr -d '\r\n')
+          # Optional on the trigger branch only: a narrower candidate list and spaced retries.
+          [ -f .github/free-candidates.txt ] && export CANDIDATES=$(tr -d ' \n' < .github/free-candidates.txt)
+          [ -f .github/free-attempts.txt ] && export ATTEMPTS=$(tr -d ' \n' < .github/free-attempts.txt)
           node beta-server/scripts/openrouter-free-models-probe.mjs test-results/openrouter-free-models.md
           cat test-results/openrouter-free-models.md >> "$GITHUB_STEP_SUMMARY"
 

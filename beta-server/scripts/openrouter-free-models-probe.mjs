@@ -24,6 +24,8 @@ const KEY = (process.env.OPENROUTER_API_KEY ?? '').trim()
 const BASE = 'https://openrouter.ai/api/v1'
 // The user's list, strongest-for-Inkling first (vision and size), Lightning (text only) last.
 const CANDIDATES = (process.env.CANDIDATES ?? 'nvidia/nemotron-3.5-super-vl:free,google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,nvidia/nemotron-3.5-lightning:free').split(',').map((s) => s.trim()).filter(Boolean)
+const ATTEMPTS = Number(process.env.ATTEMPTS ?? 1)
+const SPACING_S = Number(process.env.SPACING_S ?? 30)
 if (!KEY) {
   console.error('OPENROUTER_API_KEY is not set')
   process.exit(2)
@@ -141,7 +143,15 @@ for (const id of CANDIDATES) {
   let t = null
   let ti = null
   if (m && only.length) {
-    t = await stream({ model: id, messages: [{ role: 'system', content: SYS }, { role: 'user', content: MATH }], max_tokens: 900, temperature: 0.3, stream: true, reasoning: { enabled: false }, provider: lock(only) })
+    // A shared upstream pool can be busy (429): try again, spaced out, up to ATTEMPTS times, and record each outcome.
+    const attempts = []
+    for (let a = 0; a < ATTEMPTS; a++) {
+      if (a) await new Promise((res) => setTimeout(res, SPACING_S * 1000))
+      t = await stream({ model: id, messages: [{ role: 'system', content: SYS }, { role: 'user', content: MATH }], max_tokens: 900, temperature: 0.3, stream: true, reasoning: { enabled: false }, provider: lock(only) })
+      attempts.push({ at: new Date().toISOString(), status: t.status, reason: t.status === 200 ? 'ok' : short(t.json?.error?.metadata?.limit_source ?? t.json?.error?.message ?? t.text, 80) })
+      if (t.status !== 429) break
+    }
+    r.attempts = attempts
     r.math = { status: t.status, ms: t.ms, firstTextMs: t.firstTextMs, usage: t.usage, provider: t.provider, finish: t.finish, error: t.json?.error ?? t.errorEvent ?? null, correct: t.status === 200 ? mathOk(t.answer) : null, answer: short(t.answer, 1500), reasoningChars: t.reasoning?.length ?? 0 }
     if (t.status === 200 && t.answer && r.modalities.includes('image')) {
       const data = (await readFile(join(root, 'tests/fixtures/handwriting', 'scenario-a.jpg'))).toString('base64')
@@ -159,6 +169,7 @@ lines.push('')
 for (const [id, r] of Object.entries(results.candidates)) {
   if (!r.math && !r.image) continue
   lines.push(`### ${id}`, '')
+  if (r.attempts?.length > 1) lines.push(`Attempts: ${r.attempts.map((x) => `${x.at.slice(11, 19)} ${x.status}`).join(', ')}`, '')
   if (r.math) lines.push(`**Maths check** (HTTP ${r.math.status}, ${r.math.ms} ms):`, '', `> ${short(r.math.answer || JSON.stringify(r.math.error), 1200)}`, '')
   if (r.image) lines.push(`**Handwriting (x² + 5x + 6 = 0 → x = 2, 3)** (HTTP ${r.image.status}, ${r.image.ms} ms):`, '', `> ${short(r.image.answer || JSON.stringify(r.image.error), 1200)}`, '')
 }
