@@ -14,7 +14,7 @@ try {
   console.log('::error title=Live cloud test::No report was written (the test did not run).')
   process.exit(0)
 }
-const tag = r.model ? `${String(r.model).split('/').at(-1)}: ` : 'Live cloud: '
+const tag = r.model ? `${String(r.model).split('/').at(-1)}${r.textModel ? `+${String(r.textModel.model).split('/').at(-1)}` : ''}${r.scenarios && r.scenarios !== 'all' ? ` (${r.scenarios})` : ''}: ` : 'Live cloud: '
 const esc = (s) => s.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
 const s = (ms) => (ms == null ? '–' : `${(ms / 1000).toFixed(1)}s`)
 const lines = []
@@ -26,7 +26,7 @@ console.log(`::notice title=${tag}settings probe::${esc(lines.join('\n') || 'no 
 
 const rows = r.runs.map((x) => {
   const passed = x.checks.filter((c) => c.pass).length
-  return `${x.scenario}/${x.task}: ${x.ok ? 'ok' : `ERROR ${x.error}`} | first ${s(x.firstTokenMs)} total ${s(x.totalMs)} | ${x.inputTokens ?? '?'}→${x.outputTokens ?? '?'} tok | ${x.neurons?.toFixed(1) ?? '?'} N | ${x.validated === undefined ? '' : x.validated ? 'valid ' : 'INVALID '}checks ${passed}/${x.checks.length}`
+  return `${x.scenario}/${x.task}${x.model ? ` [${x.model.split('/').at(-1)}]` : ''}: ${x.ok ? 'ok' : `ERROR ${x.error}`} | first ${s(x.firstTokenMs)} total ${s(x.totalMs)} | ${x.inputTokens ?? '?'}→${x.outputTokens ?? '?'} tok | ${x.neurons?.toFixed(1) ?? '?'} N | ${x.validated === undefined ? '' : x.validated ? 'valid ' : 'INVALID '}checks ${passed}/${x.checks.length}`
 })
 console.log(`::notice title=${tag}scenarios (${r.mode})::${esc(rows.join('\n'))}`)
 

@@ -31,6 +31,8 @@ export interface Run {
   inputTokens?: number
   outputTokens?: number
   neurons?: number
+  /** The Workers AI model that answered (direct mode only). */
+  model?: string
   validated?: boolean
   checks: { name: string; pass: boolean; detail?: string }[]
 }

@@ -85,9 +85,11 @@ jobs:
           set +e
           echo "| Model | Started | Budget | Day use before | Result |" > test-results/runs.md
           echo "|---|---|---|---|---|" >> test-results/runs.md
-          grep -v '^\s*#' .github/bench-models.txt | grep -v '^\s*$' | while IFS='|' read -r model rates budget reasoning thinking; do
+          grep -v '^\s*#' .github/bench-models.txt | grep -v '^\s*$' | while IFS='|' read -r model rates budget reasoning thinking textmodel textrates scenarios; do
             model=$(echo $model); rates=$(echo $rates | tr -d ' '); budget=$(echo $budget); reasoning=$(echo $reasoning); thinking=$(echo $thinking)
-            slug=${model##*/}
+            textmodel=$(echo $textmodel); textrates=$(echo $textrates | tr -d ' '); scenarios=$(echo ${scenarios:-all})
+            # The report's name, as tests/live/cloud.live.test.ts builds it.
+            slug=${model##*/}; [ -n "$textmodel" ] && slug="$slug+${textmodel##*/}"; [ "$scenarios" != all ] && slug="$slug-$scenarios"
             node scripts/cf-usage.mjs 30 > /tmp/usage.json
             today=$(date -u +%F)
             used=$(jq -r --arg d "$today" '.utcDays[$d] // 0' /tmp/usage.json)
@@ -97,10 +99,13 @@ jobs:
               echo "| $model | – | $budget | $used | not run: would leave production under $PRODUCTION_RESERVE |" >> test-results/runs.md
               continue
             fi
+            # The settings probe (six small requests) only for a plain model comparison.
+            probe=0; [ -z "$textmodel" ] && [ "$scenarios" = all ] && probe=1
             start=$(date -u +%FT%TZ)
             echo "::group::$model (budget $budget, reasoning $reasoning, thinking $thinking)"
             INKLING_LIVE_MODEL="$model" INKLING_LIVE_RATES="$rates" INKLING_LIVE_BUDGET="$budget" \
-              INKLING_LIVE_REASONING="$reasoning" INKLING_LIVE_THINKING="$thinking" INKLING_LIVE_PROBE=1 \
+              INKLING_LIVE_TEXT_MODEL="$textmodel" INKLING_LIVE_TEXT_RATES="$textrates" INKLING_LIVE_SCENARIOS="$scenarios" \
+              INKLING_LIVE_REASONING="$reasoning" INKLING_LIVE_THINKING="$thinking" INKLING_LIVE_PROBE="$probe" \
               npm run test:live:cloud > "test-results/live-$slug.log" 2>&1
             code=$?
             grep -E '^\s+(\[|probe|installation|Workers AI)|Tests |passed|failed' "test-results/live-$slug.log" | head -60
@@ -108,6 +113,7 @@ jobs:
             LIVE_SUMMARY_TEXTS=1 node scripts/live-summary.mjs "test-results/live-cloud-$slug.json"
             end=$(date -u +%FT%TZ)
             echo "$model $start $end" >> test-results/windows.txt
+            [ -n "$textmodel" ] && echo "$textmodel $start $end" >> test-results/windows.txt
             echo "| $model | $start | $budget | $used | test exit $code |" >> test-results/runs.md
             sleep 30
           done

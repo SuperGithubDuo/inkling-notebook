@@ -1,8 +1,10 @@
 # Workers AI models to benchmark, one per line, in this order:
-#   model | input,output Neurons per million tokens (from the catalog's USD price ÷ $0.011 per 1,000 Neurons, 4 Nov 2026) | Neuron budget | reasoning_effort (or none) | thinking (off or on)
+#   model | input,output Neurons per M | Neuron budget | reasoning_effort (or none) | thinking (off or on)
+#     [| text model | its input,output Neurons per M | scenarios: all, core or text]
+# The optional text model turns on text-only routing (beta-server/src/route.ts) for the run.
 # Budgets cap what each run may use; the workflow also refuses to start a run that would
-# leave production less than its share of today's free 10,000 Neurons.
-# Run 4 (4 Nov 2026): other inexpensive vision models, since Gemma 4 26B misreads handwriting.
-# GLM-5.3-Flash $0.15/$0.50 per M; Llama 4 Scout $0.27/$0.85 per M.
-@cf/zai-org/glm-5.3-flash | 13636,45455 | 500 | none | off
-@cf/meta/llama-4-scout-17b-16e-instruct | 24545,77273 | 700 | none | off
+# leave production less than 5,000 of today's free 10,000 Neurons.
+# Run 5 (4 Nov 2026): routing on, every scenario (original 13 answers + the text scenarios);
+# then the new text scenarios on Qwen alone, as their baseline.
+@cf/qwen/qwen3.8-27b | 40909,290909 | 1600 | low | off | @cf/google/gemma-4-26b-a4b-it | 9091,27273 | all
+@cf/qwen/qwen3.8-27b | 40909,290909 | 1000 | low | off | | | text
