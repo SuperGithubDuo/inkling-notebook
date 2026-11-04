@@ -3,13 +3,14 @@ name: Release
 # Builds Inkling's installers on real Windows and macOS machines and tests them.
 #
 # How to start it (see docs/RELEASING.md):
-# - Push any branch named build/<something>: `build/windows` builds Windows,
-#   `build/macos` builds macOS, `build/all` (or any other name) builds both.
-#   Works from any branch, including beta-release, without touching main.
-# - Actions → Release → Run workflow (only once this file is on the default
-#   branch: GitHub lists manual workflows from the default branch only).
-# - Push a tag v* to also upload the installers to a DRAFT GitHub release.
+# - Actions → Release → Run workflow: choose windows, macos, both, or
+#   draft-release (both installers, uploaded to a DRAFT GitHub release).
 #   Drafts are private until someone presses Publish.
+# - Fallback: push a branch named build/<something> (`build/windows`,
+#   `build/macos`, `build/draft-release`, anything else builds both).
+#
+# Pushing tags does not start it: pressing Publish creates the v* tag, and a
+# tag-triggered run could only fail against the release it just published.
 #
 # Nothing is published by branch builds or manual runs: installers are kept as
 # workflow artifacts. Signing switches on when the signing secrets exist.
@@ -25,7 +26,6 @@ on:
         default: windows
   push:
     branches: ['build/**']
-    tags: ['v*']
 
 permissions:
   contents: write
@@ -50,7 +50,7 @@ jobs:
           # build/draft-release: both installers, uploaded to the DRAFT release v<version> (no git tag
           # is created until someone presses Publish). Same effect as pushing a tag, minus the public tag.
           draft=no
-          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_REF" == refs/heads/build/draft-release || "$want" == draft-release ]]; then want=both; draft=yes; fi
+          if [[ "$GITHUB_REF" == refs/heads/build/draft-release || "$want" == draft-release ]]; then want=both; draft=yes; fi
           case "$want" in
             windows) m='["windows-2022"]' ;;
             macos) m='["macos-15"]' ;;
@@ -321,7 +321,7 @@ jobs:
         shell: bash
         run: |
           ver=$(node -p "require('./package.json').version")
-          gh release edit "v$ver" -R "$GITHUB_REPOSITORY" --notes "**DO NOT PUBLISH.** A build or test failed in $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Fix it and push build/draft-release again."
+          gh release edit "v$ver" -R "$GITHUB_REPOSITORY" --notes "**DO NOT PUBLISH.** A build or test failed in $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Fix it and run Release → draft-release again."
           echo "::error title=Draft release::Tests failed; the draft v$ver is marked DO NOT PUBLISH"; exit 1
       - name: Verify the draft's files and write its notes
         if: env.ALL_PASSED == 'true'

@@ -40,3 +40,34 @@ jobs:
         working-directory: beta-server
       - run: npx wrangler deploy --dry-run --outdir /tmp/beta-bundle
         working-directory: beta-server
+
+  # The Electron acceptance suites (real app, real mouse input) on Linux under a virtual
+  # display: handwriting, persistence, PDFs, the tutor against local fakes. About 5 minutes.
+  # The Release workflow runs the same suites on Windows and macOS.
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # Each suite separately, so one failure doesn't hide the others.
+      - { name: Phase 1, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "phase1" node tests/e2e/phase1.e2e.mjs }
+      - { name: Phase 2, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "phase2" node tests/e2e/phase2.e2e.mjs }
+      - { name: Regressions, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "regressions" node tests/e2e/regressions.e2e.mjs }
+      - { name: Phase 3, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "phase3" node tests/e2e/phase3.e2e.mjs }
+      - { name: Phase 4 (Gemini), if: always(), run: xvfb-run -a node scripts/ci-run.mjs "phase4" node tests/e2e/phase4.e2e.mjs }
+      - { name: Ollama, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "ollama" node tests/e2e/ollama.e2e.mjs }
+      - { name: Cloud beta, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "cloud" node tests/e2e/cloud.e2e.mjs }
+      - { name: Layout, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "layout" node tests/e2e/layout.e2e.mjs }
+      - { name: Release, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "release" node tests/e2e/release.e2e.mjs }
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results-acceptance-linux
+          path: test-results
+          if-no-files-found: ignore

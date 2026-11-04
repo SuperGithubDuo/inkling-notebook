@@ -4,15 +4,22 @@ name: AI server emergency switch
 # secret, which never leaves GitHub). Same as `npm run admin -- summary|pause|resume`
 # in beta-server/.
 #
-# Start one by pushing (creating) a branch from any branch:
-#   ops/summary  → usage (no identities): Neurons used in the last 24 h of the cap, today's use,
+# Start one with Actions → AI server emergency switch → Run workflow, choosing:
+#   summary  → usage (no identities): Neurons used in the last 24 h of the cap, today's use,
 #                  answers, installations, networks, paused or not. Read-only.
-#   ops/pause    → stop ALL AI answers now. The app says the AI is paused for
+#   pause    → stop ALL AI answers now. The app says the AI is paused for
 #                  maintenance; notebooks work as usual.
-#   ops/resume   → turn AI answers back on.
-# Delete the branch afterwards so it can be pushed again.
+#   resume   → turn AI answers back on.
+# Fallback: push a branch ops/summary, ops/pause or ops/resume (delete it afterwards).
 
 on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [summary, pause, resume]
+        default: summary
   push:
     branches: ['ops/pause', 'ops/resume', 'ops/summary']
 
@@ -33,12 +40,16 @@ jobs:
         env:
           URL: ${{ vars.INKLING_BETA_URL }}
           INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+          # Run workflow passes the choice; a pushed ops/<action> branch names it.
+          ACTION: ${{ inputs.action || github.ref_name }}
         run: |
+          ACTION=${ACTION#ops/}
+          case "$ACTION" in summary|pause|resume) ;; *) echo "::error title=AI server::Unknown action '$ACTION'."; exit 1 ;; esac
           [ -n "$URL" ] || { echo "::error title=AI server::Set the repository variable INKLING_BETA_URL first."; exit 1; }
           ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
           [ ${#ADMIN} -ge 32 ] || { echo "::error title=AI server::The INKLING_ADMIN_TOKEN secret is missing or too short."; exit 1; }
-          if [ "$GITHUB_REF_NAME" != ops/summary ]; then
-            if [ "$GITHUB_REF_NAME" = ops/pause ]; then paused=true; else paused=false; fi
+          if [ "$ACTION" != summary ]; then
+            if [ "$ACTION" = pause ]; then paused=true; else paused=false; fi
             code=$(curl -sS -o /tmp/res.json -w '%{http_code}' -X POST "$URL/admin/pause" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d "{\"paused\":$paused}")
             [ "$code" = 200 ] || { echo "::error title=AI server switch::The server answered $code."; exit 1; }
             now=$(curl -sS "$URL/v1/status" -H 'x-inkling-install: inst_operatorstatuscheck000000' | jq -r .paused)

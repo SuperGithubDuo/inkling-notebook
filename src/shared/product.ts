@@ -2,7 +2,6 @@
  * Product facts shown in the app (About, feedback, privacy). One place, so a
  * rename or a new support address is a one-line change.
  */
-export const PRODUCT_NAME = 'Inkling'
 export const REPO_URL = 'https://github.com/SuperGithubDuo/inkling-notebook'
 export const RELEASES_URL = `${REPO_URL}/releases`
 /**

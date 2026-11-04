@@ -7,7 +7,6 @@
 import { create } from 'zustand'
 import type { AiError, AiPart } from '@shared/ai'
 import { parseTaskResult, type CheckResult, type Difficulty, type PracticeSet } from '@shared/tutor'
-import { useStore } from '@/store/store'
 import { buildContext, hasSelection, type ContextKind } from './context'
 import { cancelAi, preflight, startAi } from './client'
 
@@ -166,9 +165,3 @@ export const usePractice = create<PracticeState>((set, get) => {
     }
   }
 })
-
-/** Puts a problem on the open canvas page as an editable text box, for working by hand. */
-export function hasCanvasPage(): boolean {
-  const s = useStore.getState()
-  return !!s.activePageId && !!s.pages[s.activePageId]
-}

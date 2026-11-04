@@ -13,7 +13,7 @@ name: Download site
 # safety net, and by hand. Release events run the workflow file at the release's tag, so they
 # only hand over to a fresh run on main ("relay"); everything is built and deployed from main.
 #
-# Switching it on (needs approval; see docs/maintainers/DOWNLOAD-SITE.md):
+# Switching it on (needs approval; see docs/RELEASING.md, "Download site"):
 #   Settings → Pages → Build and deployment → Source: "GitHub Actions".
 # That setting is the switch: until it is chosen, the site is only built and checked.
 # Kill switch: repository variable INKLING_SITE_ENABLED=false stops deploys.

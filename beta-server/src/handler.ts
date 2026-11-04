@@ -64,7 +64,7 @@ export interface Deps {
 const MIN_CHAT_TOKENS = 300
 /**
  * Output tokens a typical answer uses, per task: what an installation needs room for.
- * Measured with the real model (docs/live-results/cloud-qwen3.8-27b.md).
+ * Measured with the real model (docs/archive/live-results/cloud-qwen3.8-27b.md).
  */
 export const EXPECTED_OUTPUT_TOKENS: Record<AiRequest['task'], number> = { chat: 350, practice: 900, check: 180, annotate: 380 }
 

@@ -11,7 +11,7 @@ Status on 1 Nov 2026. What's done is listed first so this page stays the single 
 | PR [#2](https://github.com/SuperGithubDuo/inkling-notebook/pull/2): download experience → `beta-release` | CI green, merged (merge commit `d9211ff`) |
 | PR [#3](https://github.com/SuperGithubDuo/inkling-notebook/pull/3): Hermes's launch review and evidence → `beta-release` | CI green, merged (`2e37ec5`); Hermes's commit `3e1ab80` kept, his 34 files byte-identical |
 | PR [#4](https://github.com/SuperGithubDuo/inkling-notebook/pull/4): update `main` | Fast-forward `5c0f27d` → `2e37ec5`: no merge commit, no rewritten history. CI and *Download site* green on `main` |
-| Draft-release checks from `main` | See [READINESS.md](../READINESS.md#beta-2-for-510-invited-testers): run started with *Run workflow* on `main` |
+| Draft-release checks from `main` | See [READINESS.md](READINESS.md#beta-2-for-510-invited-testers): run started with *Run workflow* on `main` |
 
 ## Waiting for you
 
@@ -23,7 +23,7 @@ Done: Pages is on, and *Download site* deploys from `main` (first deploy run [41
 
 ### 2. Feedback form (before inviting testers)
 
-Create the no-sign-in form from [HERMES-FEEDBACK-FORM.md](../HERMES-FEEDBACK-FORM.md) and set the repository **variable** `INKLING_FEEDBACK_URL`. The site then shows a *Send feedback* button; installers pick it up only when the draft is rebuilt (*Actions → Release → Run workflow → draft-release*).
+Create the no-sign-in form from [HERMES-FEEDBACK-FORM.md](HERMES-FEEDBACK-FORM.md) and set the repository **variable** `INKLING_FEEDBACK_URL`. The site then shows a *Send feedback* button; installers pick it up only when the draft is rebuilt (*Actions → Release → Run workflow → draft-release*).
 
 ### 3. Publish a release (the approval that makes downloads live)
 

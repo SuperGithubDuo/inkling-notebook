@@ -52,7 +52,7 @@ main ──●──●──●──●──────────●──
 | Workflow | File | Status | Proposal |
 |---|---|---|---|
 | CI | `ci.yml` | Runs on `main` pushes and PRs | Keep |
-| Release | `release.yml` | Builds, tests and drafts releases | Keep. This branch adds strict verification of the draft before it can be marked ready (see [DOWNLOAD-SITE.md](DOWNLOAD-SITE.md)) |
+| Release | `release.yml` | Builds, tests and drafts releases | Keep. This branch adds strict verification of the draft before it can be marked ready (see [DOWNLOAD-SITE.md](../RELEASING.md#download-site)) |
 | Beta AI server | `beta-server.yml` | Deploys the Cloudflare Worker | Keep (deployment automation) |
 | AI server emergency switch | `beta-server-ops.yml` | Pause / resume / summary | Keep |
 | Cloudflare AI diagnostics | `cloudflare-diagnostics.yml` | Read-only checks | Keep |

@@ -3,7 +3,7 @@
 This page is for people who build Inkling from source. **To use Inkling you don't need any of this:** download the installer from the [download page](https://supergithubduo.github.io/inkling-notebook/) instead.
 
 - [Requirements](#requirements) · [Install and run](#install-and-run) · [Testing](#testing) · [Continuous integration](#continuous-integration)
-- Related: [Architecture](ARCHITECTURE.md) · [AI providers](AI-PROVIDERS.md) · [Building and releasing](RELEASING.md) · [Known limitations](KNOWN-LIMITATIONS.md)
+- Related: [Architecture](ARCHITECTURE.md) · [AI providers](AI.md) · [Building and releasing](RELEASING.md) · [Known limitations](USER-GUIDE.md#known-limitations)
 
 ## Requirements
 
@@ -56,7 +56,7 @@ With Ollama running and a model installed (`ollama pull qwen3-vl:4b-instruct`):
 - `npm run test:live` sends the handwriting scenarios through Inkling's own AI service with the exact images the app sends (`tests/fixtures/handwriting/`): **A** x² + 5x + 6 = 0 factorised correctly but solved as x = 2, 3 (should be −2, −3); **B** a correct linear equation; **C** a free-body diagram; **D** a question about a note; **E** a question about PDF text; and practice problems with answer checking. Each check (reading, correctness, streaming, schema validation) is recorded with its timing in `test-results/live-ollama-<model>.md`; a wrong answer is reported, not hidden.
 - `npm run build && npm run test:live:app` does the whole on-page workflow in the app: write scenario A, ask, *Show this on my page*, preview, approve, undo, redo and edit, writing `test-results/live-app-<model>.md` and screenshots.
 
-Set `INKLING_LIVE_MODEL=qwen3-vl:2b-instruct` (or any installed vision model) to test another model. Both skip when Ollama or the model isn't there. The fixture images are drawn with the test suite's pen-stroke font, so they are clean; real student handwriting should also be tried by hand (see [`windows-validation.md`](windows-validation.md)).
+Set `INKLING_LIVE_MODEL=qwen3-vl:2b-instruct` (or any installed vision model) to test another model. Both skip when Ollama or the model isn't there. The fixture images are drawn with the test suite's pen-stroke font, so they are clean; real student handwriting should also be tried by hand (see [`windows-validation.md`](archive/windows-validation.md)).
 
 ### Real Gemini smoke test (optional)
 
@@ -93,9 +93,9 @@ Each step is one or two requests, well inside the free per-minute limits.
 
 ## Continuous integration
 
-- **CI** (`.github/workflows/ci.yml`) runs the typecheck, unit tests, the production build and the AI server's typecheck and bundle on every push to `main` and on every pull request.
+- **CI** (`.github/workflows/ci.yml`) runs on every push to `main` and on every pull request: the typecheck, unit tests, the production build and the AI server's typecheck and bundle, and, in parallel, the Electron acceptance suites on Linux under a virtual display (about 5 minutes; screenshots are uploaded when a suite fails).
 - **Release** (`.github/workflows/release.yml`) builds the Windows and macOS installers on real GitHub-hosted Windows and macOS machines and runs every acceptance suite there, plus a packaged-app smoke test and an install → update → uninstall → reinstall check. See [RELEASING.md](RELEASING.md).
-- **Download site** (`.github/workflows/pages.yml`) rebuilds the download page from the newest approved release. See [maintainers/DOWNLOAD-SITE.md](maintainers/DOWNLOAD-SITE.md).
+- **Download site** (`.github/workflows/pages.yml`) rebuilds the download page from the newest approved release. See [Download site](RELEASING.md#download-site).
 
 On a headless Linux machine run the e2e suite under a virtual display: `xvfb-run -a npm run test:e2e`. Each run uses a fresh temporary data folder and writes screenshots to `test-results/` (override with `SHOTS=…`).
 

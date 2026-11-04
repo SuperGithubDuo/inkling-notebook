@@ -1,6 +1,6 @@
 # Phase 4.5 notes (Windows stabilisation)
 
-Kept for history. Written during the Phase 4.5 Windows stabilisation; current status is in [READINESS.md](../READINESS.md).
+Kept for history. Written during the Phase 4.5 Windows stabilisation; current status is in [READINESS.md](READINESS.md).
 
 - **Clean install** — Electron 45 stopped downloading its binary on install; `postinstall` now does it (see *Install and run* in [DEVELOPMENT.md](../DEVELOPMENT.md#install-and-run)).
 - **PDF unit tests on Windows** — the tests passed pdf.js a backslash path for its fonts; they now use a forward-slash path with a trailing `/` (`tests/support/pdfjsData.mjs`). App code was not affected.
