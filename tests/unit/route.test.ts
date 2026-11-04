@@ -18,7 +18,8 @@ import { CLOUD_MODEL, type AiPart, type AiRequest, type AiTurn } from '../../src
 const GEMMA = '@cf/google/gemma-4-26b-a4b-it'
 const GEMMA_RATES = { inputPerM: 9091, outputPerM: 27273 }
 const MAIN = { model: CLOUD_MODEL, rates: RATES, reasoningEffort: 'low', disableThinking: true }
-const TEXT = { model: GEMMA, rates: GEMMA_RATES }
+const TEXT = { model: GEMMA, rates: GEMMA_RATES, tasks: ['chat', 'practice', 'check'] as const }
+const DEFAULT_TEXT = { model: GEMMA, rates: GEMMA_RATES }
 
 const image: AiPart = { image: { mimeType: 'image/jpeg', data: '/9j/4AAQSkZJRgABAQ' } }
 const text = (t: string): AiPart => ({ text: t })
@@ -34,6 +35,13 @@ describe('routing rule', () => {
     for (const task of ['chat', 'practice', 'check'] as const) {
       expect(chooseModel(task, ask(text('<note>Calvin cycle</note> Where does it happen?')), MAIN, TEXT)).toEqual({ route: 'text', model: GEMMA, rates: GEMMA_RATES, reasoningEffort: '', disableThinking: true })
     }
+  })
+
+  it('by default the text model answers only practice sets and typed answer checks, never chat', () => {
+    expect(chooseModel('practice', ask(text('Two problems')), MAIN, DEFAULT_TEXT).model).toBe(GEMMA)
+    expect(chooseModel('check', ask(text('Student answer (typed): x = 4')), MAIN, DEFAULT_TEXT).model).toBe(GEMMA)
+    expect(chooseModel('chat', ask(text('I got 11/15. Is that right?')), MAIN, DEFAULT_TEXT).model).toBe(CLOUD_MODEL)
+    expect(chooseModel('chat', ask(text('hi')), MAIN, { ...TEXT, tasks: ['practice'] }).model).toBe(CLOUD_MODEL)
   })
 
   it('keeps markup on the main model, even without an image', () => {
@@ -127,11 +135,18 @@ describe('routing rule', () => {
       expect(textModelFrom({ MODEL_TEXT: 'gpt-4o', TEXT_INPUT_NEURONS_PER_M: '1', TEXT_OUTPUT_NEURONS_PER_M: '1' }, CLOUD_MODEL)).toBeNull()
       expect(textModelFrom({ MODEL_TEXT: 'https://example.com/m', TEXT_INPUT_NEURONS_PER_M: '1', TEXT_OUTPUT_NEURONS_PER_M: '1' }, CLOUD_MODEL)).toBeNull()
       expect(textModelFrom({ MODEL_TEXT: CLOUD_MODEL, TEXT_INPUT_NEURONS_PER_M: '1', TEXT_OUTPUT_NEURONS_PER_M: '1' }, CLOUD_MODEL)).toBeNull()
-      expect(textModelFrom({ MODEL_TEXT: ` ${GEMMA} `, TEXT_INPUT_NEURONS_PER_M: '9091', TEXT_OUTPUT_NEURONS_PER_M: '27273' }, CLOUD_MODEL)).toEqual(TEXT)
+      expect(textModelFrom({ MODEL_TEXT: ` ${GEMMA} `, TEXT_INPUT_NEURONS_PER_M: '9091', TEXT_OUTPUT_NEURONS_PER_M: '27273' }, CLOUD_MODEL)).toEqual({ ...DEFAULT_TEXT, tasks: ['practice', 'check'] })
+    })
+    it('TEXT_MODEL_TASKS picks the tasks; markup and unknown names are ignored', () => {
+      const env = { MODEL_TEXT: GEMMA, TEXT_INPUT_NEURONS_PER_M: '9091', TEXT_OUTPUT_NEURONS_PER_M: '27273' }
+      expect(textModelFrom({ ...env, TEXT_MODEL_TASKS: 'chat, practice,check' }, CLOUD_MODEL)?.tasks).toEqual(['chat', 'practice', 'check'])
+      expect(textModelFrom({ ...env, TEXT_MODEL_TASKS: 'annotate,check,bogus' }, CLOUD_MODEL)?.tasks).toEqual(['check'])
+      expect(textModelFrom({ ...env, TEXT_MODEL_TASKS: 'annotate' }, CLOUD_MODEL)?.tasks).toEqual(['practice', 'check'])
     })
     it('the shipped wrangler.jsonc leaves it off', async () => {
       const raw = await readFile(join(import.meta.dirname, '../../beta-server/wrangler.jsonc'), 'utf8')
       expect(raw).toMatch(/"MODEL_TEXT":\s*""/)
+      expect(raw).toMatch(/"TEXT_MODEL_TASKS":\s*"practice,check"/)
     })
   })
 })

@@ -76,7 +76,10 @@ export function registerTextScenarios({ run, check, timeout = 900_000 }: Scenari
     check(b, 'does not give away 11/15', !/11\/15/.test(flatMath(b.text)), b.text.slice(0, 300))
     const c = await say('I got 11/15. Is that right?')
     check(c, 'answered', c.ok, c.error)
-    check(c, 'confirms 11/15 is correct', /(correct|right|well done|exactly|yes)/i.test(c.text) && !claimsMistake(c.text), c.text.slice(0, 200))
+    // 11/15 IS right: the answer must say so plainly, and must not send the student back to re-check.
+    const opening = c.text.trim().split(/(?<=[.!?])\s/)[0] ?? ''
+    check(c, 'confirms 11/15 is correct (first sentence)', /\b(yes|correct|right|well done|exactly|spot on)\b/i.test(opening) && !/\b(close|almost|not quite)\b/i.test(opening), opening)
+    check(c, 'does not ask a correct student to re-check', !/(take (a )?(second|another) look|double-check your|re-?check|very close|almost there|not quite)/i.test(c.text) && !claimsMistake(c.text), c.text.slice(0, 200))
   })
 
   it('J: corrects a wrong worked example in PDF text', { timeout }, async () => {

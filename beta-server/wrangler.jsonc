@@ -40,10 +40,12 @@
     "STRUCTURED": "prompt",
     "IMAGE_PATCH": "28",
     // Text-only routing (src/route.ts), OFF while MODEL_TEXT is empty. To turn it on, set
-    // MODEL_TEXT to "@cf/google/gemma-4-26b-a4b-it" with its prices, 9091 and 27273 Neurons per M.
+    // MODEL_TEXT to "@cf/google/gemma-4-26b-a4b-it" (prices below, Neurons per M).
     // Requests with any handwriting context stay on MODEL either way.
     "MODEL_TEXT": "",
     "TEXT_INPUT_NEURONS_PER_M": "9091",
-    "TEXT_OUTPUT_NEURONS_PER_M": "27273"
+    "TEXT_OUTPUT_NEURONS_PER_M": "27273",
+    // Which text-only tasks it may answer. Chat is left out on purpose (see src/route.ts).
+    "TEXT_MODEL_TASKS": "practice,check"
   }
 }

@@ -45,7 +45,7 @@ export interface BetaServerOptions {
   structured?: 'json_schema' | 'prompt'
   imagePatch?: number
   /** The text-only model for requests without handwriting context (beta-server/src/route.ts). */
-  textModel?: { model: string; rates: { inputPerM: number; outputPerM: number } } | null
+  textModel?: { model: string; rates: { inputPerM: number; outputPerM: number }; tasks?: readonly ('chat' | 'practice' | 'check')[] } | null
   port?: number
 }
 export interface RecordedRequest {

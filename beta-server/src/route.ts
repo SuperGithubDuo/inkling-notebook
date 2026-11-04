@@ -4,8 +4,9 @@
  *
  *   - anything that involves handwriting goes to the main model (MODEL, Qwen 3.8 27B),
  *     exactly as before;
- *   - a request with no handwriting context at all may go to the text model
- *     (MODEL_TEXT, e.g. Gemma 4 26B A4B), with thinking off.
+ *   - a request with no handwriting context at all, for a task listed in
+ *     TEXT_MODEL_TASKS (default: practice sets and typed answer checks), may go
+ *     to the text model (MODEL_TEXT, e.g. Gemma 4 26B A4B), with thinking off.
  *
  * "Handwriting context" is decided conservatively, from the request alone:
  *   - any image part in any turn (the current question or an earlier one);
@@ -37,9 +38,20 @@ export interface ModelChoice {
   disableThinking: boolean
 }
 
+/** Tasks the text model may answer. Markup ('annotate') never: it always reads handwriting. */
+export type TextTask = 'chat' | 'practice' | 'check'
+/**
+ * Default when MODEL_TEXT is set without TEXT_MODEL_TASKS: the structured tasks only. In the live
+ * evaluation (4 Nov 2026) Gemma's practice sets and typed answer checks were right every time, but
+ * in a typed chat it told a student with a correct answer (11/15) to "take a second look".
+ */
+export const DEFAULT_TEXT_TASKS: readonly TextTask[] = ['practice', 'check']
+
 export interface TextModelConfig {
   model: string
   rates: Rates
+  /** Which tasks it may answer (default DEFAULT_TEXT_TASKS). */
+  tasks?: readonly TextTask[]
 }
 
 /** True when the request depends on handwriting the text model can't be trusted to read. */
@@ -57,7 +69,8 @@ export function chooseModel(
   main: { model: string; rates: Rates; reasoningEffort: string; disableThinking: boolean },
   text?: TextModelConfig | null
 ): ModelChoice {
-  if (!text || needsMainModel(task, turns)) return { route: 'image', ...main }
+  const tasks: readonly string[] = text?.tasks ?? DEFAULT_TEXT_TASKS
+  if (!text || !tasks.includes(task) || needsMainModel(task, turns)) return { route: 'image', ...main }
   // Thinking off and no reasoning effort: the settings the benchmark measured (docs/benchmarks/).
   return { route: 'text', model: text.model, rates: text.rates, reasoningEffort: '', disableThinking: true }
 }
@@ -66,11 +79,16 @@ export function chooseModel(
  * The text model from the Worker's settings, or null (the rule is off). Off unless
  * MODEL_TEXT names a Workers AI model and both its prices are positive numbers.
  */
-export function textModelFrom(env: { MODEL_TEXT?: string; TEXT_INPUT_NEURONS_PER_M?: string; TEXT_OUTPUT_NEURONS_PER_M?: string }, mainModel: string): TextModelConfig | null {
+export function textModelFrom(env: { MODEL_TEXT?: string; TEXT_INPUT_NEURONS_PER_M?: string; TEXT_OUTPUT_NEURONS_PER_M?: string; TEXT_MODEL_TASKS?: string }, mainModel: string): TextModelConfig | null {
   const model = (env.MODEL_TEXT ?? '').trim()
   if (!model || model === mainModel || !/^@cf\/[a-z0-9._-]+\/[a-z0-9._-]+$/i.test(model)) return null
   const inputPerM = Number(env.TEXT_INPUT_NEURONS_PER_M)
   const outputPerM = Number(env.TEXT_OUTPUT_NEURONS_PER_M)
   if (!(Number.isFinite(inputPerM) && inputPerM > 0 && Number.isFinite(outputPerM) && outputPerM > 0)) return null
-  return { model, rates: { inputPerM, outputPerM } }
+  // TEXT_MODEL_TASKS: a comma-separated subset of chat, practice, check; unknown names are ignored.
+  const named = (env.TEXT_MODEL_TASKS ?? '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter((t): t is TextTask => t === 'chat' || t === 'practice' || t === 'check')
+  return { model, rates: { inputPerM, outputPerM }, tasks: named.length ? [...new Set(named)] : DEFAULT_TEXT_TASKS }
 }

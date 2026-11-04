@@ -40,6 +40,8 @@ export interface Env {
   MODEL_TEXT?: string
   TEXT_INPUT_NEURONS_PER_M?: string
   TEXT_OUTPUT_NEURONS_PER_M?: string
+  /** Tasks the text model may answer: a comma-separated subset of chat, practice, check (default practice,check). */
+  TEXT_MODEL_TASKS?: string
   /** Secret (wrangler secret put ADMIN_TOKEN): the operator's pause switch and summary. Without it the admin API is off. */
   ADMIN_TOKEN?: string
 }

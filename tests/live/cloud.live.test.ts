@@ -66,7 +66,9 @@ const TEXT_MODEL = (() => {
   const [i, o] = (env.INKLING_LIVE_TEXT_RATES ?? '').split(',').map(Number)
   if (!model) return null
   if (!(i !== undefined && o !== undefined && i > 0 && o > 0)) throw new Error('INKLING_LIVE_TEXT_RATES must be set with INKLING_LIVE_TEXT_MODEL')
-  return { model, rates: { inputPerM: i, outputPerM: o } }
+  // INKLING_LIVE_TEXT_TASKS: which tasks it may answer (default: the server's, practice and check).
+  const tasks = (env.INKLING_LIVE_TEXT_TASKS ?? '').split(',').map((t) => t.trim()).filter((t) => t === 'chat' || t === 'practice' || t === 'check') as Array<'chat' | 'practice' | 'check'>
+  return { model, rates: { inputPerM: i, outputPerM: o }, ...(tasks.length ? { tasks } : {}) }
 })()
 /** Which scenarios run: "all" (default), "core" (the original 13 answers) or "text" (scenarios-text.ts only). */
 const SCENARIOS = env.INKLING_LIVE_SCENARIOS === 'core' || env.INKLING_LIVE_SCENARIOS === 'text' ? env.INKLING_LIVE_SCENARIOS : 'all'
