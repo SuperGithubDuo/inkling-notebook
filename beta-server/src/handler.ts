@@ -28,6 +28,7 @@ import { aiRequestSchema, type AiRequest } from '../../src/shared/ai'
 import { taskSpec } from '../../src/main/ai/prompts'
 import { UPSTREAM_RETRY_MS, type Identity, type Ledger, type Quota, type RefusalCode } from './ledger'
 import { classifyUpstream, estimateInputTokens, neuronsFor, parseUpstream, readSse, toMessages, type Rates, type Usage } from './upstream'
+import { chooseModel, type TextModelConfig } from './route'
 
 /** The parts of the Workers AI binding the server uses. */
 export interface AiBinding {
@@ -50,6 +51,11 @@ export interface ServerConfig {
   /** Largest accepted request, in estimated input tokens. */
   maxInputTokens: number
   adminTokenHash: string | null
+  /**
+   * The text-only model (route.ts): requests with no handwriting context go to it. Unset: every
+   * request goes to `model`, exactly as before (the default).
+   */
+  textModel?: TextModelConfig | null
 }
 
 export interface Deps {
@@ -190,8 +196,11 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   const spec = taskSpec(body.task, 'cloud')
   const inputTokens = estimateInputTokens(spec.system, body.turns, config.imagePatch)
   if (inputTokens > config.maxInputTokens) return tooLarge()
-  const outRate = config.rates.outputPerM / 1e6
-  const inputCost = inputTokens * (config.rates.inputPerM / 1e6)
+  // Handwriting context → the main model, as always; text only → the text model, if one is set.
+  const choice = chooseModel(body.task, body.turns, { model: config.model, rates: config.rates, reasoningEffort: config.reasoningEffort, disableThinking: config.disableThinking }, config.textModel)
+  const hasImage = body.turns.some((t) => t.parts.some((p) => 'image' in p))
+  const outRate = choice.rates.outputPerM / 1e6
+  const inputCost = inputTokens * (choice.rates.inputPerM / 1e6)
 
   // Reserve the worst case against the service's cap; the installation and network need room for a typical answer.
   // Near the cap a chat answer may be shortened to fit; a structured answer can't be.
@@ -214,8 +223,8 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     messages: toMessages(spec.system, body.turns),
     max_completion_tokens: maxTokens,
     ...(spec.temperature !== undefined ? { temperature: spec.temperature } : {}),
-    ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
-    ...(config.disableThinking ? { chat_template_kwargs: { enable_thinking: false } } : {})
+    ...(choice.reasoningEffort ? { reasoning_effort: choice.reasoningEffort } : {}),
+    ...(choice.disableThinking ? { chat_template_kwargs: { enable_thinking: false } } : {})
   }
   const useJsonMode = !!spec.jsonSchema && config.structured === 'json_schema'
   if (useJsonMode) inputs.response_format = { type: 'json_schema', json_schema: spec.jsonSchema }
@@ -225,13 +234,14 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   const startedAt = now()
   let upstream: unknown
   try {
-    upstream = await deps.ai.run(config.model, inputs)
+    upstream = await deps.ai.run(choice.model, inputs)
   } catch (err) {
     const { kind, detail } = classifyUpstream(err)
     // The kind only: an error message could in principle quote what was sent.
     console.warn('workers-ai error', kind)
     // An error before any answer: the model did no work, except possibly for capacity errors mid-way (not knowable): charge nothing.
     await ledger.settle(reservationId, undefined, { failedBeforeModel: true, upstreamExhausted: kind === 'free_allocation' })
+    await ledger.record({ model: choice.model, route: choice.route, task: body.task, image: hasImage, neurons: 0, error: kind })
     return upstreamProblem(kind)
   }
 
@@ -281,8 +291,10 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     }
     // Unknown usage: estimate from what was produced, never below the input estimate; and never above the reservation.
     // A stream stopped early has no usage report, and the model may have run on a little: charge the reservation.
-    const cost = usage ? neuronsFor(usage, config.rates) : clientGone || (failed && !text) ? reserved : Math.min(reserved, inputCost + ((text.length + reasoningChars) / 3) * outRate)
+    const cost = usage ? neuronsFor(usage, choice.rates) : clientGone || (failed && !text) ? reserved : Math.min(reserved, inputCost + ((text.length + reasoningChars) / 3) * outRate)
     await ledger.settle(reservationId, cost)
+    // Counts only (no content, no identity): which model, what kind of request, its cost, whether it failed.
+    await ledger.record({ model: choice.model, route: choice.route, task: body.task, image: hasImage, neurons: cost, error: failed && !text ? 'stream' : undefined })
     const quota = await ledger.quota(id)
     if (failed && !text) {
       await send('error', { code: 'server', message: 'The model stopped before answering. Try again in a moment.', quota })

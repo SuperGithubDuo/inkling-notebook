@@ -88,6 +88,38 @@ interface Day {
   upstreamExhausted?: boolean
   /** When Cloudflare last reported the free allocation used up. Answers stop for UPSTREAM_RETRY_MS, then are tried again. */
   upstreamExhaustedAt?: number
+  /** Today's counts per model (record()). Counts only: no content, no identity. */
+  models?: Record<string, ModelStats>
+}
+
+/** One model's day: requests, what kind they were, Neurons, and failures. No content, no identity. */
+export interface ModelStats {
+  requests: number
+  /** Requests carrying a handwriting image somewhere in the conversation. */
+  image: number
+  text: number
+  /** Sent to this model because of the routing rule: 'image' = main model, 'text' = text model. */
+  routes: Record<string, number>
+  tasks: Record<string, number>
+  neurons: number
+  errors: number
+  errorKinds: Record<string, number>
+}
+
+/** What the handler reports after each model call. */
+export interface UsageRecord {
+  model: string
+  route: 'image' | 'text'
+  task: string
+  image: boolean
+  neurons: number
+  /** The upstream error kind, when the call failed. */
+  error?: string
+}
+
+const emptyStats = (): ModelStats => ({ requests: 0, image: 0, text: 0, routes: {}, tasks: {}, neurons: 0, errors: 0, errorKinds: {} })
+const bump = (m: Record<string, number>, k: string): void => {
+  m[k] = (m[k] ?? 0) + 1
 }
 
 /**
@@ -191,6 +223,8 @@ export class Ledger {
       for (const prefix of ['i:', 'n:']) for (const key of await this.storage.list(prefix)) await this.storage.delete(key)
       // Leftovers from the access-code version of this server.
       for (const key of ['usage', 'testers']) await this.storage.delete(key)
+      // Keep the finished day's per-model counts (counts only) so the operator can read a whole day.
+      if (this.dayState?.models) await this.storage.put('modelsPrev', { day: this.dayState.day, models: this.dayState.models })
       this.dayState = { day, salt: randomHex(32), global: 0, requests: 0 }
       await this.storage.put('day', this.dayState)
       this.recent.clear()
@@ -412,8 +446,45 @@ export class Ledger {
     })
   }
 
+  /** Adds one model call to today's per-model counts. */
+  record(r: UsageRecord): Promise<void> {
+    return this.exclusive(async () => {
+      const day = await this.today()
+      day.models ??= {}
+      const m = (day.models[r.model] ??= emptyStats())
+      m.requests++
+      if (r.image) m.image++
+      else m.text++
+      bump(m.routes, r.route)
+      bump(m.tasks, r.task)
+      m.neurons += Math.max(0, r.neurons)
+      if (r.error) {
+        m.errors++
+        bump(m.errorKinds, r.error)
+      }
+      await this.storage.put('day', day)
+    })
+  }
+
+  /** Per-model counts for today and the previous day, with Neurons per answer and the capacity they imply. */
+  private async modelReport(day: Day): Promise<{ today: Record<string, ModelStats & { neuronsPerAnswer: number | null }>; previous: { day: string; models: Record<string, ModelStats> } | null; estimatedCapacity: number | null }> {
+    const models = day.models ?? {}
+    const today: Record<string, ModelStats & { neuronsPerAnswer: number | null }> = {}
+    let n = 0
+    let answered = 0
+    for (const [k, v] of Object.entries(models)) {
+      const ok = v.requests - v.errors
+      today[k] = { ...v, neurons: Math.round(v.neurons * 10) / 10, neuronsPerAnswer: ok > 0 ? Math.round((v.neurons / ok) * 10) / 10 : null }
+      n += v.neurons
+      answered += ok
+    }
+    const previous = (await this.storage.get<{ day: string; models: Record<string, ModelStats> }>('modelsPrev')) ?? null
+    // Today's mix at today's cost per answer: roughly how many answers the daily cap allows.
+    return { today, previous, estimatedCapacity: answered > 0 && n > 0 ? Math.floor(this.limits.globalDailyNeurons / (n / answered)) : null }
+  }
+
   /** Today's totals for the operator; no identities. */
-  summary(): Promise<{ day: string; globalUsed: number; globalLimit: number; todayUsed: number; answers: number; installations: number; networks: number; answering: number; upstreamExhausted: boolean; paused: boolean; limits: LedgerLimits }> {
+  summary(): Promise<{ day: string; globalUsed: number; globalLimit: number; todayUsed: number; answers: number; installations: number; networks: number; answering: number; upstreamExhausted: boolean; paused: boolean; limits: LedgerLimits; models: Awaited<ReturnType<Ledger['modelReport']>> }> {
     return this.exclusive(async () => {
       const day = await this.today()
       await this.expire(day)
@@ -430,7 +501,8 @@ export class Ledger {
         answering: open.length,
         upstreamExhausted: this.upstreamBlocked(day),
         paused: await this.isPaused(),
-        limits: this.limits
+        limits: this.limits,
+        models: await this.modelReport(day)
       }
     })
   }

@@ -9,7 +9,8 @@
  */
 import { DurableObject } from 'cloudflare:workers'
 import { handle, sha256Hex, type ServerConfig } from './handler'
-import { Ledger, type Identity, type LedgerLimits, type Quota, type ReserveResult } from './ledger'
+import { Ledger, type Identity, type LedgerLimits, type Quota, type ReserveResult, type UsageRecord } from './ledger'
+import { textModelFrom } from './route'
 
 export interface Env {
   AI: Ai
@@ -32,6 +33,13 @@ export interface Env {
   STRUCTURED: string
   IMAGE_PATCH: string
   MAX_INPUT_TOKENS: string
+  /**
+   * The text-only model (route.ts). Empty (the default): every request goes to MODEL, as before.
+   * Set it with both prices to send requests with no handwriting context to it.
+   */
+  MODEL_TEXT?: string
+  TEXT_INPUT_NEURONS_PER_M?: string
+  TEXT_OUTPUT_NEURONS_PER_M?: string
   /** Secret (wrangler secret put ADMIN_TOKEN): the operator's pause switch and summary. Without it the admin API is off. */
   ADMIN_TOKEN?: string
 }
@@ -82,6 +90,9 @@ export class LedgerObject extends DurableObject<Env> {
     this.ledger.useLimits(l)
     return this.ledger.quota(id)
   }
+  record(r: UsageRecord): Promise<void> {
+    return this.ledger.record(r)
+  }
   isPaused(): Promise<boolean> {
     return this.ledger.isPaused()
   }
@@ -110,7 +121,8 @@ export default {
       imagePatch: Number(env.IMAGE_PATCH) || 28,
       maxBodyBytes: 3_500_000,
       maxInputTokens: Number(env.MAX_INPUT_TOKENS) || 12_000,
-      adminTokenHash: env.ADMIN_TOKEN && env.ADMIN_TOKEN.length >= 32 ? await sha256Hex(env.ADMIN_TOKEN) : null
+      adminTokenHash: env.ADMIN_TOKEN && env.ADMIN_TOKEN.length >= 32 ? await sha256Hex(env.ADMIN_TOKEN) : null,
+      textModel: textModelFrom(env, env.MODEL)
     }
     // The stub's methods match Ledger's (RPC returns plain data); each call carries this version's limits.
     const l = limits(env)
@@ -119,6 +131,7 @@ export default {
       quota: (id: Identity) => stub.quota(id, l),
       summary: () => stub.summary(l),
       settle: (id: string, n: number | undefined, o?: { upstreamExhausted?: boolean; failedBeforeModel?: boolean }) => stub.settle(id, n, o),
+      record: (r: UsageRecord) => stub.record(r),
       isPaused: () => stub.isPaused(),
       setPaused: (p: boolean) => stub.setPaused(p)
     } as unknown as Ledger
