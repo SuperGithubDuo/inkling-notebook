@@ -204,6 +204,12 @@ export interface ExternalOptions {
    * extras can't widen it). Unknown or unreviewed hosts are never routed to.
    */
   onlyProviders?: string[]
+  /**
+   * OpenRouter free: let the request reach hosts that may store or train on prompts
+   * (data_collection "allow"). ONLY for a test Worker, or once users have opted in to a notice that
+   * says so. The $0 ceiling, no-fallback rule and provider.only stay locked either way.
+   */
+  allowDataCollection?: boolean
   fetch?: typeof fetch
   sleep?: (ms: number) => Promise<void>
   random?: () => number
@@ -382,6 +388,7 @@ export function externalProvider(opts: ExternalOptions): AiBinding {
     async run(model, inputs, hooks) {
       const built = toProviderBody(preset, model, inputs, opts.extraBody)
       if (opts.onlyProviders?.length) built.provider = { ...((built.provider as object) ?? {}), only: [...opts.onlyProviders] }
+      if (opts.allowDataCollection && built.provider && typeof built.provider === 'object') (built.provider as Record<string, unknown>).data_collection = 'allow'
       const body = JSON.stringify(built)
       const streamed = inputs.stream === true
       let waited = 0

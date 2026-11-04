@@ -252,4 +252,31 @@ describe('OpenRouter Free configuration', () => {
     await ai.run('google/gemma-4-31b-it:free', { messages: [{ role: 'user', content: 'hi' }], max_completion_tokens: 10 })
     expect(sent.provider).toMatchObject({ only: ['google-ai-studio'], data_collection: 'deny', allow_fallbacks: false, max_price: { prompt: 0, completion: 0, request: 0, image: 0 } })
   })
+
+  it('provider data collection: off by default; on only with a disclosing notice, and the $0 lock is unchanged', async () => {
+    const off = inference(env())
+    if (typeof off === 'string') throw new Error(off)
+    expect(inference(env({ ALLOW_PROVIDER_DATA_COLLECTION: 'true' }))).toMatch(/TRAINING_NOTICE_VERSION/)
+    const on = inference(env({ ALLOW_PROVIDER_DATA_COLLECTION: 'true', TRAINING_NOTICE_VERSION: '6', MIN_NOTICE_VERSION: '4' }))
+    if (typeof on === 'string') throw new Error(on)
+    // A lower MIN_NOTICE_VERSION can't let an app whose notice doesn't disclose training reach it.
+    expect(on.minNotice).toBe(6)
+    const { externalProvider } = await import('../../beta-server/src/provider')
+    let sent: any
+    const ai = externalProvider({
+      id: 'openrouter-free',
+      apiKey: 'k',
+      onlyProviders: ['nvidia'],
+      allowDataCollection: true,
+      extraBody: { provider: { max_price: { prompt: 5 }, allow_fallbacks: true, only: ['x'] }, models: ['openai/gpt-5'] },
+      fetch: (async (_u: string, init: any) => {
+        sent = JSON.parse(init.body)
+        return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { headers: { 'content-type': 'application/json' } })
+      }) as any
+    })
+    await ai.run('nvidia/nemotron-3.5-super-vl:free', { messages: [{ role: 'user', content: 'hi' }], max_completion_tokens: 10 })
+    expect(sent.model).toBe('nvidia/nemotron-3.5-super-vl:free')
+    expect(sent).not.toHaveProperty('models')
+    expect(sent.provider).toEqual({ data_collection: 'allow', allow_fallbacks: false, max_price: { prompt: 0, completion: 0, request: 0, image: 0 }, only: ['nvidia'] })
+  })
 })

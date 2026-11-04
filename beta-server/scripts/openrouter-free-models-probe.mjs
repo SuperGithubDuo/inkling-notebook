@@ -44,7 +44,9 @@ const getJson = async (path, withKey = true) => {
   }
 }
 const ZERO = { prompt: 0, completion: 0, request: 0, image: 0 }
-const lock = (only) => ({ only, allow_fallbacks: false, max_price: ZERO, data_collection: 'deny' })
+// DATA_COLLECTION=allow (test only): hosts that may store or train on prompts are reachable; nothing else changes.
+const DATA_COLLECTION = process.env.DATA_COLLECTION === 'allow' ? 'allow' : 'deny'
+const lock = (only) => ({ only, allow_fallbacks: false, max_price: ZERO, data_collection: DATA_COLLECTION })
 
 async function stream(b) {
   const started = Date.now()
@@ -115,7 +117,10 @@ const MATH = '<page>\n3(x + 4) = 18\n3x + 4 = 18\n3x = 14\nx = 14/3\n</page>\nCh
 const mathOk = (s) => /distribut|3\s*[·×*x]?\s*4|12/i.test(s) && /x\s*=\s*2\b|x=2\b/.test(s.replace(/\$/g, ''))
 const IMG_Q = 'The attached image shows the part of my page I selected (handwriting). Check my work. Find the first mistake, if any, explain why it is wrong and how to fix it.'
 // Fixture A: x² + 5x + 6 = 0 → (x + 2)(x + 3) = 0 → x = 2, 3 (the roots should be −2 and −3).
-const imgOk = (s) => /-\s*2|−\s*2|negative/i.test(s) && /-\s*3|−\s*3|negative/i.test(s)
+const imgOk = (s) => /[-−]\s*2\b/.test(s) && /[-−]\s*3\b/.test(s)
+// Notebook context (scenario E): imported PDF text, a physics word problem. Answer: 20 m/s, 80 m.
+const PDF_Q = '<page>\nExercise 4 (from the imported PDF): A car starts from rest and accelerates uniformly at 2.5 m/s² for 8 s.\n(a) What is its final speed? (b) How far does it travel?\n</page>\nI am stuck on this exercise. Show me how to do both parts.'
+const pdfOk = (s) => /\b20\s*(m\/s|\\?,?\s*\\?(text|mathrm)\{?\s*m\/s)/i.test(s.replace(/\$/g, '')) && /\b80\s*(m\b|\\?,?\s*\\?(text|mathrm)\{?\s*m\b)/i.test(s.replace(/\$/g, ''))
 
 // ---------------------------------------------------------------- account
 const key0 = await getJson('/key')
@@ -129,6 +134,7 @@ const provByName = new Map((providers.json?.data ?? []).map((p) => [p.name, p]))
 const listedFree = (all.json?.data ?? []).filter((m) => m.id.endsWith(':free')).map((m) => m.id)
 lines.push(`Free models listed right now (${listedFree.length}): ${listedFree.join(', ') || '–'}`, '')
 
+lines.push(`Data collection setting on every request: **${DATA_COLLECTION}** (price ceiling $0, no fallbacks, one host).`, '')
 lines.push('## Candidates', '', '| Model ID | Listed | In | Context | Free endpoint host(s) | Host data policy (OpenRouter) | Locked test (deny, only host, $0) | Answer correct | First text / total | Tokens in→out | Image test |', '|---|---|---|---|---|---|---|---|---|---|---|')
 const eligible = []
 for (const id of CANDIDATES) {
@@ -158,6 +164,10 @@ for (const id of CANDIDATES) {
       ti = await stream({ model: id, messages: [{ role: 'system', content: SYS }, { role: 'user', content: [{ type: 'text', text: IMG_Q }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${data}` } }] }], max_tokens: 900, temperature: 0.3, stream: true, reasoning: { enabled: false }, provider: lock(only) })
       r.image = { status: ti.status, ms: ti.ms, firstTextMs: ti.firstTextMs, usage: ti.usage, provider: ti.provider, error: ti.json?.error ?? ti.errorEvent ?? null, correct: ti.status === 200 ? imgOk(ti.answer) : null, answer: short(ti.answer, 1500) }
     }
+    if (t.status === 200 && t.answer) {
+      const tp = await stream({ model: id, messages: [{ role: 'system', content: SYS }, { role: 'user', content: PDF_Q }], max_tokens: 900, temperature: 0.3, stream: true, reasoning: { enabled: false }, provider: lock(only) })
+      r.pdf = { status: tp.status, ms: tp.ms, firstTextMs: tp.firstTextMs, usage: tp.usage, provider: tp.provider, chunks: tp.chunks, error: tp.json?.error ?? tp.errorEvent ?? null, correct: tp.status === 200 ? pdfOk(tp.answer) : null, answer: short(tp.answer, 1500) }
+    }
     if (t.status === 200 && t.answer) eligible.push({ id, only, vision: r.modalities.includes('image'), math: r.math.correct, image: r.image?.correct ?? null })
   }
   const policyText = hostPolicies.map((p) => `${p.host}: ${JSON.stringify(p.endpoint)} ${p.provider ? JSON.stringify(p.provider) : ''}`).join('; ')
@@ -171,6 +181,7 @@ for (const [id, r] of Object.entries(results.candidates)) {
   lines.push(`### ${id}`, '')
   if (r.attempts?.length > 1) lines.push(`Attempts: ${r.attempts.map((x) => `${x.at.slice(11, 19)} ${x.status}`).join(', ')}`, '')
   if (r.math) lines.push(`**Maths check** (HTTP ${r.math.status}, ${r.math.ms} ms):`, '', `> ${short(r.math.answer || JSON.stringify(r.math.error), 1200)}`, '')
+  if (r.pdf) lines.push(`**Notebook PDF word problem (20 m/s, 80 m)** (HTTP ${r.pdf.status}, first text ${r.pdf.firstTextMs ?? '–'} ms, total ${r.pdf.ms} ms, ${r.pdf.chunks ?? '–'} chunks, correct: ${r.pdf.correct}):`, '', `> ${short(r.pdf.answer || JSON.stringify(r.pdf.error), 1200)}`, '')
   if (r.image) lines.push(`**Handwriting (x² + 5x + 6 = 0 → x = 2, 3)** (HTTP ${r.image.status}, ${r.image.ms} ms):`, '', `> ${short(r.image.answer || JSON.stringify(r.image.error), 1200)}`, '')
 }
 

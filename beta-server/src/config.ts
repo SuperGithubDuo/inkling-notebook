@@ -43,6 +43,13 @@ export interface Env {
    * Required for "openrouter-free": no routing to a host whose data policy wasn't reviewed.
    */
   UPSTREAM_PROVIDERS?: string
+  /**
+   * "true": OpenRouter free requests may reach hosts that store or train on prompts. Test Workers
+   * only until a notice that says so ships: the server then also requires TRAINING_NOTICE_VERSION.
+   */
+  ALLOW_PROVIDER_DATA_COLLECTION?: string
+  /** The first app notice version that discloses provider training (no shipped app has one yet). */
+  TRAINING_NOTICE_VERSION?: string
   /** Extra JSON merged into every provider request (operator-only, e.g. OpenRouter provider preferences). */
   UPSTREAM_EXTRA_BODY?: string
   /** USD per million tokens, at list price (not promotional), so accounting errs high. */
@@ -197,6 +204,11 @@ export function inference(env: Env):
     .map((p) => p.trim())
     .filter((p) => /^[a-z0-9][a-z0-9._/-]{0,63}$/i.test(p))
   if (id === 'openrouter-free' && !onlyProviders.length) return 'UPSTREAM_PROVIDERS must name the reviewed host(s) for openrouter-free'
+  const allowCollection = env.ALLOW_PROVIDER_DATA_COLLECTION === 'true'
+  if (allowCollection && id !== 'openrouter-free') return 'ALLOW_PROVIDER_DATA_COLLECTION is only for openrouter-free'
+  // Users must have agreed to a notice that says the host may keep or train on what is sent.
+  const trainingNotice = pos(env.TRAINING_NOTICE_VERSION)
+  if (allowCollection && !trainingNotice) return 'TRAINING_NOTICE_VERSION must be set with ALLOW_PROVIDER_DATA_COLLECTION'
   if (preset.freeLimits) {
     // A token quota too, and no quota above the provider's documented free plan: the server never plans to pass it.
     const f = preset.freeLimits
@@ -229,6 +241,7 @@ export function inference(env: Env):
       maxAttempts: num(env.UPSTREAM_MAX_ATTEMPTS, free ? 2 : 3),
       retryRateLimit: !free,
       ...(onlyProviders.length && (id === 'openrouter-free' || id === 'openrouter') ? { onlyProviders } : {}),
+      ...(allowCollection ? { allowDataCollection: true } : {}),
       firstByteTimeoutMs: num(env.UPSTREAM_TIMEOUT_MS, 45_000),
       idleTimeoutMs: num(env.UPSTREAM_IDLE_TIMEOUT_MS, 45_000)
     })
@@ -256,7 +269,8 @@ export function inference(env: Env):
     ...(preset.imageTokens ? { imageMinTokens: preset.imageTokens } : {}),
     // DeepInfra is named in the app's data notice from version 4. Any other host isn't named in a
     // shipped notice yet: it needs a new notice (and CLOUD_CONSENT_VERSION) before real users reach it.
-    minNotice: num(env.MIN_NOTICE_VERSION, id === 'deepinfra' ? 4 : NOTICE_NOT_YET_SHIPPED),
+    // With data collection allowed, never below the notice that discloses it (MIN_NOTICE_VERSION can only raise it).
+    minNotice: allowCollection ? Math.max(trainingNotice!, num(env.MIN_NOTICE_VERSION, 0)) : num(env.MIN_NOTICE_VERSION, id === 'deepinfra' ? 4 : NOTICE_NOT_YET_SHIPPED),
     inputMargin: num(env.INPUT_ESTIMATE_MARGIN, 1.5)
   }
 }

@@ -76,6 +76,8 @@ jobs:
           # Optional on the trigger branch only: a narrower candidate list and spaced retries.
           [ -f .github/free-candidates.txt ] && export CANDIDATES=$(tr -d ' \n' < .github/free-candidates.txt)
           [ -f .github/free-attempts.txt ] && export ATTEMPTS=$(tr -d ' \n' < .github/free-attempts.txt)
+          # TEST ONLY: provider data collection allowed (the $0 ceiling, :free model, one host and no fallbacks stay locked).
+          [ -f .github/free-data-collection.txt ] && export DATA_COLLECTION=$(tr -d ' \n' < .github/free-data-collection.txt)
           node beta-server/scripts/openrouter-free-models-probe.mjs test-results/openrouter-free-models.md
           cat test-results/openrouter-free-models.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -98,13 +100,19 @@ jobs:
             model=$(echo "$row" | jq -r .id); only=$(echo "$row" | jq -r .only)
             slug=$(echo "$model" | tr '/:' '__')
             echo "::group::$model via $only"
+            # With data collection allowed: a TEMPORARY Worker (deleted below), never the regular test Worker.
+            # TRAINING_NOTICE_VERSION 4 is TEST ONLY, so the test suite (which sends notice 4) can reach it.
+            name=inkling-ai-free-next; extra=()
+            if [ -f .github/free-data-collection.txt ] && [ "$(tr -d ' \n' < .github/free-data-collection.txt)" = allow ]; then
+              name=inkling-ai-free-collect; extra=(--name "$name" --var ALLOW_PROVIDER_DATA_COLLECTION:true --var TRAINING_NOTICE_VERSION:4)
+            fi
             ( cd beta-server
               for attempt in 1 2 3; do
-                npx wrangler deploy -c wrangler.openrouter-free.jsonc --var "UPSTREAM_MODEL:$model" --var "UPSTREAM_PROVIDERS:$only" --var "GLOBAL_REQUESTS_PER_DAY:$((left - 2))" --var GLOBAL_REQUESTS_PER_MINUTE:16 > /tmp/d.log 2>&1 && break
+                npx wrangler deploy -c wrangler.openrouter-free.jsonc "${extra[@]}" --var "UPSTREAM_MODEL:$model" --var "UPSTREAM_PROVIDERS:$only" --var "GLOBAL_REQUESTS_PER_DAY:$((left - 2))" --var GLOBAL_REQUESTS_PER_MINUTE:16 > /tmp/d.log 2>&1 && break
                 cat /tmp/d.log; sleep 20
               done
-              printf '%s' "$KEY" | npx wrangler secret put INFERENCE_API_KEY -c wrangler.openrouter-free.jsonc > /dev/null 2>&1
-              printf '%s' "$ADMIN" | npx wrangler secret put ADMIN_TOKEN -c wrangler.openrouter-free.jsonc > /dev/null 2>&1 )
+              printf '%s' "$KEY" | npx wrangler secret put INFERENCE_API_KEY --name "$name" > /dev/null 2>&1
+              printf '%s' "$ADMIN" | npx wrangler secret put ADMIN_TOKEN --name "$name" > /dev/null 2>&1 )
             url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/d.log | head -1)
             ok=0
             for i in $(seq 1 60); do
@@ -124,6 +132,8 @@ jobs:
             n=$((n + 1))
           done
           curl -sS "https://openrouter.ai/api/v1/credits" -H "Authorization: Bearer $KEY" | jq -c '{credits: .data}'
+          res=$(curl -sS -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/inkling-ai-free-collect?force=true")
+          echo "temporary Worker deleted: $(echo "$res" | jq -c '{success, errors}')"
           exit 0
 
       - name: Keep the reports
