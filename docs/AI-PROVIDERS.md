@@ -8,6 +8,7 @@
 - **Workers AI stays as the rollback**: one setting (`INFERENCE_PROVIDER`) switches back, on the same Worker, with the same ledger and the same app.
 - **OpenRouter is supported but not recommended**: pinned to DeepInfra it is the same model on the same hardware for 5.5% more, with one more company handling notebook content, and pinning removes its main benefit (falling back to other hosts), which would be multi-provider routing.
 - **Groq and Cerebras are not recommended for now**: Groq lists the model as *Preview*, is the most expensive, and counts every image as 2,048 tokens; Cerebras is the fastest but costs about 1.6× DeepInfra on Inkling's input-heavy requests.
+- **Groq's free plan** is implemented as an unused, test-only option with strict request and token quotas, but is **NO-GO for production**: preview model (evaluation only, no DPA), and only ~100 answers a day (see below).
 
 ## Provider comparison (Qwen 3.8 27B)
 
@@ -52,6 +53,47 @@ Reliability: no provider publishes an SLA for this model on the pages checked, a
 ### Other hosts seen on OpenRouter
 
 Several hosts list the same model cheaper (e.g. Prime Intellect $0.024/$1.324, Chutes $0.039/$1.25, about half DeepInfra's cost). They were not evaluated: their retention and training terms weren't checked, and choosing among them is exactly the multi-provider routing this migration excludes. Worth a separate review if spend becomes significant.
+
+## Groq free plan (`qwen/qwen3.8-27b`): implemented, NO-GO for production
+
+*Checked 3 Nov 2026 against Groq's own docs and Services Agreement (updated 22 Jun 2026). Live tests are wired up but not yet run: the repository has no `GROQ_API_KEY` secret (Actions run 41778755405 stopped at "Required secrets").*
+
+**What Groq's documentation states**
+
+| | Groq free plan |
+|---|---|
+| Model ID | `qwen/qwen3.8-27b` — listed under **Preview models** |
+| Free limits (organization-wide, not per key) | 30 requests/min, 1,000 requests/day, **8,000 tokens/min, 200,000 tokens/day** |
+| Context / max output | 131,072 / 16,384 |
+| Input | text and images (≤ 3 per request, ≤ 20 MB, **each image counts 2,048 tokens**) |
+| Streaming | yes (OpenAI-compatible SSE; usage in `x_groq.usage` on the last chunk) |
+| Reasoning | off by default for this model; `reasoning_effort` low/medium/high (the docs disagree on whether `none` is accepted, so the server sends nothing) |
+| Billing | the Developer (paid) plan needs a card, US bank account or SEPA debit; a Free org without a payment method has nothing to charge |
+| Retention | none by default; inputs/outputs may be logged up to 30 days for abuse/reliability unless **Zero Data Retention** is switched on (Data Controls; "all customers may enable" it) |
+| Training | Services Agreement §4.2: Groq may not use inputs or outputs for training without the customer's permission |
+| Age | §2: the account holder must be 18+; §6.3: for an app likely used by minors, the customer is solely responsible for complying with the law |
+
+**Why NO-GO for production**
+
+1. **Preview = evaluation only.** Groq's models page: preview models are for evaluation and should not be used in production; they may be discontinued at short notice.
+2. **Preview = Beta Service under the Services Agreement (§3.6)**: provided as-is, may be discontinued at any time, no support or indemnity, and **the DPA does not apply**. Inkling's users are students (many under 18); serving their notebooks without a data processing agreement isn't acceptable.
+3. **Capacity is about the same as Workers AI Free, not 1,000 answers a day.** The token quota binds long before the request quota: measured Inkling answers use ~0.5–1.2k tokens on text and ~2.5–2.9k with a handwriting image (Groq's fixed 2,048 per image). At 180,000 planned tokens/day that is **~70 (image-heavy) to ~250 (text-only), about 100 answers/day for a typical mix**.
+4. **8,000 tokens a minute is a classroom bottleneck**: two or three image answers a minute for everyone together.
+5. **The free plan can change at any time** (§3.5, §5.1). Multiple accounts to multiply the quota would breach §6.3(d)(iii) (use "intended to avoid incurring Fees").
+
+**What is implemented (kept unused, like OpenRouter Free)**
+
+- Provider `groq` (`beta-server/src/provider.ts`): only `qwen/qwen3.8-27b`; `service_tier` locked to `on_demand`; `reasoning_format: parsed`; no tools; `max_completion_tokens`; operator extras can't change any of these.
+- Config fails closed without request **and** token quotas, with any quota above Groq's free limits, with another model, or with another base URL.
+- Ledger (one Durable Object, every operation serialized): rolling 24-hour request and token counts in hourly buckets, a persisted 60-second window, each request's **worst case** (estimated input × margin + output cap, images ≥ 2,048) held before sending and replaced by Groq's reported count after. Unsettled reservations stay charged; retries count as requests. Daily requests are checked over any 24 hours as well as the UTC day.
+- **Plan guard**: if Groq's `x-ratelimit-limit-requests` (> 1,000/day) or `x-ratelimit-limit-tokens` (> 8,000/min) ever show more than the free plan, the server pauses itself — an upgraded account could bill.
+- New refusal `free_token_quota` (503 with the real wait); minute-quota refusals are `capacity` with the seconds until room.
+- Test Worker `inkling-ai-groq-next` (`wrangler.groq.jsonc`): 900 req/day, 25/min, 180,000 tokens/day, 7,000/min; `MAX_INPUT_TOKENS` 4,000 so every worst case fits in a minute (long conversations are refused that Workers AI accepts). `MIN_NOTICE_VERSION` 4 is **test only**; with Groq's default (99) no shipped app can reach it, because no notice names Groq.
+- `scripts/groq-probe.mjs`, `scripts/groq-quota-check.mjs`, workflow `ai-server-groq.yml` (push `deploy/ai-server-groq`). 22 unit tests (`tests/unit/groq.test.ts`).
+
+**To run the live tests**: create a Groq account on the free plan (no payment method), switch on Zero Data Retention in Data Controls, create a key, add it as the repository secret `GROQ_API_KEY`, and re-run the workflow. The probe stops before deploying anything if the account's headers don't show free-plan limits.
+
+**Revisit when** Groq moves `qwen/qwen3.8-27b` to production status (the DPA would then apply). Even then it adds a second free pool of roughly Workers AI's size, and it needs a new data notice naming Groq.
 
 ## OpenRouter Free (`qwen/qwen3.8-27b:free`): withdrawn
 
