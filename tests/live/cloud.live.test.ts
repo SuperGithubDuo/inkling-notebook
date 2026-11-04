@@ -197,6 +197,14 @@ describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
         continue
       }
       // Workers AI is briefly out of capacity (error 3040): ask again, as a person would.
+      // A token-quota provider (Groq's free plan) paces the whole service per minute: wait the time the server gives.
+      if (end.type === 'error' && end.error.code === 'server' && /busy right now/i.test(end.error.message) && attempt < 6) {
+        capacityRetries++
+        const wait = Math.min(65, Math.max(5, Number((end.error as { retryAfter?: number }).retryAfter) || 30))
+        console.log(`  the server's per-minute provider quota is full; asking again in ${wait} s`)
+        await new Promise((res) => setTimeout(res, wait * 1000))
+        continue
+      }
       if (end.type === 'error' && end.error.code === 'server' && /capacity/i.test(end.error.message) && attempt < 3) {
         capacityRetries++
         console.log('  Workers AI at capacity; asking again in 20 s')

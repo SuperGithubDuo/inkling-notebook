@@ -158,6 +158,8 @@ export async function startBetaServer(options = {}) {
     minNoticeVersion: options.minNoticeVersion ?? 0,
     inputMargin: options.inputMargin ?? 1,
     freeProvider: options.freeProvider ?? false,
+    tokenQuota: options.tokenQuota ?? false,
+    imageMinTokens: options.imageMinTokens,
     rates: options.rates ?? RATES,
     reasoningEffort: options.reasoningEffort ?? 'low',
     disableThinking: options.disableThinking ?? true,

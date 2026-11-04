@@ -16,7 +16,9 @@ import { fakeWorkersAi } from './fakeBeta.mjs'
 export const FAKE_KEY = 'di-test-key-0123456789abcdefghijklmnop'
 
 /**
- * @param {{ key?: string, path?: string, reportCost?: (usage: any) => number | undefined, cachedTokens?: number }} [options]
+ * `responseHeaders` is sent with every answer (Groq's x-ratelimit-* limits); `groqUsage` moves a
+ * stream's usage into x_groq.usage on its last chunk, as Groq reports it.
+ * @param {{ key?: string, path?: string, reportCost?: (usage: any) => number | undefined, cachedTokens?: number, responseHeaders?: Record<string, string>, groqUsage?: boolean }} [options]
  */
 export async function startFakeOpenAi(options = {}) {
   const key = options.key ?? FAKE_KEY
@@ -75,16 +77,17 @@ export async function startFakeOpenAi(options = {}) {
     }
 
     // Translate the OpenAI-compatible body back into the Workers AI inputs the fake model reads.
-    const { max_tokens, model: m, stream_options, chat_template_kwargs, reasoning, provider, ...rest } = body
-    const inputs = { ...rest, max_completion_tokens: max_tokens, ...(chat_template_kwargs ? { chat_template_kwargs } : {}) }
+    const { max_tokens, max_completion_tokens, model: m, stream_options, chat_template_kwargs, reasoning, provider, service_tier, reasoning_format, ...rest } = body
+    const inputs = { ...rest, max_completion_tokens: max_tokens ?? max_completion_tokens, ...(chat_template_kwargs ? { chat_template_kwargs } : {}) }
+    const extra = options.responseHeaders ?? {}
     const out = await model.run(m, inputs)
     if (!body.stream) {
       const json = out
       if (json.usage) decorateUsage(json.usage)
-      res.writeHead(200, { 'content-type': 'application/json' })
+      res.writeHead(200, { 'content-type': 'application/json', ...extra })
       return res.end(JSON.stringify(json))
     }
-    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    res.writeHead(200, { 'content-type': 'text/event-stream', ...extra })
     const reader = out.getReader()
     res.on('close', () => void reader.cancel().catch(() => undefined))
     const dec = new TextDecoder()
@@ -96,6 +99,10 @@ export async function startFakeOpenAi(options = {}) {
       text = text.replace(/^data: (\{.*"usage".*\})$/m, (_, j) => {
         const o = JSON.parse(j)
         if (o.usage) decorateUsage(o.usage)
+        if (options.groqUsage && o.usage) {
+          o.x_groq = { id: 'req_fake', usage: o.usage }
+          delete o.usage
+        }
         return `data: ${JSON.stringify(o)}`
       })
       res.write(text)

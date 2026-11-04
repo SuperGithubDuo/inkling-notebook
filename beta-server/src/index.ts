@@ -44,9 +44,9 @@ export class LedgerObject extends DurableObject<WorkerEnv> {
       limits(env)
     )
   }
-  reserve(id: Identity, worst: number, expected: number, l?: LedgerLimits, fingerprint?: string): Promise<ReserveResult> {
+  reserve(id: Identity, worst: number, expected: number, l?: LedgerLimits, fingerprint?: string, tokens?: number): Promise<ReserveResult> {
     this.ledger.useLimits(l)
-    return this.ledger.reserve(id, worst, expected, fingerprint)
+    return this.ledger.reserve(id, worst, expected, fingerprint, tokens)
   }
   settle(id: string, neurons: number | undefined, opts?: SettleOptions): Promise<void> {
     return this.ledger.settle(id, neurons, opts)
@@ -82,6 +82,8 @@ export default {
       minNoticeVersion: inf.minNotice,
       inputMargin: inf.inputMargin,
       freeProvider: inf.freeProvider,
+      tokenQuota: inf.tokenQuota,
+      imageMinTokens: inf.imageMinTokens,
       rates: inf.rates,
       reasoningEffort: env.REASONING_EFFORT ?? '',
       disableThinking: env.DISABLE_THINKING === 'true',
@@ -94,7 +96,7 @@ export default {
     // The stub's methods match Ledger's (RPC returns plain data); each call carries this version's limits.
     const l = limits(env)
     const ledger = {
-      reserve: (id: Identity, worst: number, expected: number, fp?: string) => stub.reserve(id, worst, expected, l, fp),
+      reserve: (id: Identity, worst: number, expected: number, fp?: string, tokens?: number) => stub.reserve(id, worst, expected, l, fp, tokens),
       quota: (id: Identity) => stub.quota(id, l),
       summary: () => stub.summary(l),
       settle: (id: string, n: number | undefined, o?: SettleOptions) => stub.settle(id, n, o),

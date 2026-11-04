@@ -42,11 +42,13 @@ export interface BetaServerOptions {
   rates?: { inputPerM: number; outputPerM: number; cachedInputPerM?: number; unit?: 'neurons' | 'usd'; costMultiplier?: number }
   /** Builds the model from the bundled server modules (e.g. an external provider). */
   makeAi?: (mod: any) => AiBindingLike | Promise<AiBindingLike>
-  provider?: 'workers-ai' | 'deepinfra' | 'openrouter' | 'openrouter-free' | 'openai-compatible'
+  provider?: 'workers-ai' | 'deepinfra' | 'openrouter' | 'openrouter-free' | 'groq' | 'openai-compatible'
   publicModel?: string
   minNoticeVersion?: number
   inputMargin?: number
   freeProvider?: boolean
+  tokenQuota?: boolean
+  imageMinTokens?: number
   /** Extra ledger limits (unit, globalMonthly, installMonthly, softFraction, softFactor, duplicateWindowMs). */
   limits?: Record<string, unknown>
   reasoningEffort?: string

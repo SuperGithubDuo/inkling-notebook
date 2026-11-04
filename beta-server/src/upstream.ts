@@ -125,14 +125,14 @@ export function imageTokens(base64: string, patch = 28): number {
  * (English averages about 4; maths and LaTeX are denser), each image by its
  * size, and a few tokens of chat formatting per message.
  */
-export function estimateInputTokens(system: string, turns: AiTurn[], patch?: number): number {
+export function estimateInputTokens(system: string, turns: AiTurn[], patch?: number, imageMin = 0): number {
   let chars = system.length
   let tokens = 8
   for (const t of turns) {
     tokens += 8
     for (const p of t.parts) {
       if ('text' in p) chars += p.text.length
-      else tokens += imageTokens(p.image.data, patch)
+      else tokens += Math.max(imageMin, imageTokens(p.image.data, patch))
     }
   }
   return tokens + Math.ceil(chars / 3)
@@ -180,7 +180,9 @@ export function parseUpstream(json: unknown, whole = false): ParsedEvent {
   if (!json || typeof json !== 'object') return {}
   const o = json as Record<string, unknown>
   if (o.error && typeof o.error === 'object') return { error: true }
-  const usage = readUsage(o.usage as UpstreamUsage | undefined)
+  // Groq reports a stream's usage in x_groq.usage on its last chunk (and in usage when asked with include_usage).
+  const xg = o.x_groq && typeof o.x_groq === 'object' ? ((o.x_groq as { usage?: unknown }).usage as UpstreamUsage | undefined) : undefined
+  const usage = readUsage(o.usage as UpstreamUsage | undefined) ?? readUsage(xg)
   const choice = Array.isArray(o.choices) ? (o.choices[0] as Record<string, unknown> | undefined) : undefined
   if (choice) {
     const d = (whole ? choice.message : choice.delta) as Record<string, unknown> | undefined

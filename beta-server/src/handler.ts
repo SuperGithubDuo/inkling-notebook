@@ -55,8 +55,15 @@ export interface ServerConfig {
    * worst case reserved before the call above what the provider will bill.
    */
   inputMargin?: number
-  /** The provider never bills (OpenRouter Free): a reported charge pauses the service. */
+  /** The provider never bills (OpenRouter Free, Groq's free plan): a reported charge pauses the service. */
   freeProvider?: boolean
+  /**
+   * The provider counts an account-wide TOKEN quota (Groq): each request's worst-case tokens are held
+   * in the ledger before sending, and its reported tokens replace them after.
+   */
+  tokenQuota?: boolean
+  /** Input tokens the provider counts per image at least (Groq: 2,048). */
+  imageMinTokens?: number
   /** Reasoning effort sent to the model ('low' keeps hidden, billed reasoning short). Empty: not sent. */
   reasoningEffort: string
   /** Sends chat_template_kwargs.enable_thinking = false. */
@@ -166,6 +173,9 @@ function refusal(code: RefusalCode, retryAfter: number | undefined, quota?: Quot
     case 'free_daily_quota':
       // The service's own count of the provider's daily request quota (shared by everyone).
       return problem(429, 'daily_quota', `Inkling’s free AI has answered as many questions as it can today, for everyone. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
+    case 'free_token_quota':
+      // The provider's rolling 24-hour token quota, shared by everyone: room comes back hour by hour.
+      return problem(503, 'server', `Inkling’s free AI has used its provider’s token allowance for now, for everyone. Try again ${inAbout(retryAfter)}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'too_large':
       return problem(413, 'bad_request', 'This request is too large for the free AI. Select a smaller part of the page or ask for fewer problems.', undefined, { scope: code })
     case 'busy':
@@ -238,7 +248,7 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   // Identical requests from one installation are the same request (the ledger refuses a repeat of an answered one).
   const fingerprint = await requestFingerprint(body)
   const spec = taskSpec(body.task, 'cloud')
-  const inputTokens = estimateInputTokens(spec.system, body.turns, config.imagePatch)
+  const inputTokens = estimateInputTokens(spec.system, body.turns, config.imagePatch, config.imageMinTokens ?? 0)
   if (inputTokens > config.maxInputTokens) return tooLarge()
   const outRate = config.rates.outputPerM / 1e6
   const inputCost = inputTokens * (config.rates.inputPerM / 1e6) * Math.max(1, config.inputMargin ?? 1)
@@ -248,13 +258,16 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   let maxTokens = spec.maxOutputTokens
   let reserved = Math.ceil(inputCost + maxTokens * outRate)
   const expected = Math.ceil(inputCost + Math.min(maxTokens, EXPECTED_OUTPUT_TOKENS[body.task]) * outRate)
-  let res = await ledger.reserve(id, reserved, expected, fingerprint)
+  // A token-quota provider holds the request's worst case in tokens too: input (with margin) plus the output cap.
+  const heldInput = Math.ceil(inputTokens * Math.max(1, config.inputMargin ?? 1))
+  const tokensFor = (cap: number): number | undefined => (config.tokenQuota ? heldInput + cap : undefined)
+  let res = await ledger.reserve(id, reserved, expected, fingerprint, tokensFor(maxTokens))
   if (!res.ok && body.task === 'chat' && res.code === 'global_quota' && res.quota) {
     const fit = Math.floor((res.quota.globalLimit - res.quota.globalUsed - inputCost) / outRate)
     if (fit >= MIN_CHAT_TOKENS) {
       maxTokens = Math.min(maxTokens, fit)
       reserved = Math.ceil(inputCost + maxTokens * outRate)
-      res = await ledger.reserve(id, reserved, Math.min(expected, reserved), fingerprint)
+      res = await ledger.reserve(id, reserved, Math.min(expected, reserved), fingerprint, tokensFor(maxTokens))
     }
   }
   if (!res.ok) return refusal(res.code, res.retryAfter, res.quota)
@@ -292,6 +305,14 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     const { kind } = classifyUpstream(err)
     // The kind only: an error message could in principle quote what was sent.
     // Operator problems are errors (alert-worthy): a refused key, or the provider account out of credit.
+    if (kind === 'paid_plan') {
+      // The provider account's limits are a paid plan's: it could bill. Stop everything until the operator looks.
+      console.error(`${providerName} account is not on the free plan: answers paused`)
+      // The request reached the model: keep its whole reservation (and held tokens) counted.
+      await ledger.settle(reservationId, undefined, { extraAttempts })
+      await ledger.setPaused(true)
+      return refusal('paused', undefined)
+    }
     if (kind === 'auth') console.error(`${providerName} refused the API key`)
     else if (kind === 'credits') console.error(`${providerName} account has no credit: answers paused`)
     else console.warn(`${providerName} error`, kind)
@@ -302,7 +323,9 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     const quotaGone = kind === 'rate_limited' && Number.isFinite(wait) && wait > QUOTA_WAIT_S
     const blockedUntil = quotaGone ? now() + Math.min(wait, 36 * 3600) * 1000 : undefined
     if (quotaGone) console.warn(`${providerName} quota used up`, Math.round(wait))
-    const opts = { upstreamExhausted: exhausted, upstreamBlockedUntil: blockedUntil, extraAttempts }
+    // A timed-out or unreadable attempt may still have run (and been counted) at the provider: keep its held tokens.
+    const maybeRan = kind === 'timeout' || kind === 'other'
+    const opts = { upstreamExhausted: exhausted, upstreamBlockedUntil: blockedUntil, extraAttempts, ...(maybeRan && config.tokenQuota ? { tokens: tokensFor(maxTokens) } : {}) }
     if (retryCharge > 0) await ledger.settle(reservationId, Math.min(reserved, retryCharge), opts)
     else await ledger.settle(reservationId, undefined, { failedBeforeModel: true, ...opts })
     if (quotaGone) return refusal('upstream_unavailable', Math.ceil(wait))
@@ -376,7 +399,9 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     if (!failed && !text && !clientGone) failed = 'empty'
     const cost =
       retryCharge + (runaway ? reserved : usage ? costFor(usage, config.rates) : clientGone || (failed && !text) ? reserved : Math.min(reserved, inputCost + ((text.length + reasoningChars) / 3) * outRate))
-    await ledger.settle(reservationId, cost, { answered: !failed && !clientGone && !!text, extraAttempts })
+    // The provider's own token count when it reported one; otherwise the held worst case stays counted.
+    const reportedTokens = usage && !runaway ? usage.inputTokens + usage.outputTokens : undefined
+    await ledger.settle(reservationId, cost, { answered: !failed && !clientGone && !!text, extraAttempts, tokens: reportedTokens })
     // A free provider must never bill. A reported charge means a misconfiguration (a paid model or
     // endpoint was reached): stop every answer until the operator looks.
     if (config.freeProvider && usage?.reportedCostUsd !== undefined && usage.reportedCostUsd > 0) {

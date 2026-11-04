@@ -1,0 +1,179 @@
+name: AI server (Groq free plan, test)
+
+# Tests Groq's FREE plan for Qwen 3.8 27B (qwen/qwen3.8-27b) for Inkling: direct probes
+# (model listing, the account's limits from Groq's headers, streaming and where usage
+# arrives, the reasoning switch, image tokens, structured answers, whether the per-minute
+# token limit counts the output cap, quality samples, errors, the per-minute limit), then a
+# SEPARATE test Worker "inkling-ai-groq-next" (beta-server/wrangler.groq.jsonc) with the
+# security checks and the 13 real-model scenarios, then a temporary copy with a 5-request
+# daily quota hit by a burst. Production ("inkling-ai-beta", Workers AI), its secrets and
+# main are untouched. Uses ~120 of the account's 1,000 daily requests and well under half
+# of its 200,000 daily tokens. Stops before any Worker if the account isn't on the free plan.
+#
+# Start it by pushing the branch `deploy/ai-server-groq`.
+#
+# Needs these repository secrets:
+#   CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN   as for the production workflow
+#   INKLING_ADMIN_TOKEN                           ≥ 32 characters
+#   GROQ_API_KEY                                  a Groq key for DEVELOPMENT (free plan, no payment method)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['deploy/ai-server-groq']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-server-groq
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
+
+      - name: Required secrets
+        shell: bash
+        run: |
+          missing=()
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
+          [ ${#INKLING_ADMIN_TOKEN} -ge 32 ] || missing+=("INKLING_ADMIN_TOKEN (at least 32 characters)")
+          [ -n "$GROQ_API_KEY" ] || missing+=(GROQ_API_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then echo "::error title=Missing secrets::Add these repository secrets: ${missing[*]} (see the top of .github/workflows/ai-server-groq.yml)"; exit 1; fi
+
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm --prefix beta-server ci
+          mkdir -p test-results
+
+      - name: Typecheck and unit-test the server
+        run: |
+          npm --prefix beta-server run typecheck
+          npx vitest run tests/unit/groq.test.ts tests/unit/provider.test.ts tests/unit/beta.test.ts
+
+      - name: Direct Groq probes
+        id: probe
+        shell: bash
+        run: |
+          export GROQ_API_KEY=$(printf '%s' "$GROQ_API_KEY" | tr -d '\r\n')
+          node beta-server/scripts/groq-probe.mjs test-results/groq-probe.md
+          cat test-results/groq-probe.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy the test Worker
+        id: deploy
+        # Only on the free plan, with the model listed: never a test Worker on a billable account.
+        if: steps.probe.outputs.free_plan == 'true' && steps.probe.outputs.listed == 'true'
+        working-directory: beta-server
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npx wrangler deploy -c wrangler.groq.jsonc > /tmp/deploy.log 2>&1; then break; fi
+            cat /tmp/deploy.log; [ $attempt = 3 ] && exit 1; sleep 20
+          done
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          [ -n "$url" ] || { echo "::error title=Deploy::no workers.dev address printed"; exit 1; }
+          printf '%s' "$GROQ_API_KEY" | tr -d '\r\n' | npx wrangler secret put INFERENCE_API_KEY -c wrangler.groq.jsonc > /dev/null 2>&1 || { echo "::error title=INFERENCE_API_KEY::could not be set"; exit 1; }
+          token=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          printf '%s' "$token" | npx wrangler secret put ADMIN_TOKEN -c wrangler.groq.jsonc > /dev/null 2>&1 || { echo "::error title=ADMIN_TOKEN::could not be set"; exit 1; }
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$url/admin/summary" -H "Authorization: Bearer $token")
+            [ "$code" = 200 ] && break; sleep 4
+          done
+          [ "$code" = 200 ] || { echo "::error title=Admin token::admin API answers $code"; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Test AI server (Groq free)::$url; production untouched"
+
+      - name: Security checks
+        if: steps.deploy.outputs.url != ''
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          curl -sS -X POST "$URL/admin/pause" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"paused":false}' >/dev/null
+          node scripts/abuse-check.mjs security "$URL" | tee test-results/security-groq.txt
+
+      - name: Real-model scenarios (quality, latency, reliability)
+        # ~16 requests and ~60,000 tokens; paced by the server's own per-minute token quota.
+        if: (success() || failure()) && steps.deploy.outputs.url != '' && fromJSON(steps.probe.outputs.remaining_requests || '0') >= 200
+        shell: bash
+        env:
+          INKLING_BETA_URL: ${{ steps.deploy.outputs.url }}
+          INKLING_LIVE_CLOUD: '1'
+          INKLING_LIVE_UNIT: usd
+        run: |
+          set +e
+          npm run test:live:cloud
+          status=$?
+          set -e
+          [ -f test-results/live-cloud-qwen3.8-27b.md ] && mv test-results/live-cloud-qwen3.8-27b.md test-results/live-cloud-groq.md
+          [ -f test-results/live-cloud-qwen3.8-27b.json ] && mv test-results/live-cloud-qwen3.8-27b.json test-results/live-cloud-groq.json
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          echo "::notice title=Test AI server after the scenarios::$(curl -sS "$INKLING_BETA_URL/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c '{providerRolling24h, providerLastMinute, answers, paused}')"
+          exit $status
+
+      - name: Request quota under concurrency (temporary Worker, quota 5)
+        if: (success() || failure()) && steps.deploy.outputs.url != '' && fromJSON(steps.probe.outputs.remaining_requests || '0') >= 150
+        working-directory: beta-server
+        shell: bash
+        env:
+          NAME: inkling-ai-groq-quota
+        run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          export INKLING_ADMIN_TOKEN="$ADMIN"
+          export GROQ_API_KEY=$(printf '%s' "$GROQ_API_KEY" | tr -d '\r\n')
+          vars=(--name "$NAME" --var GLOBAL_REQUESTS_PER_DAY:5 --var GLOBAL_REQUESTS_PER_MINUTE:25 --var GLOBAL_TOKENS_PER_MINUTE:7000 --var NETWORK_CONCURRENT:32 --var GLOBAL_CONCURRENT:32 --var NETWORK_PER_MINUTE:100)
+          for attempt in 1 2 3; do
+            npx wrangler deploy -c wrangler.groq.jsonc "${vars[@]}" > /tmp/q.log 2>&1 && break
+            [ $attempt = 3 ] && { echo "::error title=Temporary server::$(tail -5 /tmp/q.log | tr '\n' ' ')"; exit 1; }; sleep 20
+          done
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/q.log | head -1)
+          printf '%s' "$GROQ_API_KEY" | npx wrangler secret put INFERENCE_API_KEY --name "$NAME" > /dev/null 2>&1
+          printf '%s' "$ADMIN" | npx wrangler secret put ADMIN_TOKEN --name "$NAME" > /dev/null 2>&1
+          ok=0
+          for i in $(seq 1 60); do
+            got=$(curl -sS "$url/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c '[.upstreamRequestLimit, .limits.networkConcurrent]' 2>/dev/null || true)
+            if [ "$got" = '[5,32]' ]; then ok=$((ok + 1)); else ok=0; fi
+            [ $ok -ge 5 ] && break; sleep 3
+          done
+          [ $ok -ge 5 ] || { echo "::error title=Temporary server::not serving the tiny quota (got $got)"; exit 1; }
+          sleep 10
+          node scripts/groq-quota-check.mjs "$url" 5 ../test-results/quota-check.md
+
+      - name: Delete the temporary Worker
+        if: always()
+        shell: bash
+        run: |
+          res=$(curl -sS -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/inkling-ai-groq-quota?force=true")
+          if [ "$(echo "$res" | jq -r .success)" = true ]; then echo "::notice title=Temporary Worker::deleted"; else echo "::warning title=Temporary Worker::$(echo "$res" | jq -c .errors)"; fi
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-server-groq-reports
+          path: |
+            test-results/*.md
+            test-results/*.json
+            test-results/*.txt
+          if-no-files-found: ignore

@@ -84,6 +84,16 @@ export interface LedgerLimits {
    */
   globalRequestsPerDay?: number
   globalRequestsPerMinute?: number
+  /**
+   * Tokens (input + output) the whole service may send the provider over any 24 hours and any
+   * 60 seconds: a free endpoint's account-wide token quota (Groq's free plan: 200,000 a day and
+   * 8,000 a minute). Each request's WORST case (estimated input with margin, plus the full output
+   * cap) is held while it runs and replaced by the provider's reported count when it ends. When
+   * set, the daily request quota is ALSO checked over any 24 hours (not only the UTC day), so the
+   * limit holds whichever window the provider uses. Unset: no token quota.
+   */
+  globalTokensPerDay?: number
+  globalTokensPerMinute?: number
 }
 
 export interface Identity {
@@ -117,6 +127,7 @@ export type RefusalCode =
   | 'global_quota'
   | 'global_monthly_quota'
   | 'free_daily_quota'
+  | 'free_token_quota'
   | 'upstream_unavailable'
   | 'rate_limited'
   | 'duplicate'
@@ -176,6 +187,17 @@ interface Reservation {
   neurons: number
   day: string
   at: number
+  /** Provider tokens held for this answer (its worst case), when a token quota is set. */
+  tokens?: number
+}
+
+/** Provider requests and tokens per hour (key: the hour's start in ms), for the rolling 24-hour quotas. */
+type ProviderHours = Record<string, { req: number; tok: number }>
+/** One request sent to the provider in the last minute, with its tokens (held, then reported). */
+interface MinuteEntry {
+  t: number
+  tok: number
+  id?: string
 }
 
 export const utcDay = (t: number): string => new Date(t).toISOString().slice(0, 10)
@@ -226,6 +248,8 @@ export interface SettleOptions {
   upstreamBlockedUntil?: number
   /** Attempts beyond the first that reached the provider (retries), for the request quota. */
   extraAttempts?: number
+  /** Tokens the provider reported for the answer (input + output); undefined keeps the held worst case. */
+  tokens?: number
   failedBeforeModel?: boolean
   /** A complete answer was delivered: an identical request soon after is a duplicate. */
   answered?: boolean
@@ -244,6 +268,8 @@ export class Ledger {
   private readonly recent = new Map<string, number[]>()
   /** Requests sent to the provider in the last minute, whole service (memory only). */
   private globalMinute: number[] = []
+  private providerHourState: ProviderHours | null = null
+  private minuteState: MinuteEntry[] | null = null
   private lock: Promise<unknown> = Promise.resolve()
   private calls = 0
 
@@ -427,6 +453,7 @@ export class Ledger {
       // Whatever day it started on, the model may have worked: it counts against the rolling cap.
       await this.chargeGlobal(r.neurons, r.at)
       await this.chargeMonth(r.installMonth, r.neurons, r.at)
+      if (r.tokens !== undefined) await this.addProviderUsage(r.at, 1, r.tokens)
       if (r.day !== day.day) continue
       await this.charge(r.install, r.neurons)
       await this.charge(r.network, r.neurons)
@@ -436,6 +463,69 @@ export class Ledger {
     this.reservations = open.filter((r) => !stale.includes(r))
     await this.saveReservations()
     await this.storage.put('day', day)
+  }
+
+  // ------------------------------------------------ provider token quota
+
+  private tokenQuota(): boolean {
+    return this.finite(this.limits.globalTokensPerDay) || this.finite(this.limits.globalTokensPerMinute)
+  }
+
+  /** Provider requests and tokens per hour still inside the rolling window (persisted: survives eviction). */
+  private async providerHours(): Promise<ProviderHours> {
+    this.providerHourState ??= (await this.storage.get<ProviderHours>('ptok')) ?? {}
+    const now = this.now()
+    for (const k of Object.keys(this.providerHourState)) if (Number(k) + ROLLING_WINDOW_MS <= now) delete this.providerHourState[k]
+    return this.providerHourState
+  }
+
+  /** Requests sent in the last 60 seconds with their tokens (persisted, so a restarted object still knows). */
+  private async minute(): Promise<MinuteEntry[]> {
+    this.minuteState ??= (await this.storage.get<MinuteEntry[]>('pmin')) ?? []
+    const now = this.now()
+    this.minuteState = this.minuteState.filter((e) => now - e.t < 60_000)
+    return this.minuteState
+  }
+
+  private async addProviderUsage(at: number, req: number, tok: number): Promise<void> {
+    if (!(req > 0) && !(tok > 0)) return
+    const h = await this.providerHours()
+    const k = String(Math.floor(at / HOUR_MS) * HOUR_MS)
+    const b = h[k] ?? { req: 0, tok: 0 }
+    h[k] = { req: b.req + Math.max(0, req), tok: b.tok + Math.max(0, tok) }
+    await this.storage.put('ptok', h)
+  }
+
+  /** Provider tokens and requests over the rolling day, counting answers in progress at their worst case. */
+  private async providerDay(): Promise<{ req: number; tok: number }> {
+    const h = await this.providerHours()
+    const open = await this.openReservations()
+    let req = 0
+    let tok = 0
+    for (const b of Object.values(h)) {
+      req += b.req
+      tok += b.tok
+    }
+    // A reservation's request is counted at settle (into its hour); until then, here.
+    for (const r of open) {
+      if (r.tokens === undefined) continue
+      req += 1
+      tok += r.tokens
+    }
+    return { req, tok }
+  }
+
+  /** Seconds until `need` more tokens fit under the rolling daily token quota, as old hours leave the window. */
+  private async secondsUntilTokens(used: number, need: number): Promise<number> {
+    const h = await this.providerHours()
+    const now = this.now()
+    let left = used
+    const held = Object.keys(h).map(Number).sort((a, b) => a - b)
+    for (const k of held) {
+      left -= h[String(k)]!.tok
+      if (left + need <= this.limits.globalTokensPerDay!) return Math.max(60, Math.ceil((k + ROLLING_WINDOW_MS - now) / 1000))
+    }
+    return 60
   }
 
   private upstreamBlocked(day: Day): boolean {
@@ -509,7 +599,7 @@ export class Ledger {
    * Reserves `worst` Neurons (the request's worst case) against the global
    * cap; the installation and network need room for `expected`.
    */
-  reserve(id: Identity, worst: number, expected: number = worst, fingerprint?: string): Promise<ReserveResult> {
+  reserve(id: Identity, worst: number, expected: number = worst, fingerprint?: string, tokens?: number): Promise<ReserveResult> {
     return this.exclusive(async () => {
       if (await this.isPaused()) return { ok: false, code: 'paused' }
       const now = this.now()
@@ -562,9 +652,43 @@ export class Ledger {
         if (this.globalMinute.length + 1 > this.limits.globalRequestsPerMinute) return { ok: false, code: 'capacity', retryAfter: Math.max(1, Math.ceil((60_000 - (now - this.globalMinute[0]!)) / 1000)) }
       }
 
-      const r: Reservation = { id: this.randomId(), install: k.install, network: k.network, installMonth: k.installMonth, neurons: worst, day: day.day, at: now }
+      // The provider's account-wide token quota (and its requests over any 24 hours), worst case held.
+      const tq = this.tokenQuota()
+      if (tq) {
+        const need = Math.max(1, Math.ceil(tokens ?? 0))
+        if (tokens === undefined) return { ok: false, code: 'too_large', quota: q }
+        if (this.finite(this.limits.globalTokensPerMinute) && need > this.limits.globalTokensPerMinute) return { ok: false, code: 'too_large', quota: q }
+        if (this.finite(this.limits.globalTokensPerDay) && need > this.limits.globalTokensPerDay) return { ok: false, code: 'too_large', quota: q }
+        const pd = await this.providerDay()
+        if (this.finite(this.limits.globalRequestsPerDay) && pd.req + 1 > this.limits.globalRequestsPerDay) return { ok: false, code: 'free_daily_quota', retryAfter: 3600, quota: q }
+        if (this.finite(this.limits.globalTokensPerDay) && pd.tok + need > this.limits.globalTokensPerDay) return { ok: false, code: 'free_token_quota', retryAfter: await this.secondsUntilTokens(pd.tok, need), quota: q }
+        const m = await this.minute()
+        const minuteTok = m.reduce((n, e) => n + e.tok, 0)
+        const minuteWait = (needTok: number, needReq: number): number => {
+          // When enough of the last minute's entries leave the window.
+          let tok = minuteTok
+          let req = m.length
+          for (const e of m) {
+            tok -= e.tok
+            req -= 1
+            const tokOk = !this.finite(this.limits.globalTokensPerMinute) || tok + needTok <= this.limits.globalTokensPerMinute
+            const reqOk = !this.finite(this.limits.globalRequestsPerMinute) || req + needReq <= this.limits.globalRequestsPerMinute
+            if (tokOk && reqOk) return Math.max(1, Math.ceil((e.t + 60_000 - now) / 1000))
+          }
+          return 60
+        }
+        if (this.finite(this.limits.globalRequestsPerMinute) && m.length + 1 > this.limits.globalRequestsPerMinute) return { ok: false, code: 'capacity', retryAfter: minuteWait(need, 1) }
+        if (this.finite(this.limits.globalTokensPerMinute) && minuteTok + need > this.limits.globalTokensPerMinute) return { ok: false, code: 'capacity', retryAfter: minuteWait(need, 1) }
+      }
+
+      const r: Reservation = { id: this.randomId(), install: k.install, network: k.network, installMonth: k.installMonth, neurons: worst, day: day.day, at: now, ...(tq ? { tokens: Math.max(1, Math.ceil(tokens!)) } : {}) }
       open.push(r)
       await this.saveReservations()
+      if (tq) {
+        const m = await this.minute()
+        m.push({ t: now, tok: r.tokens!, id: r.id })
+        await this.storage.put('pmin', m)
+      }
       if (this.finite(this.limits.globalRequestsPerDay) || this.finite(this.limits.globalRequestsPerMinute)) {
         day.upstreamRequests = (day.upstreamRequests ?? 0) + 1
         this.globalMinute.push(now)
@@ -596,6 +720,19 @@ export class Ledger {
       if (opts.extraAttempts && opts.extraAttempts > 0) {
         day.upstreamRequests = (day.upstreamRequests ?? 0) + opts.extraAttempts
         for (let i = 0; i < opts.extraAttempts; i++) this.globalMinute.push(this.now())
+      }
+      const held = open.find((x) => x.id === reservationId)
+      if (held?.tokens !== undefined) {
+        // Retries were requests too; each may have been counted at its worst case by the provider.
+        const extra = Math.max(0, opts.extraAttempts ?? 0)
+        const reported = opts.failedBeforeModel && opts.tokens === undefined ? 0 : opts.tokens !== undefined && Number.isFinite(opts.tokens) && opts.tokens >= 0 ? Math.ceil(opts.tokens) : held.tokens
+        const tok = reported + extra * held.tokens
+        await this.addProviderUsage(held.at, 1 + extra, tok)
+        const m = await this.minute()
+        const e = m.find((x) => x.id === reservationId)
+        if (e) e.tok = reported
+        for (let i = 0; i < extra; i++) m.push({ t: this.now(), tok: held.tokens })
+        await this.storage.put('pmin', m)
       }
       if (r) {
         this.reservations = open.filter((x) => x !== r)
@@ -630,6 +767,8 @@ export class Ledger {
     reduced: boolean
     upstreamRequests: number
     upstreamRequestLimit: number | null
+    providerRolling24h: { requests: number; tokens: number; requestLimit: number | null; tokenLimit: number | null } | null
+    providerLastMinute: { requests: number; tokens: number; requestLimit: number | null; tokenLimit: number | null } | null
     installations: number
     networks: number
     answering: number
@@ -658,6 +797,21 @@ export class Ledger {
         reduced,
         upstreamRequests: day.upstreamRequests ?? 0,
         upstreamRequestLimit: this.finite(this.limits.globalRequestsPerDay) ? this.limits.globalRequestsPerDay : null,
+        ...(await (async () => {
+          if (!this.tokenQuota()) return { providerRolling24h: null, providerLastMinute: null }
+          const pd = await this.providerDay()
+          const m = await this.minute()
+          const rl = this.finite(this.limits.globalRequestsPerDay) ? this.limits.globalRequestsPerDay : null
+          return {
+            providerRolling24h: { requests: pd.req, tokens: pd.tok, requestLimit: rl, tokenLimit: this.finite(this.limits.globalTokensPerDay) ? this.limits.globalTokensPerDay : null },
+            providerLastMinute: {
+              requests: m.length,
+              tokens: m.reduce((n, e) => n + e.tok, 0),
+              requestLimit: this.finite(this.limits.globalRequestsPerMinute) ? this.limits.globalRequestsPerMinute : null,
+              tokenLimit: this.finite(this.limits.globalTokensPerMinute) ? this.limits.globalTokensPerMinute : null
+            }
+          }
+        })()),
         // The capped figure: the last 24 hours plus answers in progress.
         globalUsed: Math.round(this.rollingUsed(await this.hours()) + open.reduce((n, r) => n + r.neurons, 0)),
         globalLimit: this.limits.globalDailyNeurons,

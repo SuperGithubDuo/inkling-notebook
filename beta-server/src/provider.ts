@@ -12,6 +12,11 @@
  *   openrouter-free  OpenRouter's free variant (qwen/qwen3.8-27b:free): no charge, a
  *                account-wide daily and per-minute request quota, and a request body
  *                locked so it can never be routed to a paid endpoint
+ *   groq         Groq's free plan (qwen/qwen3.8-27b, a PREVIEW model there): no payment method
+ *                on the account, so nothing can be billed; account-wide request AND token
+ *                quotas (30 req/min, 1,000 req/day, 8,000 tokens/min, 200,000 tokens/day) that
+ *                the server never plans to exceed, and a stop if the account's limits ever
+ *                show it is no longer on the free plan
  *
  * The desktop app never knows which one answers; it talks only to the Worker.
  *
@@ -25,11 +30,11 @@
  * carry only a kind and an HTTP status.
  */
 
-export type ProviderId = 'workers-ai' | 'deepinfra' | 'openrouter' | 'openrouter-free' | 'openai-compatible'
+export type ProviderId = 'workers-ai' | 'deepinfra' | 'openrouter' | 'openrouter-free' | 'groq' | 'openai-compatible'
 export type ExternalProviderId = Exclude<ProviderId, 'workers-ai'>
 
 /** How a provider is asked to turn Qwen's hidden ("thinking") reasoning off. */
-type ThinkingStyle = 'chat_template_kwargs' | 'openrouter_reasoning' | 'reasoning_effort_none'
+type ThinkingStyle = 'chat_template_kwargs' | 'openrouter_reasoning' | 'reasoning_effort_none' | 'groq'
 
 export interface ProviderPreset {
   baseUrl: string
@@ -54,7 +59,28 @@ export interface ProviderPreset {
   forbiddenExtra?: string[]
   /** Answers cost nothing: a reported charge above zero is a misconfiguration to stop on. */
   free?: boolean
+  /** The only model IDs this free preset may ask for (anything else could be a paid model). */
+  freeModels?: string[]
+  /**
+   * The provider's documented FREE-plan limits for the model, account-wide. Configured quotas may
+   * not exceed them, and the server refuses to start without request and token quotas set.
+   */
+  freeLimits?: { requestsPerDay: number; requestsPerMinute: number; tokensPerDay: number; tokensPerMinute: number }
+  /**
+   * Response headers that report the account's limits (Groq: x-ratelimit-limit-requests is the daily
+   * request limit). A value above the free plan's means the account was upgraded to a paid plan:
+   * the server stops answering rather than run up a bill.
+   */
+  planGuard?: { header: string; maxFree: number }[]
+  /** Fixed input tokens the provider counts per image (Groq: 2,048); the estimate never counts fewer. */
+  imageTokens?: number
 }
+
+/**
+ * Groq's documented free-plan limits for qwen/qwen3.8-27b (console.groq.com/docs/rate-limits,
+ * read 3 Nov 2026). Rate limits there apply to the organization, not to a key.
+ */
+export const GROQ_FREE_LIMITS = { requestsPerDay: 1000, requestsPerMinute: 30, tokensPerDay: 200_000, tokensPerMinute: 8000 }
 
 /** Checked against the providers' own documentation, Nov 2026 (docs/AI-PROVIDERS.md). */
 export const PRESETS: Record<ExternalProviderId, ProviderPreset> = {
@@ -81,6 +107,26 @@ export const PRESETS: Record<ExternalProviderId, ProviderPreset> = {
     // a price ceiling of zero, so OpenRouter refuses rather than bill.
     lockedBody: { provider: { data_collection: 'deny', allow_fallbacks: false, max_price: { prompt: 0, completion: 0, request: 0, image: 0 } } },
     forbiddenExtra: ['models', 'route', 'model', 'plugins']
+  },
+  groq: {
+    baseUrl: 'https://api.groq.com/openai/v1',
+    model: 'qwen/qwen3.8-27b',
+    thinking: 'groq',
+    includeUsage: true,
+    costMultiplier: 1,
+    free: true,
+    freeModels: ['qwen/qwen3.8-27b'],
+    freeLimits: GROQ_FREE_LIMITS,
+    // Groq: requests headers are per DAY, tokens headers per MINUTE.
+    planGuard: [
+      { header: 'x-ratelimit-limit-requests', maxFree: GROQ_FREE_LIMITS.requestsPerDay },
+      { header: 'x-ratelimit-limit-tokens', maxFree: GROQ_FREE_LIMITS.tokensPerMinute }
+    ],
+    imageTokens: 2048,
+    // Locked, merged last: the standard on-demand tier (never "flex"/"performance"/"auto", which can
+    // pick a tier the free plan doesn't have), and any reasoning in its own field so it is counted, never shown.
+    lockedBody: { service_tier: 'on_demand', reasoning_format: 'parsed' },
+    forbiddenExtra: ['model', 'models', 'service_tier', 'tools', 'tool_choice', 'compound_custom', 'search_settings', 'documents']
   },
   'openai-compatible': { baseUrl: '', model: '', thinking: 'chat_template_kwargs', includeUsage: true, costMultiplier: 1 }
 }
@@ -109,6 +155,7 @@ export type UpstreamKind =
   | 'json_mode'
   | 'bad_request'
   | 'malformed' // a reply we could not read
+  | 'paid_plan' // the provider account's limits are no longer the free plan's: stop, don't bill
   | 'other'
 
 /** A provider failure, by kind. The message never contains what was sent or what the provider said. */
@@ -201,13 +248,18 @@ export function toProviderBody(preset: ProviderPreset, model: string, inputs: Re
   const thinkingOff = chat_template_kwargs?.enable_thinking === false
   const body: Record<string, unknown> = { ...rest, model }
   // max_tokens is the field every OpenAI-compatible host reads; it caps the answer, reasoning included.
-  if (typeof max_completion_tokens === 'number') body.max_tokens = max_completion_tokens
+  // Groq has deprecated it for max_completion_tokens.
+  if (typeof max_completion_tokens === 'number') body[preset.thinking === 'groq' ? 'max_completion_tokens' : 'max_tokens'] = max_completion_tokens
   if (preset.thinking === 'chat_template_kwargs') {
     if (thinkingOff) body.chat_template_kwargs = { enable_thinking: false }
     else if (reasoning_effort) body.reasoning_effort = reasoning_effort
   } else if (preset.thinking === 'openrouter_reasoning') {
     body.reasoning = thinkingOff ? { enabled: false } : reasoning_effort ? { effort: reasoning_effort } : undefined
     if (body.reasoning === undefined) delete body.reasoning
+  } else if (preset.thinking === 'groq') {
+    // Groq's Qwen 3.8 27B reasons only when asked (its default is none, and the docs disagree on whether
+    // "none" itself is accepted), so "off" sends nothing; on, only the efforts Groq lists for this model.
+    if (!thinkingOff && typeof reasoning_effort === 'string' && ['low', 'medium', 'high'].includes(reasoning_effort)) body.reasoning_effort = reasoning_effort
   } else {
     body.reasoning_effort = thinkingOff ? 'none' : (reasoning_effort ?? undefined)
     if (body.reasoning_effort === undefined) delete body.reasoning_effort
@@ -297,6 +349,15 @@ export async function openRouterAccount(apiKey: string, doFetch: typeof fetch = 
   return { freeRequestsToday: d.free_model_daily_requests, isFreeTier: d.is_free_tier, limit: d.limit, limitRemaining: d.limit_remaining, usage: d.usage }
 }
 
+/** True when a limit header shows more than the free plan allows (an upgraded, billable account). */
+export function planUpgraded(preset: ProviderPreset, headers: Headers): boolean {
+  for (const g of preset.planGuard ?? []) {
+    const v = Number(headers.get(g.header))
+    if (headers.has(g.header) && Number.isFinite(v) && v > g.maxFree) return true
+  }
+  return false
+}
+
 /** An OpenAI-compatible provider with Inkling's timeouts and bounded retries. */
 export function externalProvider(opts: ExternalOptions): AiBinding {
   const preset = PRESETS[opts.id]
@@ -334,6 +395,11 @@ export function externalProvider(opts: ExternalOptions): AiBinding {
             signal: ctrl.signal
           })
           clearTimeout(timer)
+          // The account's limits say it is on a paid plan: don't read on (or retry), stop everything.
+          if (planUpgraded(preset, res.headers)) {
+            void res.body?.cancel().catch(() => undefined)
+            throw new UpstreamError('paid_plan', res.status)
+          }
           if (res.ok) {
             const type = res.headers.get('content-type') ?? ''
             if (streamed && res.body && /event-stream/i.test(type)) return guardStream(res.body, idleMs, totalMs)
@@ -363,6 +429,7 @@ export function externalProvider(opts: ExternalOptions): AiBinding {
           if (!RETRYABLE.has(res.status) || kind === 'credits' || (res.status === 429 && opts.retryRateLimit === false)) throw failure
         } catch (err) {
           clearTimeout(timer)
+          if (err instanceof UpstreamError && err.kind === 'paid_plan') throw err
           if (err instanceof UpstreamError && !(err.status && RETRYABLE.has(err.status) && err.kind !== 'credits' && !(err.status === 429 && opts.retryRateLimit === false))) throw err
           failure = err instanceof UpstreamError ? err : new UpstreamError(ctrl.signal.aborted ? 'timeout' : 'other')
         }

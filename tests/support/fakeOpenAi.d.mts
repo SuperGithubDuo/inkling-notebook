@@ -20,4 +20,4 @@ export interface FakeOpenAi {
   completions(): Array<{ method: string; path: string; headers: Record<string, any>; body: any }>
   close(): Promise<void>
 }
-export function startFakeOpenAi(options?: { key?: string; path?: string; reportCost?: (usage: any) => number | undefined; cachedTokens?: number }): Promise<FakeOpenAi>
+export function startFakeOpenAi(options?: { key?: string; path?: string; reportCost?: (usage: any) => number | undefined; cachedTokens?: number; responseHeaders?: Record<string, string>; groqUsage?: boolean }): Promise<FakeOpenAi>

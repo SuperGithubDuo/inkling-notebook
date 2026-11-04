@@ -30,7 +30,7 @@ export interface Env {
   IMAGE_PATCH: string
   MAX_INPUT_TOKENS: string
   // ---- External provider (unset keeps Workers AI) ----
-  /** "workers-ai" (default) | "deepinfra" | "openrouter" | "openrouter-free" | "openai-compatible". */
+  /** "workers-ai" (default) | "deepinfra" | "openrouter" | "openrouter-free" | "groq" | "openai-compatible". */
   INFERENCE_PROVIDER?: string
   /** Secret (wrangler secret put INFERENCE_API_KEY): the provider's API key. Never leaves the Worker except to that provider. */
   INFERENCE_API_KEY?: string
@@ -65,6 +65,12 @@ export interface Env {
    */
   GLOBAL_REQUESTS_PER_DAY?: string
   GLOBAL_REQUESTS_PER_MINUTE?: string
+  /**
+   * The provider's account-wide token quota (input + output), over any 24 hours and any minute
+   * (required for "groq": set under Groq's free 200,000 a day / 8,000 a minute).
+   */
+  GLOBAL_TOKENS_PER_DAY?: string
+  GLOBAL_TOKENS_PER_MINUTE?: string
   /** Reservation margin on the input estimate (default 1.5 on an external provider). */
   INPUT_ESTIMATE_MARGIN?: string
   /** Oldest app data notice accepted. Default: 4 with an external provider (its notice names it), 0 on Workers AI. */
@@ -87,7 +93,7 @@ export const NOTICE_NOT_YET_SHIPPED = 99
 
 export function providerOf(env: Env): ProviderId {
   const p = (env.INFERENCE_PROVIDER ?? '').trim()
-  return p === 'deepinfra' || p === 'openrouter' || p === 'openrouter-free' || p === 'openai-compatible' ? p : 'workers-ai'
+  return p === 'deepinfra' || p === 'openrouter' || p === 'openrouter-free' || p === 'groq' || p === 'openai-compatible' ? p : 'workers-ai'
 }
 
 /**
@@ -117,7 +123,9 @@ export function externalLimits(env: Env): LedgerLimits | string {
     softFraction: pos(env.SOFT_LIMIT_FRACTION) ?? 0.8,
     softFactor: pos(env.SOFT_LIMIT_FACTOR) ?? 0.5,
     globalRequestsPerDay: pos(env.GLOBAL_REQUESTS_PER_DAY),
-    globalRequestsPerMinute: pos(env.GLOBAL_REQUESTS_PER_MINUTE)
+    globalRequestsPerMinute: pos(env.GLOBAL_REQUESTS_PER_MINUTE),
+    globalTokensPerDay: pos(env.GLOBAL_TOKENS_PER_DAY),
+    globalTokensPerMinute: pos(env.GLOBAL_TOKENS_PER_MINUTE)
   }
 }
 
@@ -141,7 +149,9 @@ export function limits(env: Env): LedgerLimits {
 }
 
 /** Who answers, and at what price, from the Worker's settings; a string explains a setting that is missing (serve nothing). */
-export function inference(env: Env): { ai: AiBinding; provider: ProviderId; model: string; publicModel: string; rates: ServerConfig['rates']; minNotice: number; inputMargin: number; freeProvider?: boolean } | string {
+export function inference(env: Env):
+  | { ai: AiBinding; provider: ProviderId; model: string; publicModel: string; rates: ServerConfig['rates']; minNotice: number; inputMargin: number; freeProvider?: boolean; tokenQuota?: boolean; imageMinTokens?: number }
+  | string {
   const provider = providerOf(env)
   if (provider === 'workers-ai') {
     // Refuse rather than risk billed usage on a Workers Paid account.
@@ -170,10 +180,25 @@ export function inference(env: Env): { ai: AiBinding; provider: ProviderId; mode
   if (!input || !output) return 'PRICE_INPUT_USD_PER_M and PRICE_OUTPUT_USD_PER_M must be set'
   const model = env.UPSTREAM_MODEL?.trim() || PRESETS[id].model
   if (!model) return 'UPSTREAM_MODEL must be set'
+  const preset = PRESETS[id]
   if (free) {
-    // Never a paid model: only a ":free" variant, and the account-wide request quota must be set.
-    if (!model.endsWith(':free')) return 'UPSTREAM_MODEL must be a ":free" model for openrouter-free'
-    if (!l.globalRequestsPerDay || !l.globalRequestsPerMinute) return 'GLOBAL_REQUESTS_PER_DAY and GLOBAL_REQUESTS_PER_MINUTE must be set for openrouter-free'
+    // Never a paid model: only a ":free" variant (OpenRouter) or the preset's own free model (Groq).
+    if (preset.freeModels ? !preset.freeModels.includes(model) : !model.endsWith(':free')) return `UPSTREAM_MODEL must be ${preset.freeModels ? preset.freeModels.join(' or ') : 'a ":free" model'} for ${id}`
+    // The account-wide request quota must be set.
+    if (!l.globalRequestsPerDay || !l.globalRequestsPerMinute) return `GLOBAL_REQUESTS_PER_DAY and GLOBAL_REQUESTS_PER_MINUTE must be set for ${id}`
+  }
+  if (preset.freeLimits) {
+    // A token quota too, and no quota above the provider's documented free plan: the server never plans to pass it.
+    const f = preset.freeLimits
+    if (!l.globalTokensPerDay || !l.globalTokensPerMinute) return `GLOBAL_TOKENS_PER_DAY and GLOBAL_TOKENS_PER_MINUTE must be set for ${id}`
+    if (l.globalRequestsPerDay! > f.requestsPerDay) return `GLOBAL_REQUESTS_PER_DAY must be at most ${f.requestsPerDay} (${id} free plan)`
+    if (l.globalRequestsPerMinute! > f.requestsPerMinute) return `GLOBAL_REQUESTS_PER_MINUTE must be at most ${f.requestsPerMinute} (${id} free plan)`
+    if (l.globalTokensPerDay > f.tokensPerDay) return `GLOBAL_TOKENS_PER_DAY must be at most ${f.tokensPerDay} (${id} free plan)`
+    if (l.globalTokensPerMinute > f.tokensPerMinute) return `GLOBAL_TOKENS_PER_MINUTE must be at most ${f.tokensPerMinute} (${id} free plan)`
+    // The base URL is the provider's own: an override could point the key and requests somewhere else.
+    // (A local test double is allowed: a deployed Worker can't reach this machine's localhost.)
+    const base = env.UPSTREAM_BASE_URL?.replace(/\/+$/, '')
+    if (base && base !== preset.baseUrl && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(base)) return `UPSTREAM_BASE_URL can't be changed for ${id}`
   }
   let extraBody: Record<string, unknown> | undefined
   if (env.UPSTREAM_EXTRA_BODY) {
@@ -215,6 +240,8 @@ export function inference(env: Env): { ai: AiBinding; provider: ProviderId; mode
       ...(free ? { ignoreReportedCost: true } : {})
     },
     freeProvider: free,
+    ...(preset.freeLimits ? { tokenQuota: true } : {}),
+    ...(preset.imageTokens ? { imageMinTokens: preset.imageTokens } : {}),
     // DeepInfra is named in the app's data notice from version 4. Any other host isn't named in a
     // shipped notice yet: it needs a new notice (and CLOUD_CONSENT_VERSION) before real users reach it.
     minNotice: num(env.MIN_NOTICE_VERSION, id === 'deepinfra' ? 4 : NOTICE_NOT_YET_SHIPPED),

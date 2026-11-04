@@ -1,0 +1,78 @@
+{
+  // Inkling's AI server answering through Groq's FREE plan (qwen/qwen3.8-27b, a preview model
+  // on Groq). A separate Worker ("inkling-ai-groq-next") for testing with a development key;
+  // production (wrangler.jsonc, Workers AI) is not touched by it.
+  //
+  //   npx wrangler deploy -c wrangler.groq.jsonc
+  //   npx wrangler secret put INFERENCE_API_KEY -c wrangler.groq.jsonc   # a Groq key (gsk_…), free plan
+  //   npx wrangler secret put ADMIN_TOKEN -c wrangler.groq.jsonc         # ≥ 32 random characters
+  //
+  // Nothing can be billed: the Groq organization has no payment method (the free plan), the
+  // server only asks for qwen/qwen3.8-27b on the on-demand tier, and it pauses itself if
+  // Groq's headers ever report limits above the free plan's (an upgraded, billable account).
+  //
+  // Not for real students yet: no shipped app's data notice names Groq (see docs/AI-PROVIDERS.md).
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "inkling-ai-groq-next",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "alias": { "@shared": "../src/shared" },
+  // Kept so a rollback is a one-line change (INFERENCE_PROVIDER → "workers-ai"); unused otherwise.
+  "ai": { "binding": "AI" },
+  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "LedgerObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LedgerObject"] }],
+  // Error kinds only; never request content (the Worker never logs it), no per-request invocation logs.
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
+  "vars": {
+    "INFERENCE_PROVIDER": "groq",
+    "UPSTREAM_MODEL": "qwen/qwen3.8-27b",
+    // Groq's free plan for this model, account-wide (console.groq.com/docs/rate-limits, 3 Nov 2026):
+    // 30 requests/min, 1,000/day, 8,000 tokens/min, 200,000 tokens/day. The server refuses to start
+    // above those; these leave ~10% for probes and the operator on the same account.
+    "GLOBAL_REQUESTS_PER_DAY": "900",
+    "GLOBAL_REQUESTS_PER_MINUTE": "25",
+    "GLOBAL_TOKENS_PER_DAY": "180000",
+    "GLOBAL_TOKENS_PER_MINUTE": "7000",
+    // Every request's worst case (input × margin + output cap) must fit in a minute's 7,000 tokens:
+    // 4,000 × 1.25 + 1,800 (the largest cap, practice) = 6,800.
+    "MAX_INPUT_TOKENS": "4000",
+    "INPUT_ESTIMATE_MARGIN": "1.25",
+    // SHADOW prices (DeepInfra's list price): nothing is billed; they only share out the free quota.
+    "PRICE_INPUT_USD_PER_M": "0.20",
+    "PRICE_OUTPUT_USD_PER_M": "2.50",
+    "GLOBAL_DAILY_USD": "1.00",
+    "GLOBAL_MONTHLY_USD": "30",
+    // The token quota allows ~100 answers a day: an installation ~10 of them, a network ~3 installations.
+    "INSTALL_DAILY_USD": "0.008",
+    "INSTALL_MONTHLY_USD": "0.15",
+    "NETWORK_DAILY_USD": "0.024",
+    "TYPICAL_USD_PER_ANSWER": "0.0008",
+    "SOFT_LIMIT_FRACTION": "0.8",
+    "SOFT_LIMIT_FACTOR": "0.5",
+    "INSTALL_PER_MINUTE": "4",
+    "NETWORK_PER_MINUTE": "12",
+    "INSTALL_CONCURRENT": "1",
+    "NETWORK_CONCURRENT": "3",
+    "GLOBAL_CONCURRENT": "6",
+    "UPSTREAM_MAX_ATTEMPTS": "2",
+    "UPSTREAM_TIMEOUT_MS": "45000",
+    "UPSTREAM_IDLE_TIMEOUT_MS": "45000",
+    // TEST ONLY: no shipped app's notice names Groq, so production would leave this at its
+    // default (99, closed). Notice 4 lets the test suites (which send 4) reach this test Worker.
+    "MIN_NOTICE_VERSION": "4",
+    "REASONING_EFFORT": "",
+    "DISABLE_THINKING": "true",
+    "STRUCTURED": "prompt",
+    "IMAGE_PATCH": "28",
+    "MODEL": "@cf/qwen/qwen3.8-27b",
+    "ACCOUNT_PLAN": "free",
+    "GLOBAL_DAILY_NEURONS": "9000",
+    "INSTALL_DAILY_NEURONS": "900",
+    "NETWORK_DAILY_NEURONS": "2700",
+    "TYPICAL_NEURONS_PER_ANSWER": "90",
+    "INPUT_NEURONS_PER_M": "40909",
+    "OUTPUT_NEURONS_PER_M": "290909"
+  }
+}
