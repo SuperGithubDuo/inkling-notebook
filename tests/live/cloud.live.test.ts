@@ -106,9 +106,10 @@ describe.skipIf(!enabled)(`live cloud AI, ${CLOUD_MODEL}`, () => {
     installations++
     const s = service.status()
     if (s.provider !== 'cloud' || !aiReady(s)) throw new Error(`A fresh install is not ready on the cloud AI: ${JSON.stringify(s)}`)
+    // Nothing (not even a connection check) is sent before the cloud notice is accepted.
+    await service.setConsent(true)
     const t = await service.test()
     if (!t.ok) throw new Error(`Anonymous status check failed: ${JSON.stringify(t)}`)
-    await service.setConsent(true)
   }
 
   beforeAll(async () => {
