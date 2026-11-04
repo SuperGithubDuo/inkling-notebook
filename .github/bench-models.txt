@@ -4,7 +4,6 @@
 # The optional text model turns on text-only routing (beta-server/src/route.ts) for the run.
 # Budgets cap what each run may use; the workflow also refuses to start a run that would
 # leave production less than 5,000 of today's free 10,000 Neurons.
-# Run 5 (4 Nov 2026): routing on, every scenario (original 13 answers + the text scenarios);
-# then the new text scenarios on Qwen alone, as their baseline.
-@cf/qwen/qwen3.8-27b | 40909,290909 | 1600 | low | off | @cf/google/gemma-4-26b-a4b-it | 9091,27273 | all
-@cf/qwen/qwen3.8-27b | 40909,290909 | 1000 | low | off | | | text
+# Run 6 (4 Nov 2026): the text scenarios again with routing on, after correcting checks
+# that expected final answers from a tutor told to guide (both models "failed" them).
+@cf/qwen/qwen3.8-27b | 40909,290909 | 350 | low | off | @cf/google/gemma-4-26b-a4b-it | 9091,27273 | text

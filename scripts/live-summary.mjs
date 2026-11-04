@@ -54,6 +54,14 @@ console.log(`::notice title=${tag}allowance::${esc(summary.filter(Boolean).join(
 
 // With LIVE_SUMMARY_TEXTS=1: every answer's text (shortened), so quality can be read from the check run too.
 if (process.env.LIVE_SUMMARY_TEXTS === '1') {
-  const texts = r.runs.map((x) => `### ${x.scenario}/${x.task}\n${(x.text || x.error || '').slice(0, 900)}`)
-  console.log(`::notice title=${tag}answers::${esc(texts.join('\n\n').slice(0, 60000))}`)
+  const texts = r.runs.map((x) => `### ${x.scenario}/${x.task}${x.model ? ` [${x.model.split('/').at(-1)}]` : ''}\n${(x.text || x.error || '').slice(0, 1500)}`)
+  // GitHub shortens long annotations: a few notices of about 6,000 characters each.
+  const parts = []
+  let cur = ''
+  for (const t of texts) {
+    if (cur && cur.length + t.length > 6000) (parts.push(cur), (cur = ''))
+    cur += (cur ? '\n\n' : '') + t
+  }
+  if (cur) parts.push(cur)
+  parts.slice(0, 5).forEach((p, i) => console.log(`::notice title=${tag}answers ${i + 1}/${Math.min(parts.length, 5)}::${esc(p)}`))
 }
