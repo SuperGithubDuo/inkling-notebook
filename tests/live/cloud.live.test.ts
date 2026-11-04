@@ -37,6 +37,7 @@ import { parseTaskResult } from '../../src/shared/tutor'
 import { taskSpec } from '../../src/main/ai/prompts'
 import { registerScenarios, img, selection, type Run } from './scenarios'
 import { registerTextScenarios } from './scenarios-text'
+import { practiceTally, registerPracticeScenarios } from './scenarios-practice'
 import { startBetaServer, RATES, type BetaServer } from '../support/fakeBeta.mjs'
 import { workersAiRest } from '../support/workersAiRest.mjs'
 
@@ -70,8 +71,8 @@ const TEXT_MODEL = (() => {
   const tasks = (env.INKLING_LIVE_TEXT_TASKS ?? '').split(',').map((t) => t.trim()).filter((t) => t === 'chat' || t === 'practice' || t === 'check') as Array<'chat' | 'practice' | 'check'>
   return { model, rates: { inputPerM: i, outputPerM: o }, ...(tasks.length ? { tasks } : {}) }
 })()
-/** Which scenarios run: "all" (default), "core" (the original 13 answers) or "text" (scenarios-text.ts only). */
-const SCENARIOS = env.INKLING_LIVE_SCENARIOS === 'core' || env.INKLING_LIVE_SCENARIOS === 'text' ? env.INKLING_LIVE_SCENARIOS : 'all'
+/** Which scenarios run: "all" (default), "core" (the original 13 answers), "text" (scenarios-text.ts) or "practice" (scenarios-practice.ts). */
+const SCENARIOS = (['core', 'text', 'practice'] as const).find((s) => s === env.INKLING_LIVE_SCENARIOS) ?? 'all'
 const SLUG = (MODEL.split('/').at(-1)! + (TEXT_MODEL ? `+${TEXT_MODEL.model.split('/').at(-1)}` : '') + (SCENARIOS === 'all' ? '' : `-${SCENARIOS}`)).replace(/[^A-Za-z0-9.+_-]/g, '_')
 if (!enabled) console.log('\n  Live cloud tests skipped: set INKLING_BETA_URL + INKLING_LIVE_CLOUD=1, or CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (see the comment at the top of this file).\n')
 
@@ -170,7 +171,7 @@ describe.skipIf(!enabled)(`live cloud AI, ${MODEL}`, () => {
     await server?.close()
     await mkdir(join(root, 'test-results'), { recursive: true })
     const base = join(root, 'test-results', `live-cloud-${SLUG}`)
-    await writeFile(`${base}.json`, JSON.stringify({ model: MODEL, textModel: TEXT_MODEL, scenarios: SCENARIOS, rates: LIVE_RATES, mode, at: new Date().toISOString(), quotaBefore, quotaAfter, probes, runs }, null, 2))
+    await writeFile(`${base}.json`, JSON.stringify({ model: MODEL, textModel: TEXT_MODEL, scenarios: SCENARIOS, practiceTally, rates: LIVE_RATES, mode, at: new Date().toISOString(), quotaBefore, quotaAfter, probes, runs }, null, 2))
     await writeFile(`${base}.md`, report())
     console.log(`\n  Report: ${base}.md`)
   })
@@ -232,10 +233,11 @@ describe.skipIf(!enabled)(`live cloud AI, ${MODEL}`, () => {
     expect.soft(pass, `${r.scenario}/${r.task}: ${name}${detail ? ` — ${detail}` : ''}`).toBe(true)
   }
 
-  if (SCENARIOS !== 'text') registerScenarios({ run, check, timeout: 300_000 })
-  if (SCENARIOS !== 'core') registerTextScenarios({ run, check, timeout: 300_000 })
+  if (SCENARIOS === 'all' || SCENARIOS === 'core') registerScenarios({ run, check, timeout: 300_000 })
+  if (SCENARIOS === 'all' || SCENARIOS === 'text') registerTextScenarios({ run, check, timeout: 300_000 })
+  if (SCENARIOS === 'all' || SCENARIOS === 'practice') registerPracticeScenarios({ run, check, timeout: 300_000 })
 
-  it.skipIf(SCENARIOS === 'text')('F: a follow-up question carries the conversation', { timeout: 300_000 }, async () => {
+  it.skipIf(SCENARIOS !== 'all' && SCENARIOS !== 'core')('F: a follow-up question carries the conversation', { timeout: 300_000 }, async () => {
     const image = await img('scenario-a.jpg')
     const first = await run('F', { task: 'chat', turns: [{ role: 'user', parts: [selection, image, { text: 'Give me a hint for the next step.' }] }] })
     check(first, 'answered', first.ok, first.error)

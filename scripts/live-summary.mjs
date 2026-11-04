@@ -50,6 +50,7 @@ const summary = [
   `Blended interaction: ${Number.isFinite(blended) ? blended.toFixed(0) : '–'} N → ${Number.isFinite(blended) ? Math.floor(10000 / blended) : '–'} per day on 10,000 free Neurons (${Number.isFinite(blended) ? Math.floor(9000 / blended) : '–'} under the 9,000 cap)`,
   r.quotaBefore && r.quotaAfter ? `Server ledger, whole service: ${r.quotaBefore.globalUsed}→${r.quotaAfter.globalUsed} of ${r.quotaAfter.globalLimit}` : ''
 ]
+if (r.practiceTally && r.practiceTally.checked + r.practiceTally.unchecked > 0) summary.push(`Practice answers checked mechanically: ${r.practiceTally.correct}/${r.practiceTally.checked} correct (${r.practiceTally.unchecked} not checkable automatically)`)
 console.log(`::notice title=${tag}allowance::${esc(summary.filter(Boolean).join('\n'))}`)
 
 // With LIVE_SUMMARY_TEXTS=1: every answer's text (shortened), so quality can be read from the check run too.

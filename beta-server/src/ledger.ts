@@ -98,7 +98,7 @@ export interface ModelStats {
   /** Requests carrying a handwriting image somewhere in the conversation. */
   image: number
   text: number
-  /** Sent to this model because of the routing rule: 'image' = main model, 'text' = text model. */
+  /** Which side of the routing rule sent it here: 'main' = main model, 'text' = text model. */
   routes: Record<string, number>
   tasks: Record<string, number>
   neurons: number
@@ -109,7 +109,7 @@ export interface ModelStats {
 /** What the handler reports after each model call. */
 export interface UsageRecord {
   model: string
-  route: 'image' | 'text'
+  route: 'main' | 'text'
   task: string
   image: boolean
   neurons: number

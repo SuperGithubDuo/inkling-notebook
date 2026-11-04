@@ -5,7 +5,7 @@
  *   - anything that involves handwriting goes to the main model (MODEL, Qwen 3.8 27B),
  *     exactly as before;
  *   - a request with no handwriting context at all, for a task listed in
- *     TEXT_MODEL_TASKS (default: practice sets and typed answer checks), may go
+ *     TEXT_MODEL_TASKS (default: practice generation only), may go
  *     to the text model (MODEL_TEXT, e.g. Gemma 4 26B A4B), with thinking off.
  *
  * "Handwriting context" is decided conservatively, from the request alone:
@@ -30,8 +30,8 @@ import type { Rates } from './upstream'
 export const IMAGE_OMITTED = '(image omitted)'
 
 export interface ModelChoice {
-  /** 'image': the main model (handwriting context); 'text': the text-only model. */
-  route: 'image' | 'text'
+  /** 'main': the main model (everything with handwriting context, and every task not listed); 'text': the text-only model. */
+  route: 'main' | 'text'
   model: string
   rates: Rates
   reasoningEffort: string
@@ -41,11 +41,11 @@ export interface ModelChoice {
 /** Tasks the text model may answer. Markup ('annotate') never: it always reads handwriting. */
 export type TextTask = 'chat' | 'practice' | 'check'
 /**
- * Default when MODEL_TEXT is set without TEXT_MODEL_TASKS: the structured tasks only. In the live
- * evaluation (4 Nov 2026) Gemma's practice sets and typed answer checks were right every time, but
- * in a typed chat it told a student with a correct answer (11/15) to "take a second look".
+ * Default when MODEL_TEXT is set without TEXT_MODEL_TASKS: practice generation only. In the live
+ * evaluation (4 Nov 2026) Gemma told a student with a correct answer (11/15) to "take a second
+ * look", so anything that judges a student's answer (chat, answer checks) stays on the main model.
  */
-export const DEFAULT_TEXT_TASKS: readonly TextTask[] = ['practice', 'check']
+export const DEFAULT_TEXT_TASKS: readonly TextTask[] = ['practice']
 
 export interface TextModelConfig {
   model: string
@@ -70,7 +70,7 @@ export function chooseModel(
   text?: TextModelConfig | null
 ): ModelChoice {
   const tasks: readonly string[] = text?.tasks ?? DEFAULT_TEXT_TASKS
-  if (!text || !tasks.includes(task) || needsMainModel(task, turns)) return { route: 'image', ...main }
+  if (!text || !tasks.includes(task) || needsMainModel(task, turns)) return { route: 'main', ...main }
   // Thinking off and no reasoning effort: the settings the benchmark measured (docs/benchmarks/).
   return { route: 'text', model: text.model, rates: text.rates, reasoningEffort: '', disableThinking: true }
 }

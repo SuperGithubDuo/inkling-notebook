@@ -196,7 +196,8 @@ export function classifyUpstream(err: unknown): { kind: UpstreamErrorKind; detai
   if (/\b4006\b|daily free allocation/i.test(detail)) return { kind: 'free_allocation', detail }
   if (/3040|capacity/i.test(detail)) return { kind: 'capacity', detail }
   if (/429|rate limit|too many requests|3036/i.test(detail)) return { kind: 'rate_limited', detail }
-  if (/5007|no such model|model .*not found|not supported/i.test(detail)) return { kind: 'model_unavailable', detail }
+  // 5035: the model isn't available on the account's plan (e.g. a model listed but not on Workers Free).
+  if (/5007|5035|no such model|model .*not found|not supported|not available on the workers free plan/i.test(detail)) return { kind: 'model_unavailable', detail }
   if (/json mode/i.test(detail)) return { kind: 'json_mode', detail }
   if (/^.{0,20}(400|5006|5021|3030)\b|invalid input|validation/i.test(detail)) return { kind: 'bad_request', detail }
   return { kind: 'other', detail }

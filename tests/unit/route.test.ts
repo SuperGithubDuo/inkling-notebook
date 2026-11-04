@@ -28,7 +28,7 @@ const entry = (role: 'user' | 'model', parts: AiPart[]): ThreadEntry => ({ role,
 
 describe('routing rule', () => {
   it('is off without a text model: everything goes to the main model', () => {
-    for (const task of ['chat', 'practice', 'check', 'annotate'] as const) expect(chooseModel(task, ask(text('hi')), MAIN, null)).toMatchObject({ route: 'image', model: CLOUD_MODEL, reasoningEffort: 'low' })
+    for (const task of ['chat', 'practice', 'check', 'annotate'] as const) expect(chooseModel(task, ask(text('hi')), MAIN, null)).toMatchObject({ route: 'main', model: CLOUD_MODEL, reasoningEffort: 'low' })
   })
 
   it('sends text-only chat, practice and typed answer checks to the text model, thinking off', () => {
@@ -37,9 +37,9 @@ describe('routing rule', () => {
     }
   })
 
-  it('by default the text model answers only practice sets and typed answer checks, never chat', () => {
+  it('by default the text model answers only practice generation: never chat or answer checks', () => {
     expect(chooseModel('practice', ask(text('Two problems')), MAIN, DEFAULT_TEXT).model).toBe(GEMMA)
-    expect(chooseModel('check', ask(text('Student answer (typed): x = 4')), MAIN, DEFAULT_TEXT).model).toBe(GEMMA)
+    expect(chooseModel('check', ask(text('Student answer (typed): x = 4')), MAIN, DEFAULT_TEXT).model).toBe(CLOUD_MODEL)
     expect(chooseModel('chat', ask(text('I got 11/15. Is that right?')), MAIN, DEFAULT_TEXT).model).toBe(CLOUD_MODEL)
     expect(chooseModel('chat', ask(text('hi')), MAIN, { ...TEXT, tasks: ['practice'] }).model).toBe(CLOUD_MODEL)
   })
@@ -135,18 +135,18 @@ describe('routing rule', () => {
       expect(textModelFrom({ MODEL_TEXT: 'gpt-4o', TEXT_INPUT_NEURONS_PER_M: '1', TEXT_OUTPUT_NEURONS_PER_M: '1' }, CLOUD_MODEL)).toBeNull()
       expect(textModelFrom({ MODEL_TEXT: 'https://example.com/m', TEXT_INPUT_NEURONS_PER_M: '1', TEXT_OUTPUT_NEURONS_PER_M: '1' }, CLOUD_MODEL)).toBeNull()
       expect(textModelFrom({ MODEL_TEXT: CLOUD_MODEL, TEXT_INPUT_NEURONS_PER_M: '1', TEXT_OUTPUT_NEURONS_PER_M: '1' }, CLOUD_MODEL)).toBeNull()
-      expect(textModelFrom({ MODEL_TEXT: ` ${GEMMA} `, TEXT_INPUT_NEURONS_PER_M: '9091', TEXT_OUTPUT_NEURONS_PER_M: '27273' }, CLOUD_MODEL)).toEqual({ ...DEFAULT_TEXT, tasks: ['practice', 'check'] })
+      expect(textModelFrom({ MODEL_TEXT: ` ${GEMMA} `, TEXT_INPUT_NEURONS_PER_M: '9091', TEXT_OUTPUT_NEURONS_PER_M: '27273' }, CLOUD_MODEL)).toEqual({ ...DEFAULT_TEXT, tasks: ['practice'] })
     })
     it('TEXT_MODEL_TASKS picks the tasks; markup and unknown names are ignored', () => {
       const env = { MODEL_TEXT: GEMMA, TEXT_INPUT_NEURONS_PER_M: '9091', TEXT_OUTPUT_NEURONS_PER_M: '27273' }
       expect(textModelFrom({ ...env, TEXT_MODEL_TASKS: 'chat, practice,check' }, CLOUD_MODEL)?.tasks).toEqual(['chat', 'practice', 'check'])
       expect(textModelFrom({ ...env, TEXT_MODEL_TASKS: 'annotate,check,bogus' }, CLOUD_MODEL)?.tasks).toEqual(['check'])
-      expect(textModelFrom({ ...env, TEXT_MODEL_TASKS: 'annotate' }, CLOUD_MODEL)?.tasks).toEqual(['practice', 'check'])
+      expect(textModelFrom({ ...env, TEXT_MODEL_TASKS: 'annotate' }, CLOUD_MODEL)?.tasks).toEqual(['practice'])
     })
     it('the shipped wrangler.jsonc leaves it off', async () => {
       const raw = await readFile(join(import.meta.dirname, '../../beta-server/wrangler.jsonc'), 'utf8')
       expect(raw).toMatch(/"MODEL_TEXT":\s*""/)
-      expect(raw).toMatch(/"TEXT_MODEL_TASKS":\s*"practice,check"/)
+      expect(raw).toMatch(/"TEXT_MODEL_TASKS":\s*"practice"/)
     })
   })
 })
@@ -243,7 +243,7 @@ describe('AI server with text-only routing', () => {
     const g = s.models.today[GEMMA]
     const q = s.models.today[CLOUD_MODEL]
     expect(g).toMatchObject({ requests: 2, image: 0, text: 2, routes: { text: 2 }, tasks: { chat: 1, practice: 1 }, errors: 1, errorKinds: { capacity: 1 } })
-    expect(q).toMatchObject({ requests: 1, image: 1, text: 0, routes: { image: 1 }, tasks: { chat: 1 }, errors: 0 })
+    expect(q).toMatchObject({ requests: 1, image: 1, text: 0, routes: { main: 1 }, tasks: { chat: 1 }, errors: 0 })
     expect(g.neurons).toBeCloseTo(neuronsFor({ inputTokens: 400, outputTokens: 50 }, GEMMA_RATES), 1)
     expect(q.neurons).toBeCloseTo(neuronsFor({ inputTokens: 1000, outputTokens: 200 }, RATES), 1)
     expect(s.models.estimatedCapacity).toBe(Math.floor(9000 / ((g.neurons + q.neurons) / 2)))
@@ -264,12 +264,38 @@ describe('per-model counts in the ledger', () => {
     const ledger = new Ledger(s, limits, () => t)
     expect((await ledger.summary()).models).toEqual({ today: {}, previous: null, estimatedCapacity: null })
     await ledger.record({ model: GEMMA, route: 'text', task: 'chat', image: false, neurons: 8 })
-    await ledger.record({ model: CLOUD_MODEL, route: 'image', task: 'annotate', image: true, neurons: 124 })
+    await ledger.record({ model: CLOUD_MODEL, route: 'main', task: 'annotate', image: true, neurons: 124 })
     t = Date.UTC(2026, 10, 5, 0, 10)
     const next = await ledger.summary()
     expect(next.models.today).toEqual({})
     expect(next.models.previous?.day).toBe('2026-11-04')
     expect(next.models.previous?.models[GEMMA]).toMatchObject({ requests: 1, text: 1, neurons: 8 })
     expect(next.models.previous?.models[CLOUD_MODEL]).toMatchObject({ requests: 1, image: 1, tasks: { annotate: 1 } })
+  })
+})
+
+describe('the text model becoming unavailable', () => {
+  let server: BetaServer
+  afterEach(async () => server?.close())
+  it('fails only the routed task, as "model unavailable", and clearing MODEL_TEXT restores it on the main model', async () => {
+    const glm = { model: '@cf/zai-org/glm-5.3-flash', rates: { inputPerM: 13636, outputPerM: 45455 }, tasks: ['practice'] as const }
+    const failing = { run: (m: string, i: Record<string, unknown>) => (m === glm.model ? Promise.reject(new Error('5035: AiError: Model @cf/zai-org/glm-5.3-flash is not available on the Workers Free plan')) : inner.run(m, i)) }
+    const inner = (await import('../support/fakeBeta.mjs')).fakeWorkersAi()
+    server = await startBetaServer({ ai: failing, textModel: glm })
+    const practice = await post(server, { task: 'practice', turns: ask(text('Two problems')) })
+    expect(practice.status).toBe(503)
+    expect(practice.json.error.code).toBe('model_unavailable')
+    const chat = await post(server, { task: 'chat', turns: ask(text('Where?')) }, 'inst_' + 'S'.repeat(32))
+    expect(chat.events.at(-1)?.event).toBe('done')
+    await server.settled()
+    const s = (await server.admin('GET', '/admin/summary')).body
+    expect(s.models.today[glm.model]).toMatchObject({ requests: 1, errors: 1, errorKinds: { model_unavailable: 1 } })
+    expect(s.models.today[CLOUD_MODEL]).toMatchObject({ requests: 1, errors: 0 })
+    await server.close()
+    // The switch: MODEL_TEXT cleared (textModel null) → practice answered by the main model again.
+    server = await startBetaServer({ ai: failing, textModel: textModelFrom({ MODEL_TEXT: '' }, CLOUD_MODEL) })
+    const again = await post(server, { task: 'practice', turns: ask(text('Two problems')) })
+    expect(again.events.at(-1)?.event).toBe('done')
+    expect(inner.calls.at(-1)?.model).toBe(CLOUD_MODEL)
   })
 })

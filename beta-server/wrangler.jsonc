@@ -45,7 +45,8 @@
     "MODEL_TEXT": "",
     "TEXT_INPUT_NEURONS_PER_M": "9091",
     "TEXT_OUTPUT_NEURONS_PER_M": "27273",
-    // Which text-only tasks it may answer. Chat is left out on purpose (see src/route.ts).
-    "TEXT_MODEL_TASKS": "practice,check"
+    // Which text-only tasks it may answer: practice generation only for the first trial. Chat and
+    // answer checks are left out on purpose (see src/route.ts).
+    "TEXT_MODEL_TASKS": "practice"
   }
 }
