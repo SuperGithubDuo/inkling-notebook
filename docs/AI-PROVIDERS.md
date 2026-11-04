@@ -95,6 +95,23 @@ Several hosts list the same model cheaper (e.g. Prime Intellect $0.024/$1.324, C
 
 **Revisit when** Groq moves `qwen/qwen3.8-27b` to production status (the DPA would then apply). Even then it adds a second free pool of roughly Workers AI's size, and it needs a new data notice naming Groq.
 
+## OpenRouter's other free models: NO-GO (tested live 4 Nov 2026)
+
+*Actions runs 41781743771 (all five, 05:51 UTC) and 41781864801 (the two Gemma models, 10 attempts each, 30 s apart, 05:52–06:02 UTC). Every request was locked as the server locks it: the `:free` model, `provider.only` = its single listed host, `allow_fallbacks: false`, a $0 price ceiling, `data_collection: "deny"`. Nothing was retried with a looser policy. Free requests used: 0 of 50; credits $0 bought, $0 used, before and after.*
+
+| Model ID | Input | Host | Result under the lock |
+|---|---|---|---|
+| `nvidia/nemotron-3.5-super-vl:free` | text, image, video; 1M context | NVIDIA (API Trial terms) | **404** "No endpoints found matching your data policy (Free model training)" |
+| `nvidia/nemotron-3.5-lightning:free` | text; 1M | NVIDIA | **404**, same (Free model training) |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | text, audio, image, video; 256k | NVIDIA | **404**, same (Free model training) |
+| `google/gemma-4-31b-it:free` | text, image, video; 262k | Google AI Studio | passes the data-policy filter, then **429 on all 10 attempts** over 4.5 min ("temporarily rate-limited upstream", `limit_source: upstream_provider_shared_pool`) |
+| `google/gemma-4-26b-a4b-it:free` | text, image, video; 262k | Google AI Studio | **429 on all 10 attempts** over 4.5 min, same |
+
+- **NVIDIA's free endpoints may train on prompts**: OpenRouter's own data-policy filter removes them. Their terms are NVIDIA's *API Trial* terms. Not usable for students' notebooks, whatever the quality.
+- **Gemma 4 on Google AI Studio** is the only privacy-filter pass, but no request was answered in 22 tries: it draws on a pool shared by every free OpenRouter user. Even when it answers, Google AI Studio keeps prompts (reported 55 days) and the account allowance is **50 requests a day** (1,000 only after buying $10 of credits, which the $0 rule excludes).
+- So **no quality, image or streaming result exists for any of the five**; none answered a single locked request. Workers AI Free answered 13 of 13 Inkling scenarios (50 of 50 checks) on 30 Oct.
+- New safeguard kept on the branch: `openrouter-free` now requires `UPSTREAM_PROVIDERS` (locked into `provider.only`), so a request can never reach a host whose policy wasn't reviewed; a non-Qwen model reports its own name to the app.
+
 ## OpenRouter Free (`qwen/qwen3.8-27b:free`): withdrawn
 
 *Tested live 4 Nov 2026 04:56 UTC with a development key (Actions run 41776120846).*
