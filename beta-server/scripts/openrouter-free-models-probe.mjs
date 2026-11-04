@@ -142,7 +142,7 @@ for (const id of CANDIDATES) {
   let ti = null
   if (m && only.length) {
     t = await stream({ model: id, messages: [{ role: 'system', content: SYS }, { role: 'user', content: MATH }], max_tokens: 900, temperature: 0.3, stream: true, reasoning: { enabled: false }, provider: lock(only) })
-    r.math = { status: t.status, ms: t.ms, firstTextMs: t.firstTextMs, usage: t.usage, provider: t.provider, finish: t.finish, error: t.json?.error ?? t.errorEvent ?? null, correct: t.status === 200 ? mathOk(t.answer) : null, answer: short(t.answer, 1500), reasoningChars: t.reasoning.length }
+    r.math = { status: t.status, ms: t.ms, firstTextMs: t.firstTextMs, usage: t.usage, provider: t.provider, finish: t.finish, error: t.json?.error ?? t.errorEvent ?? null, correct: t.status === 200 ? mathOk(t.answer) : null, answer: short(t.answer, 1500), reasoningChars: t.reasoning?.length ?? 0 }
     if (t.status === 200 && t.answer && r.modalities.includes('image')) {
       const data = (await readFile(join(root, 'tests/fixtures/handwriting', 'scenario-a.jpg'))).toString('base64')
       ti = await stream({ model: id, messages: [{ role: 'system', content: SYS }, { role: 'user', content: [{ type: 'text', text: IMG_Q }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${data}` } }] }], max_tokens: 900, temperature: 0.3, stream: true, reasoning: { enabled: false }, provider: lock(only) })
