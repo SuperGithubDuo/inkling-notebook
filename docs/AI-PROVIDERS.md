@@ -77,7 +77,7 @@ Several hosts list the same model cheaper (e.g. Prime Intellect $0.024/$1.324, C
 
 1. **Preview = evaluation only.** Groq's models page: preview models are for evaluation and should not be used in production; they may be discontinued at short notice.
 2. **Preview = Beta Service under the Services Agreement (§3.6)**: provided as-is, may be discontinued at any time, no support or indemnity, and **the DPA does not apply**. Inkling's users are students (many under 18); serving their notebooks without a data processing agreement isn't acceptable.
-3. **Capacity is about the same as Workers AI Free, not 1,000 answers a day.** The token quota binds long before the request quota: measured Inkling answers use ~0.5–1.2k tokens on text and ~2.5–2.9k with a handwriting image (Groq's fixed 2,048 per image). At 180,000 planned tokens/day that is **~70 (image-heavy) to ~250 (text-only), about 100 answers/day for a typical mix**.
+3. **Capacity is about the same as Workers AI Free, not 1,000 answers a day.** The token quota binds long before the request quota: measured Inkling answers use ~0.5–1.2k tokens on text and ~2.5–2.9k with a handwriting image (Groq's fixed 2,048 per image). At 180,000 planned tokens/day that is **~60 (every answer with a handwriting image) to ~300 (text only), about 110 a day for a 50/50 mix**.
 4. **8,000 tokens a minute is a classroom bottleneck**: two or three image answers a minute for everyone together.
 5. **The free plan can change at any time** (§3.5, §5.1). Multiple accounts to multiply the quota would breach §6.3(d)(iii) (use "intended to avoid incurring Fees").
 
