@@ -95,6 +95,29 @@ Several hosts list the same model cheaper (e.g. Prime Intellect $0.024/$1.324, C
 
 **Revisit when** Groq moves `qwen/qwen3.8-27b` to production status (the DPA would then apply). Even then it adds a second free pool of roughly Workers AI's size, and it needs a new data notice naming Groq.
 
+## OpenRouter free models with provider data collection allowed (tested live 4 Nov 2026)
+
+*Runs 41783547691 (all five, 06:08 UTC) and 41784038228 (Inkling's 13 scenarios on the two vision Nemotrons, 06:2x UTC), on a TEMPORARY Worker `inkling-ai-free-collect` (deleted after each run). Only `data_collection` changed to `allow`; the `:free` model, `provider.only` = its one host, `allow_fallbacks: false` and the $0 price ceiling were unchanged. Credits: $0 bought, $0 used, before and after.*
+
+| Model | Answered (locked, allow) | Inkling scenarios (13 answers, 50 checks) | Latency (mean first text / total) |
+|---|---|---|---|
+| `nvidia/nemotron-3.5-super-vl:free` | yes | **13/13 answers, 50/50 checks** (same as Workers AI on 30 Oct) | chat 1.2 s / 1.6 s; markup 1.9 / 2.5 s; practice 1.9 s total |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | yes | 9 of the first 10 answered before the server's own quota stopped it; 38/46 checks; **markup called the wrong work correct** (5/9, 7/9); answer checks not reached | chat 0.7 / 1.7 s |
+| `nvidia/nemotron-3.5-lightning:free` | yes (text only) | not run (no image input; most tutor requests carry handwriting) | 0.2 s / 1.8–2.5 s |
+| `google/gemma-4-31b-it:free` | **no**: 429 shared upstream pool, 3/3 (13/13 across the three runs) | – | – |
+| `google/gemma-4-26b-a4b-it:free` | **no**: 429, 3/3 (13/13 across runs) | – | – |
+
+**Quota accounting held live**: the temporary Worker was given a 22-request daily cap (the account's remainder minus 2) and refused the 23rd request with the daily-quota message before calling OpenRouter.
+
+**Capacity**: OpenRouter's free allowance is **50 requests a day for the whole account**, all free models together (1,000 only after buying $10 of credits, excluded by the $0 rule), 20 a minute. Usable ≈ 45 answers a day after test/operator headroom, less any retries: about 40% of Workers AI Free's ~110. Combined ≈ 155 a day.
+
+**Terms — why it is still NO-GO for production**
+- **NVIDIA (all three Nemotron models)**: API Trial Terms (v. 19 Sep 2025) §1.4 internal testing and evaluation only; §1.3 not for production; production needs a separate paid subscription; §2.4 prompts stored 30 days; §3.3 may be used to improve NVIDIA's models; accepted only by an adult of legal age. The use restriction is independent of privacy: user consent does not lift it.
+- **Google AI Studio (Gemma 4)**: Gemini API Additional Terms: 18+, no services directed at or likely accessed by under-18s; unpaid content used to improve Google's products, human review. Moot while it never answers.
+- **OpenRouter** (terms updated 31 Aug 2026): account holder 18+; §5.1–5.2 we must make our users comply with each model's terms; §6.1 some models store or train on inputs.
+
+Proposed opt-in disclosure (not shipped): docs/proposals/cloud-ai-training-consent.md.
+
 ## OpenRouter's other free models: NO-GO (tested live 4 Nov 2026)
 
 *Actions runs 41781743771 (all five, 05:51 UTC) and 41781864801 (the two Gemma models, 10 attempts each, 30 s apart, 05:52–06:02 UTC). Every request was locked as the server locks it: the `:free` model, `provider.only` = its single listed host, `allow_fallbacks: false`, a $0 price ceiling, `data_collection: "deny"`. Nothing was retried with a looser policy. Free requests used: 0 of 50; credits $0 bought, $0 used, before and after.*
