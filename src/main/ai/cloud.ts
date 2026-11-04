@@ -1,6 +1,8 @@
 /**
  * Inkling's free cloud AI as a tutor provider: a small server on Cloudflare
- * Workers (beta-server/) that answers with Workers AI (Qwen 3.8 27B).
+ * Workers (beta-server/) that answers with Qwen 3.8 27B. The server chooses
+ * who hosts the model (DeepInfra, or Workers AI as a backup); the app only
+ * tells it which version of the data notice the user agreed to.
  *
  * No account, code or key: each request carries this installation's random
  * ID, which the server uses (with the network address) to share out the free
@@ -13,7 +15,7 @@
  * against the real server code with a fake model (tests/support/fakeBeta.mjs).
  */
 import type { AiErrorCode, CloudQuota } from '@shared/ai'
-import { CLOUD_MODEL, CLOUD_MODEL_LABEL } from '@shared/ai'
+import { CLOUD_CONSENT_VERSION, CLOUD_MODEL, CLOUD_MODEL_LABEL, CLOUD_MODEL_PUBLIC } from '@shared/ai'
 import { ProviderError, type AiProvider, type ProviderChunk, type ProviderModel, type ProviderRequest } from './provider'
 
 /** The model works fast, but a big image and a long structured answer can take a while. */
@@ -71,7 +73,7 @@ export class CloudProvider implements AiProvider {
 
   async listModels(signal?: AbortSignal): Promise<ProviderModel[]> {
     const s = await this.status(signal)
-    return [{ id: s.model, displayName: s.model === CLOUD_MODEL ? CLOUD_MODEL_LABEL : s.model, canGenerate: !s.paused, vision: true }]
+    return [{ id: s.model, displayName: s.model === CLOUD_MODEL || s.model === CLOUD_MODEL_PUBLIC ? CLOUD_MODEL_LABEL : s.model, canGenerate: !s.paused, vision: true }]
   }
 
   async *stream(request: ProviderRequest, signal?: AbortSignal): AsyncIterable<ProviderChunk> {
@@ -158,7 +160,8 @@ export class CloudProvider implements AiProvider {
   }
 
   private headers(): Record<string, string> {
-    return { 'x-inkling-install': this.options.installId }
+    // The notice version lets the server refuse an app whose notice names a different provider.
+    return { 'x-inkling-install': this.options.installId, 'x-inkling-notice': String(CLOUD_CONSENT_VERSION) }
   }
 }
 

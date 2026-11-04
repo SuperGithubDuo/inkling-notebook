@@ -1,0 +1,129 @@
+name: AI server (external provider, test)
+
+# Deploys a SEPARATE test copy of Inkling's AI server, "inkling-ai-next"
+# (beta-server/wrangler.external.jsonc), that answers through DeepInfra instead of
+# Workers AI, and checks it. The production server ("inkling-ai-beta", Workers AI) and
+# its workflow are not touched. Manual only: Actions → AI server (external provider,
+# test) → Run workflow.
+#
+# Costs real money on the DeepInfra account of the key you give it: the security
+# checks are a few small answers (well under $0.01); the optional real-model run is a
+# few cents. The test Worker's own caps (wrangler.external.jsonc: $1/day, $20/month)
+# bound anything else.
+#
+# Needs these repository secrets:
+#   CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN   as for the production workflow
+#   INKLING_ADMIN_TOKEN                           ≥ 32 characters (the test Worker's admin API)
+#   DEEPINFRA_DEV_API_KEY                         a DeepInfra key for DEVELOPMENT (not production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      live_test:
+        description: Also run the real-model scenarios (13 answers; a few cents)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-server-next
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+      DEEPINFRA_DEV_API_KEY: ${{ secrets.DEEPINFRA_DEV_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
+
+      - name: Required secrets
+        shell: bash
+        run: |
+          missing=()
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
+          [ ${#INKLING_ADMIN_TOKEN} -ge 32 ] || missing+=("INKLING_ADMIN_TOKEN (at least 32 characters)")
+          [ -n "$DEEPINFRA_DEV_API_KEY" ] || missing+=(DEEPINFRA_DEV_API_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then echo "::error title=Missing secrets::Add these repository secrets: ${missing[*]} (see the top of .github/workflows/ai-server-next.yml)"; exit 1; fi
+
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm --prefix beta-server ci
+
+      - name: Typecheck and unit-test the server
+        run: |
+          npm --prefix beta-server run typecheck
+          npx vitest run tests/unit/provider.test.ts tests/unit/beta.test.ts
+
+      - name: Deploy the test Worker
+        id: deploy
+        working-directory: beta-server
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npx wrangler deploy -c wrangler.external.jsonc > /tmp/deploy.log 2>&1; then break; fi
+            cat /tmp/deploy.log
+            [ $attempt = 3 ] && exit 1
+            sleep 20
+          done
+          cat /tmp/deploy.log
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          [ -n "$url" ] || { echo "::error title=Deploy::no workers.dev address printed"; exit 1; }
+          # Secrets go in through stdin; they never appear in the log.
+          printf '%s' "$DEEPINFRA_DEV_API_KEY" | tr -d '\r\n' | npx wrangler secret put INFERENCE_API_KEY -c wrangler.external.jsonc > /dev/null 2>&1 || { echo "::error title=INFERENCE_API_KEY::could not be set"; exit 1; }
+          token=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          printf '%s' "$token" | npx wrangler secret put ADMIN_TOKEN -c wrangler.external.jsonc > /dev/null 2>&1 || { echo "::error title=ADMIN_TOKEN::could not be set"; exit 1; }
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$url/admin/summary" -H "Authorization: Bearer $token")
+            [ "$code" = 200 ] && break
+            sleep 4
+          done
+          [ "$code" = 200 ] || { echo "::error title=Admin token::admin API answers $code"; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Test AI server deployed::$url (DeepInfra; production untouched)"
+
+      - name: Security checks on the test Worker
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          curl -sS -X POST "$URL/admin/pause" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"paused":false}' >/dev/null
+          # An app with the old (Cloudflare-only) notice is refused before anything reaches DeepInfra.
+          code=$(curl -sS -o /tmp/old.json -w '%{http_code}' -X POST "$URL/v1/tutor" -H 'content-type: application/json' -H "x-inkling-install: inst_$(openssl rand -hex 16)" -d '{"task":"chat","turns":[{"role":"user","parts":[{"text":"hi"}]}]}')
+          [ "$code" = 400 ] && grep -q update_required /tmp/old.json || { echo "::error title=Notice gate::an app without notice 4 got $code: $(cat /tmp/old.json)"; exit 1; }
+          node scripts/abuse-check.mjs security "$URL"
+          echo "::notice title=Test AI server today::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c '{unit, globalUsed, globalLimit, monthUsed, monthLimit, answers}')"
+
+      - name: Real-model scenarios (quality, latency, cost)
+        if: inputs.live_test
+        env:
+          INKLING_BETA_URL: ${{ steps.deploy.outputs.url }}
+          INKLING_LIVE_CLOUD: '1'
+          INKLING_LIVE_UNIT: usd
+        run: npm run test:live:cloud
+
+      - name: Keep the report
+        if: inputs.live_test && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-cloud-deepinfra
+          path: test-results/live-cloud-*.md
+          if-no-files-found: ignore

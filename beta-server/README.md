@@ -13,6 +13,18 @@ Inkling app ──HTTPS──▶ Worker (this folder) ──AI binding──▶ 
                         install IDs and networks, reservations
 ```
 
+## Who answers: Workers AI or an external provider
+
+`INFERENCE_PROVIDER` picks who runs the model; the app can't tell the difference (same API, same model name in `/v1/status`).
+
+| `INFERENCE_PROVIDER` | Model call | Ledger unit | What bounds spending |
+|---|---|---|---|
+| unset / `workers-ai` (as deployed today) | `AI` binding, `@cf/qwen/qwen3.8-27b` | Neurons | Workers **Free**: Cloudflare refuses past 10,000 Neurons/day |
+| `deepinfra` (recommended next) | `https://api.deepinfra.com/v1/openai`, `Qwen/Qwen3.8-27B`, key in the `INFERENCE_API_KEY` secret | µ$ (millionths of a dollar) | `GLOBAL_DAILY_USD` (any 24 h) and `GLOBAL_MONTHLY_USD` (calendar month) hard caps |
+| `openrouter` | OpenRouter pinned to DeepInfra (`allow_fallbacks: false`, `data_collection: deny`, `zdr: true`), +5.5% fee | µ$ | same; closed to shipped apps until the data notice names OpenRouter |
+
+An external provider gets a 45 s first-byte timeout, a 45 s idle timeout, and at most 3 attempts with exponential backoff (500 ms × 2ⁿ, jittered, ≤ 4 s each, ≤ 8 s in all) for failures **before** an answer starts (timeouts, 408/429/5xx). Nothing is retried once text has streamed; a `Retry-After` longer than 4 s is passed on instead of waited for. A rejected key (401/403) is logged as an operator error; no credit (402) pauses everyone for 15 minutes like Workers AI's free-allocation error. The worker **fails closed**: without the key, the prices or both dollar caps it answers nothing. `wrangler.external.jsonc` is a ready configuration for a separate test Worker (`inkling-ai-next`). Provider research, costs and the switch/rollback procedure: [docs/AI-PROVIDERS.md](../docs/AI-PROVIDERS.md).
+
 ## Who can use it, and how it is limited
 
 Anyone running Inkling. Each request carries the app's **installation ID**, a random value Inkling creates on first run (`inst_…`, in `ai-settings.json`). The Worker also takes the client's **network** from Cloudflare (`cf-connecting-ip`, set by Cloudflare's edge and not by the client; IPv6 grouped by /64). Both can be changed by someone determined (reinstall, another network, a VPN), so they only spread the allowance fairly among ordinary users. **The global cap is what bounds use.**
@@ -27,6 +39,12 @@ Anyone running Inkling. Each request carries the app's **installation ID**, a ra
 | Reservations | | Before the model is called, the request's worst case (estimated input + the full output cap) is reserved against the global cap; the installation and network need room for a typical answer. The real cost (the model's token counts × Cloudflare's rates) then replaces it; an unknown cost (stopped answer, crash) stays charged. Every ledger update runs one at a time inside the Durable Object, so simultaneous requests can't together pass a cap. |
 | Request limits | | 3.5 MB body, 12,000 estimated input tokens, Inkling's request schema (at most 2 images, JPEG/PNG ≤ 1 MB, 24 turns), output caps per task. |
 | Emergency pause | off | The operator can stop all answers at once (below). |
+| **External provider only** | | |
+| Global dollar caps | `GLOBAL_DAILY_USD` (rolling 24 h), `GLOBAL_MONTHLY_USD` (UTC month) | The worst case of every request in progress is reserved against both before the provider is called. |
+| Per installation per month | `INSTALL_MONTHLY_USD` | Counted under a monthly salt, deleted when the month ends. |
+| Budget protection | at `SOFT_LIMIT_FRACTION` (0.8) of either cap | Daily allowances per installation and network are multiplied by `SOFT_LIMIT_FACTOR` (0.5); `quota.reduced` is true. |
+| Duplicates | 10 s | An identical request from the same installation that was **answered** in the last 10 s is refused without calling the model (a failed one can be retried at once). |
+| Data notice | `MIN_NOTICE_VERSION` (4 on DeepInfra) | Apps send `x-inkling-notice`; an app whose user agreed to a notice that doesn't name the provider is told to update, before anything is sent. |
 
 When a limit is reached the app shows a friendly message (for example *"You've used today's free AI answers on this computer. More are available in about 6 hours. Your notebooks work as usual…"*) and offers the tutor on this computer (Ollama).
 
@@ -102,8 +120,8 @@ To change a limit, edit `wrangler.jsonc` and redeploy.
 
 | Request | Answer |
 |---|---|
-| `GET /v1/status` with `x-inkling-install: inst_…` | `{ model, paused, quota }`. No model call. |
-| `POST /v1/tutor` (`application/json`, `x-inkling-install`) `{ task, turns }` | Server-sent events: `delta` `{ text }`…, then `done` `{ usage, neurons, finishReason, quota }` or `error`. A refusal before the model is JSON `{ error: { code, message, retryAfter, scope, quota } }`: 400 (no or bad installation ID, bad request), 413 (too large), 415 (not JSON), 429 (allowance, pace or one-at-a-time) or 503 (busy or paused). |
+| `GET /v1/status` with `x-inkling-install: inst_…` | `{ model, paused, quota }`. No model call. `model` is `qwen3.8-27b` on an external provider. |
+| `POST /v1/tutor` (`application/json`, `x-inkling-install`, `x-inkling-notice`) `{ task, turns }` | Server-sent events: `delta` `{ text }`…, then `done` `{ usage, neurons, unit, finishReason, quota }` or `error` (`neurons` is the cost in the ledger's `unit`: Neurons or µ$). A refusal before the model is JSON `{ error: { code, message, retryAfter, scope, quota } }`: 400 (no or bad installation ID, bad request), 413 (too large), 415 (not JSON), 429 (allowance, pace or one-at-a-time) or 503 (busy or paused). |
 | `GET /admin/summary`, `POST /admin/pause` with `Authorization: Bearer <ADMIN_TOKEN>` | Operator only; 404 without the token. |
 
 ## Tests

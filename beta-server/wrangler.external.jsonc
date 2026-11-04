@@ -1,0 +1,70 @@
+{
+  // Inkling's AI server answering through an EXTERNAL inference provider (DeepInfra).
+  // A separate Worker ("inkling-ai-next") for testing with development credentials;
+  // production (wrangler.jsonc, "inkling-ai-beta" on Workers AI) is not touched by it.
+  //
+  //   npx wrangler deploy -c wrangler.external.jsonc
+  //   npx wrangler secret put INFERENCE_API_KEY -c wrangler.external.jsonc   # a DeepInfra key
+  //   npx wrangler secret put ADMIN_TOKEN -c wrangler.external.jsonc         # ≥ 32 random characters
+  //
+  // To switch production later, see docs/AI-PROVIDERS.md → "Production switch".
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "inkling-ai-next",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "alias": { "@shared": "../src/shared" },
+  // Kept so a rollback is a one-line change (INFERENCE_PROVIDER → "workers-ai"); unused otherwise.
+  "ai": { "binding": "AI" },
+  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "LedgerObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LedgerObject"] }],
+  // Error kinds only; never request content (the Worker never logs it), no per-request invocation logs.
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
+  "vars": {
+    "INFERENCE_PROVIDER": "deepinfra",
+    "UPSTREAM_MODEL": "Qwen/Qwen3.8-27B",
+    // DeepInfra's LIST price (Nov 2026: $0.20 / $2.50 / $0.05 cached per million tokens). The
+    // 25% promotion ($0.15 / $1.875) is not used, so accounting errs high and survives its end.
+    "PRICE_INPUT_USD_PER_M": "0.20",
+    "PRICE_OUTPUT_USD_PER_M": "2.50",
+    "PRICE_CACHED_INPUT_USD_PER_M": "0.05",
+    // Hard caps on what the service may spend: any 24 hours, and each calendar month (UTC).
+    "GLOBAL_DAILY_USD": "1.00",
+    "GLOBAL_MONTHLY_USD": "20",
+    // Fair shares. A typical answer costs $0.0006 (measured) to $0.0008 (full-size images) at
+    // list price, so $0.02/day ≈ 25–34 answers a day per installation (today: ~10 on Workers AI);
+    // $0.30/month ≈ 380–500 a month; $0.06/day per network (a school or office shares it).
+    "INSTALL_DAILY_USD": "0.02",
+    "INSTALL_MONTHLY_USD": "0.30",
+    "NETWORK_DAILY_USD": "0.06",
+    "TYPICAL_USD_PER_ANSWER": "0.0008",
+    // At 80% of the day's or month's budget, everyone's daily share halves.
+    "SOFT_LIMIT_FRACTION": "0.8",
+    "SOFT_LIMIT_FACTOR": "0.5",
+    "INSTALL_PER_MINUTE": "6",
+    "NETWORK_PER_MINUTE": "20",
+    "INSTALL_CONCURRENT": "1",
+    "NETWORK_CONCURRENT": "4",
+    "GLOBAL_CONCURRENT": "24",
+    "UPSTREAM_MAX_ATTEMPTS": "3",
+    "UPSTREAM_TIMEOUT_MS": "45000",
+    "UPSTREAM_IDLE_TIMEOUT_MS": "45000",
+    // Only apps whose data notice names DeepInfra (CLOUD_CONSENT_VERSION 4).
+    "MIN_NOTICE_VERSION": "4",
+    "MAX_INPUT_TOKENS": "12000",
+    "REASONING_EFFORT": "low",
+    "DISABLE_THINKING": "true",
+    "STRUCTURED": "prompt",
+    "IMAGE_PATCH": "28",
+    // Rollback settings (used only if INFERENCE_PROVIDER is set back to "workers-ai").
+    "MODEL": "@cf/qwen/qwen3.8-27b",
+    "ACCOUNT_PLAN": "free",
+    "GLOBAL_DAILY_NEURONS": "9000",
+    "INSTALL_DAILY_NEURONS": "900",
+    "NETWORK_DAILY_NEURONS": "2700",
+    "TYPICAL_NEURONS_PER_ANSWER": "90",
+    "INPUT_NEURONS_PER_M": "40909",
+    "OUTPUT_NEURONS_PER_M": "290909"
+  }
+}

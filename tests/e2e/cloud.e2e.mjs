@@ -165,7 +165,7 @@ try {
   server.ai.reply({ chunks: ['I read: $x^2+5x+6=0$, $(x+2)(x+3)=0$, $x = 2, 3$.\n\n', 'The factorisation is right, but each factor is zero when ', '$x = -2$ or $x = -3$.'], chunkDelayMs: 250, usage: { inputTokens: 1600, outputTokens: 90 } })
   await ask('Is this right?')
   await win.waitForSelector('[data-testid="ai-consent"][data-provider="cloud"]')
-  await win.getByText(/does not use them to train models/).first().waitFor()
+  await win.getByText(/do not use requests to train models/).first().waitFor()
   assert.deepEqual(server.requests, [], 'nothing is sent before consent')
   // The count before the first answer, read by the test itself (the app hasn't asked yet).
   const leftAtStart = (await serverQuota()).approxAnswersLeft
