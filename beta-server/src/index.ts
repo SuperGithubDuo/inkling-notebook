@@ -21,6 +21,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { handle, sha256Hex, type ServerConfig } from './handler'
 import { Ledger, type Identity, type LedgerLimits, type Quota, type ReserveResult, type SettleOptions } from './ledger'
 import { inference, limits, type Env } from './config'
+import { openRouterAccount } from './provider'
 
 export type { Env } from './config'
 
@@ -100,6 +101,7 @@ export default {
       isPaused: () => stub.isPaused(),
       setPaused: (p: boolean) => stub.setPaused(p)
     } as unknown as Ledger
-    return handle(request, { ai: inf.ai, ledger, config, waitUntil: (p) => ctx.waitUntil(p) })
+    const providerAccount = inf.provider === 'openrouter-free' || inf.provider === 'openrouter' ? () => openRouterAccount(env.INFERENCE_API_KEY!.trim()) : undefined
+    return handle(request, { ai: inf.ai, ledger, config, providerAccount, waitUntil: (p) => ctx.waitUntil(p) })
   }
 } satisfies ExportedHandler<WorkerEnv>

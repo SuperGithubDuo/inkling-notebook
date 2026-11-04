@@ -178,7 +178,12 @@ lines.push('')
 // ---------------------------------------------------------------- data policy routing
 lines.push('## Data-policy routing', '', '| provider.data_collection | HTTP | Result |', '|---|---|---|')
 for (const dc of ['deny', 'allow']) {
-  const r = await call(body({ messages: q, stream: false, max_tokens: 20, provider: { allow_fallbacks: false, max_price: ZERO, data_collection: dc } }), { stream: false })
+  // 'allow' only to explain a refusal under 'deny' (a neutral test prompt; Inkling never sends 'allow').
+  if (dc === 'allow' && results['dc:deny']?.status === 200) {
+    lines.push('| allow | – | not tried: deny already answered |')
+    continue
+  }
+  const r = await call(body({ messages: dc === 'allow' ? [{ role: 'user', content: 'Reply with OK.' }] : q, stream: false, max_tokens: 20, provider: { allow_fallbacks: false, max_price: ZERO, data_collection: dc } }), { stream: false })
   results[`dc:${dc}`] = { status: r.status, error: r.json?.error }
   lines.push(`| ${dc} | ${r.status} | ${short(r.json?.error?.message ?? (r.json?.choices ? `answered by ${r.json.provider ?? '?'}` : r.text), 110).replace(/\|/g, '/')} |`)
 }
@@ -232,6 +237,11 @@ results.creditsAfter = credits1.json?.data
 lines.push('## Account after', '', `- Free requests today: before \`${JSON.stringify(key0.json?.data?.free_model_daily_requests)}\` → after \`${JSON.stringify(key1.json?.data?.free_model_daily_requests)}\``)
 lines.push(`- Credits: before \`${JSON.stringify(credits0.json?.data)}\` → after \`${JSON.stringify(credits1.json?.data)}\` (usage changed: **${JSON.stringify(credits0.json?.data?.total_usage) === JSON.stringify(credits1.json?.data?.total_usage) ? 'no' : 'YES'}**)`, '')
 
+const remaining = key1.json?.data?.free_model_daily_requests?.remaining
+if (process.env.GITHUB_OUTPUT) {
+  const { appendFile } = await import('node:fs/promises')
+  await appendFile(process.env.GITHUB_OUTPUT, `free_remaining=${remaining ?? 0}\nfree_limit=${key1.json?.data?.free_model_daily_requests?.limit ?? 0}\ndeny_ok=${results['dc:deny']?.status === 200}\n`)
+}
 const file = process.argv.find((a) => a.endsWith('.md')) ?? join(root, 'test-results', 'openrouter-free-probe.md')
 await writeFile(file, lines.join('\n') + '\n')
 await writeFile(file.replace(/\.md$/, '.json'), JSON.stringify(results, null, 2))

@@ -71,6 +71,7 @@ jobs:
           npx vitest run tests/unit/openrouterFree.test.ts tests/unit/provider.test.ts tests/unit/beta.test.ts
 
       - name: Direct OpenRouter Free probes
+        id: probe
         shell: bash
         run: |
           export OPENROUTER_API_KEY=$(printf '%s' "$OPENROUTER_API_KEY" | tr -d '\r\n')
@@ -79,6 +80,8 @@ jobs:
 
       - name: Deploy the test Worker
         id: deploy
+        # Only when the free endpoint answers with no data collection (otherwise Inkling would refuse every request anyway).
+        if: steps.probe.outputs.deny_ok == 'true'
         working-directory: beta-server
         shell: bash
         run: |
@@ -100,6 +103,7 @@ jobs:
           echo "::notice title=Test AI server (OpenRouter Free)::$url; production untouched"
 
       - name: Security checks
+        if: steps.deploy.outputs.url != ''
         shell: bash
         env:
           URL: ${{ steps.deploy.outputs.url }}
@@ -109,7 +113,8 @@ jobs:
           node scripts/abuse-check.mjs security "$URL" | tee test-results/security-free.txt
 
       - name: Real-model scenarios (quality, latency, reliability)
-        if: (success() || failure()) && steps.deploy.outputs.url != ''
+        # ~16 free requests: only with room left today (an account that never bought credits has 50 a day).
+        if: (success() || failure()) && steps.deploy.outputs.url != '' && fromJSON(steps.probe.outputs.free_remaining || '0') >= 30
         shell: bash
         env:
           INKLING_BETA_URL: ${{ steps.deploy.outputs.url }}
@@ -127,7 +132,7 @@ jobs:
           exit $status
 
       - name: Request quota under concurrency (temporary Worker, quota 5)
-        if: (success() || failure()) && steps.deploy.outputs.url != ''
+        if: (success() || failure()) && steps.deploy.outputs.url != '' && fromJSON(steps.probe.outputs.free_remaining || '0') >= 50
         working-directory: beta-server
         shell: bash
         env:

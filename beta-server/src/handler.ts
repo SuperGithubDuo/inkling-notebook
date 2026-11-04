@@ -76,6 +76,8 @@ export interface Deps {
   ai: AiBinding
   ledger: Ledger
   config: ServerConfig
+  /** The provider account's own usage figures (operator summary only), when the provider offers them. */
+  providerAccount?: () => Promise<unknown>
   /** Keeps work (settling a reservation) alive after the response ends. */
   waitUntil(p: Promise<unknown>): void
   now?: () => number
@@ -439,7 +441,11 @@ async function admin(request: Request, url: URL, deps: Deps): Promise<Response> 
   // Without an ADMIN_TOKEN secret the admin API is off.
   if (!config.adminTokenHash || !auth || !timingSafeHexEqual(await sha256Hex(auth[1]!), config.adminTokenHash)) return problem(404, 'bad_request', 'Not found.')
 
-  if (url.pathname === '/admin/summary' && request.method === 'GET') return json(200, await ledger.summary())
+  if (url.pathname === '/admin/summary' && request.method === 'GET') {
+    // The provider's own view of the account (OpenRouter: free requests used and left today), for the operator.
+    const provider = deps.providerAccount ? await deps.providerAccount().catch(() => ({ error: 'unavailable' })) : undefined
+    return json(200, { ...(await ledger.summary()), ...(provider ? { provider } : {}) })
+  }
   if (url.pathname === '/admin/pause' && request.method === 'POST') {
     const body = (await request.json().catch(() => ({}))) as { paused?: unknown }
     await ledger.setPaused(body.paused !== false)

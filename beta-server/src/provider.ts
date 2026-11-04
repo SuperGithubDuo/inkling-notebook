@@ -76,12 +76,10 @@ export const PRESETS: Record<ExternalProviderId, ProviderPreset> = {
     includeUsage: false,
     costMultiplier: 1,
     free: true,
-    // Only endpoints that don't collect data, unless the operator deliberately allows it
-    // (that would also need a new data notice).
-    extraBody: { provider: { data_collection: 'deny' } },
-    // Never paid: a free variant has one endpoint; no fallback to another endpoint or model,
-    // and a price ceiling of zero, so OpenRouter refuses rather than bill.
-    lockedBody: { provider: { allow_fallbacks: false, max_price: { prompt: 0, completion: 0, request: 0, image: 0 } } },
+    // Locked, merged last: only endpoints whose host doesn't collect (store or train on) the data
+    // (OpenRouter refuses the request when none qualifies); no fallback to another endpoint or model;
+    // a price ceiling of zero, so OpenRouter refuses rather than bill.
+    lockedBody: { provider: { data_collection: 'deny', allow_fallbacks: false, max_price: { prompt: 0, completion: 0, request: 0, image: 0 } } },
     forbiddenExtra: ['models', 'route', 'model', 'plugins']
   },
   'openai-compatible': { baseUrl: '', model: '', thinking: 'chat_template_kwargs', includeUsage: true, costMultiplier: 1 }
@@ -286,6 +284,17 @@ export function guardStream(source: ReadableStream<Uint8Array>, idleMs: number, 
       await reader.cancel(reason).catch(() => undefined)
     }
   })
+}
+
+/**
+ * OpenRouter's key-information API (GET /api/v1/key): the account's free-request counter for
+ * the UTC day and its credit limits. Only the fields the operator needs; no label or hash.
+ */
+export async function openRouterAccount(apiKey: string, doFetch: typeof fetch = (...a) => fetch(...a)): Promise<Record<string, unknown>> {
+  const res = await doFetch('https://openrouter.ai/api/v1/key', { headers: { authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(5000) })
+  if (!res.ok) return { error: `http ${res.status}` }
+  const d = ((await res.json().catch(() => null)) as { data?: Record<string, unknown> } | null)?.data ?? {}
+  return { freeRequestsToday: d.free_model_daily_requests, isFreeTier: d.is_free_tier, limit: d.limit, limitRemaining: d.limit_remaining, usage: d.usage }
 }
 
 /** An OpenAI-compatible provider with Inkling's timeouts and bounded retries. */

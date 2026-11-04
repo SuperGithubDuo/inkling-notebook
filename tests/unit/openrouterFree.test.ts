@@ -71,7 +71,7 @@ describe('OpenRouter Free request body', () => {
     expect(body).not.toHaveProperty('models')
   })
 
-  it('operator settings can loosen data collection but never the price ceiling, fallbacks or the model', () => {
+  it('operator settings can loosen none of data collection, the price ceiling, fallbacks or the model', () => {
     const body = toProviderBody(PRESETS['openrouter-free'], 'qwen/qwen3.8-27b:free', { messages: [] }, {
       provider: { data_collection: 'allow', allow_fallbacks: true, max_price: { prompt: 5, completion: 5 } },
       models: ['qwen/qwen3.8-27b'],
@@ -81,7 +81,7 @@ describe('OpenRouter Free request body', () => {
     expect(body.model).toBe('qwen/qwen3.8-27b:free')
     expect(body).not.toHaveProperty('models')
     expect(body).not.toHaveProperty('route')
-    expect(body.provider).toEqual({ data_collection: 'allow', allow_fallbacks: false, max_price: { prompt: 0, completion: 0, request: 0, image: 0 } })
+    expect(body.provider).toEqual({ data_collection: 'deny', allow_fallbacks: false, max_price: { prompt: 0, completion: 0, request: 0, image: 0 } })
   })
 
   it('reads OpenRouter’s X-RateLimit-Reset in milliseconds or seconds', () => {
