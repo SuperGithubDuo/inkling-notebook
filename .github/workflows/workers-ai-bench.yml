@@ -74,6 +74,9 @@ jobs:
         shell: bash
         run: |
           node scripts/cf-models.mjs test-results/workers-ai-catalog.md
+          # Artifacts may not be reachable: the catalog's text models also go to an annotation.
+          jq -r 'if .ok then ([.rows[] | "\(.name) | images \(.vision) | ctx \(.context // "") | price \(.price // "") | beta \(.beta) | deprecation \(.deprecated // "")"] | join("%0A")) else .error end' test-results/workers-ai-catalog.json > /tmp/cat.txt 2>/dev/null || echo "catalog unreadable" > /tmp/cat.txt
+          echo "::notice title=Workers AI catalog (text generation)::$(cat /tmp/cat.txt)"
           cat test-results/workers-ai-catalog.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Benchmark each model
@@ -102,6 +105,7 @@ jobs:
             code=$?
             grep -E '^\s+(\[|probe|installation|Workers AI)|Tests |passed|failed' "test-results/live-$slug.log" | head -60
             echo "::endgroup::"
+            LIVE_SUMMARY_TEXTS=1 node scripts/live-summary.mjs "test-results/live-cloud-$slug.json"
             end=$(date -u +%FT%TZ)
             echo "$model $start $end" >> test-results/windows.txt
             echo "| $model | $start | $budget | $used | test exit $code |" >> test-results/runs.md
@@ -127,6 +131,7 @@ jobs:
           node scripts/cf-usage.mjs 30 > test-results/usage-after.json
           echo "Production shares @cf/qwen/qwen3.8-27b, so its row also counts any student traffic in that window." >> test-results/cf-neurons.md
           cat test-results/cf-neurons.md >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Neurons as Cloudflare counted them::$(sed -n '3,$p' test-results/cf-neurons.md | tr '\n' '~' | sed 's/~/%0A/g')"
           echo "::notice title=Workers AI use by UTC day::$(jq -c .utcDays test-results/usage-after.json)"
 
       - name: Keep the reports

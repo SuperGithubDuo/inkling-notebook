@@ -14,6 +14,7 @@ try {
   console.log('::error title=Live cloud test::No report was written (the test did not run).')
   process.exit(0)
 }
+const tag = r.model ? `${String(r.model).split('/').at(-1)}: ` : 'Live cloud: '
 const esc = (s) => s.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
 const s = (ms) => (ms == null ? '–' : `${(ms / 1000).toFixed(1)}s`)
 const lines = []
@@ -21,16 +22,16 @@ if (r.probes?.length) {
   lines.push('PROBE (one small check request each):')
   for (const p of r.probes) lines.push(`  ${p.name}: ${p.ok ? `${p.usage?.completion_tokens} out tokens, ${p.reasoningChars} reasoning chars, JSON ${p.validJson ? 'valid' : 'INVALID'}, ${p.neurons?.toFixed(1)} N, ${s(p.ms)}` : `ERROR ${p.error}`}`)
 }
-console.log(`::notice title=Live cloud: settings probe::${esc(lines.join('\n') || 'no probe')}`)
+console.log(`::notice title=${tag}settings probe::${esc(lines.join('\n') || 'no probe')}`)
 
 const rows = r.runs.map((x) => {
   const passed = x.checks.filter((c) => c.pass).length
   return `${x.scenario}/${x.task}: ${x.ok ? 'ok' : `ERROR ${x.error}`} | first ${s(x.firstTokenMs)} total ${s(x.totalMs)} | ${x.inputTokens ?? '?'}→${x.outputTokens ?? '?'} tok | ${x.neurons?.toFixed(1) ?? '?'} N | ${x.validated === undefined ? '' : x.validated ? 'valid ' : 'INVALID '}checks ${passed}/${x.checks.length}`
 })
-console.log(`::notice title=Live cloud: scenarios (${r.mode})::${esc(rows.join('\n'))}`)
+console.log(`::notice title=${tag}scenarios (${r.mode})::${esc(rows.join('\n'))}`)
 
 const failed = r.runs.flatMap((x) => x.checks.filter((c) => !c.pass).map((c) => `${x.scenario}/${x.task}: ${c.name}${c.detail ? ` — ${String(c.detail).replace(/\s+/g, ' ').slice(0, 160)}` : ''}`))
-if (failed.length) console.log(`::warning title=Live cloud: ${failed.length} checks failed::${esc(failed.join('\n'))}`)
+if (failed.length) console.log(`::warning title=${tag}${failed.length} checks failed::${esc(failed.join('\n'))}`)
 
 const done = r.runs.filter((x) => x.ok && x.neurons != null)
 const mean = (t) => {
@@ -49,4 +50,10 @@ const summary = [
   `Blended interaction: ${Number.isFinite(blended) ? blended.toFixed(0) : '–'} N → ${Number.isFinite(blended) ? Math.floor(10000 / blended) : '–'} per day on 10,000 free Neurons (${Number.isFinite(blended) ? Math.floor(9000 / blended) : '–'} under the 9,000 cap)`,
   r.quotaBefore && r.quotaAfter ? `Server ledger, whole service: ${r.quotaBefore.globalUsed}→${r.quotaAfter.globalUsed} of ${r.quotaAfter.globalLimit}` : ''
 ]
-console.log(`::notice title=Live cloud: allowance::${esc(summary.filter(Boolean).join('\n'))}`)
+console.log(`::notice title=${tag}allowance::${esc(summary.filter(Boolean).join('\n'))}`)
+
+// With LIVE_SUMMARY_TEXTS=1: every answer's text (shortened), so quality can be read from the check run too.
+if (process.env.LIVE_SUMMARY_TEXTS === '1') {
+  const texts = r.runs.map((x) => `### ${x.scenario}/${x.task}\n${(x.text || x.error || '').slice(0, 900)}`)
+  console.log(`::notice title=${tag}answers::${esc(texts.join('\n\n').slice(0, 60000))}`)
+}
