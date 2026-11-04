@@ -237,6 +237,9 @@ results.creditsAfter = credits1.json?.data
 lines.push('## Account after', '', `- Free requests today: before \`${JSON.stringify(key0.json?.data?.free_model_daily_requests)}\` → after \`${JSON.stringify(key1.json?.data?.free_model_daily_requests)}\``)
 lines.push(`- Credits: before \`${JSON.stringify(credits0.json?.data)}\` → after \`${JSON.stringify(credits1.json?.data)}\` (usage changed: **${JSON.stringify(credits0.json?.data?.total_usage) === JSON.stringify(credits1.json?.data?.total_usage) ? 'no' : 'YES'}**)`, '')
 
+// The free variant withdrawn: OpenRouter answers 404 "unavailable for free" (and suggests the paid slug, never followed).
+const withdrawn = /unavailable for free/i.test(JSON.stringify(results['stream:reasoning off (what the server sends)']?.error ?? ''))
+if (withdrawn) lines.splice(3, 0, `> **BLOCKER: ${MODEL} is no longer offered free.** OpenRouter refuses it with HTTP 404 "This model is unavailable for free" and points to the paid model, which Inkling never uses.`, '')
 const remaining = key1.json?.data?.free_model_daily_requests?.remaining
 if (process.env.GITHUB_OUTPUT) {
   const { appendFile } = await import('node:fs/promises')
@@ -246,3 +249,6 @@ const file = process.argv.find((a) => a.endsWith('.md')) ?? join(root, 'test-res
 await writeFile(file, lines.join('\n') + '\n')
 await writeFile(file.replace(/\.md$/, '.json'), JSON.stringify(results, null, 2))
 console.log(lines.join('\n'))
+if (withdrawn) {
+  console.log(`::error title=Free endpoint withdrawn::${MODEL} is unavailable for free (HTTP 404).`)
+}

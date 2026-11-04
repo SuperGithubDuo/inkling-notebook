@@ -53,41 +53,27 @@ Reliability: no provider publishes an SLA for this model on the pages checked, a
 
 Several hosts list the same model cheaper (e.g. Prime Intellect $0.024/$1.324, Chutes $0.039/$1.25, about half DeepInfra's cost). They were not evaluated: their retention and training terms weren't checked, and choosing among them is exactly the multi-provider routing this migration excludes. Worth a separate review if spend becomes significant.
 
-## OpenRouter Free (`qwen/qwen3.8-27b:free`)
+## OpenRouter Free (`qwen/qwen3.8-27b:free`): withdrawn
 
-*Investigated 3 Nov 2026. Not yet tested live: the repository has no `OPENROUTER_API_KEY` secret (Actions run 41775457065 stopped at "Required secrets").*
+*Tested live 4 Nov 2026 04:56 UTC with a development key (Actions run 41776120846).*
 
-| | What the documentation says | Verified live? |
-|---|---|---|
-| Availability | Listed as a free variant of Qwen 3.8 27B (released 14 Aug 2026); 262,144-token context; text, image and video in | not yet |
-| Price | $0 input and output | not yet (the probe reads the account's credits before and after) |
-| Daily quota | 50 requests a day; **1,000 a day once at least 10 credits ($10) have been bought** (all-time purchases) | not yet (`GET /api/v1/key` → `free_model_daily_requests`) |
-| Per-minute quota | 20 requests a minute | not yet (the probe bursts 26) |
-| Scope | Governed globally: more keys or accounts don't add capacity | — |
-| Do free requests use the $10? | Not stated in OpenRouter's docs. Free variants are priced $0, so they shouldn't; one third-party review says failed requests still count against the daily allowance. A **negative balance blocks free models too**. | not yet |
-| Fallback | A free variant has one endpoint: no other host when it is busy or down; a paid model is used only if a `models` fallback list names one | — |
-| Host and data policy | Not shown on the model page. Across OpenRouter's free models, about half run on hosts that may train on prompts; others keep prompts for set periods. OpenRouter itself says it doesn't train on API traffic. Routing by data policy (`data_collection: deny`) refuses an endpoint whose host collects data. | not yet (the probe prints the endpoint's host and policy, and tries `deny` and `allow`) |
+**The free variant is no longer offered.** Every request to `qwen/qwen3.8-27b:free` got HTTP 404 "This model is unavailable for free. The paid version is available now - use this slug instead: qwen/qwen3.8-27b", and the model is no longer in OpenRouter's public model list. The free requests were not counted (0 of 50 used afterwards), and the account's credits stayed at $0 bought / $0 used.
 
-**What Inkling needs from it.** Streaming, image input, a reasoning switch (`reasoning: {enabled: false}`) and long context are all listed for the model; the free endpoint's own supported parameters and output cap are read by the probe. A structured answer, three handwriting images and a ~7,000-token conversation are probed directly.
-
-**What is implemented** (`INFERENCE_PROVIDER=openrouter-free`, `wrangler.openrouter-free.jsonc`):
-- **Never paid.** Only a model ending in `:free` is accepted; the request carries `provider.allow_fallbacks: false` and `provider.max_price` of 0 for prompt, completion, request and image, merged last so operator settings can't loosen them; `models`, `route`, `model` and `plugins` can't be added. If OpenRouter ever reports a charge above $0, the server pauses all answers and logs an error.
-- **The account-wide quota.** `GLOBAL_REQUESTS_PER_DAY` (900 of 1,000) and `GLOBAL_REQUESTS_PER_MINUTE` (16 of 20) are checked before a request is sent, per UTC day like OpenRouter's counter, counting retries. A 429 is never retried. A 429 whose reset is more than 5 minutes away means OpenRouter's quota is gone (shared with anything else on the account): everyone is stopped until the reset, without calling OpenRouter again.
-- **Fair shares.** Allowances use a *shadow* price (DeepInfra's list price), so per-installation and per-network limits still share out the free requests; nothing is billed.
-- **Graceful failure.** Downtime: one retry, then "try again in a moment". No endpoint matching the data policy, or the free variant removed: "model unavailable". Quota gone: "Inkling's free AI has reached its provider's limit for today", with the reset time. Notebooks and the local Ollama tutor keep working.
-- **Closed to shipped apps** (minimum notice 99) until a data notice names OpenRouter and the free endpoint's host.
-
-**Capacity.** One tutor answer is one request. With 900 requests a day:
-
-| Answers per active student per day | Students served per day |
+| Check | Result |
 |---|---|
-| 3 | ~300 |
-| 5 | ~180 |
-| 10 | ~90 |
+| Account without purchased credits | `is_free_tier: true`, 0 credits; **50 free requests a day** (1,000 needs $10 bought), per OpenRouter's key-information API |
+| Free Qwen 3.8 27B | **unavailable** (404) — streaming, images, reasoning, long context, latency and quality could not be tested |
+| Host, logging, retention, training | not reported: no free endpoint exists |
+| No-training restriction | `data_collection: deny` sent and locked; also refused (404, same reason) |
+| Paid model with the zero price ceiling | refused by OpenRouter: 404 "No endpoints found that satisfy the max price" — the guard works against the real API |
+| Credits consumed | none |
 
-Today's Workers AI allowance gives ~110 answers a day, so OpenRouter Free is about 8× that. The 20-a-minute limit is the tighter one in a classroom: 30 students asking at once get about 16 answers in the first minute; the rest are asked to wait a few seconds. Capacity is OpenRouter's to change, and the free variant can disappear.
+**What stays on the branch** (`INFERENCE_PROVIDER=openrouter-free`, `wrangler.openrouter-free.jsonc`), unused, in case a free variant returns:
+- **Never paid.** Only a model ending in `:free`; `provider.allow_fallbacks: false`, `max_price` 0 (prompt, completion, request, image) and `data_collection: deny`, all merged last so settings can't loosen them; no `models`, `route`, `model` or `plugins` from settings. A reported charge pauses the server. The 404's suggested paid slug is never followed.
+- **The account-wide quota.** `GLOBAL_REQUESTS_PER_DAY` and `_PER_MINUTE` checked before sending, retries counted, no 429 retries, a long-reset 429 stops everyone until the reset; `/admin/summary` shows OpenRouter's own counter.
+- **Closed to shipped apps** (notice 99) until a notice names OpenRouter and the free host.
 
-**Recommendation: supplemental at most, not primary — NO-GO until tested.** It can only be the primary provider if the live run shows (1) the endpoint's host neither trains on nor keeps prompts, so `data_collection: deny` answers; (2) answers match the Workers AI baseline on the 50 checks; (3) the credits balance doesn't move. Even then, one endpoint with no fallback, a quota shared account-wide and terms that can change make it a source of extra free capacity beside Workers AI's free allowance, not the base of the service. Using both would be routing between two free hosts of the same model, which needs your decision (it was out of scope so far) and a notice naming both.
+Even if it returned, capacity without buying credits would be 50 requests a day for the whole service (about 10 students at 5 answers each, below Workers AI's ~110 answers a day); with $10 bought, 1,000 a day and 20 a minute.
 
 ## Costs
 

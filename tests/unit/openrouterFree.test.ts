@@ -171,6 +171,15 @@ describe('OpenRouter Free on the AI server', () => {
     expect(fake!.completions()).toHaveLength(1)
   })
 
+  it('the free variant withdrawn (OpenRouter’s real 404) is "model unavailable"; the suggested paid slug is never tried', async () => {
+    await start()
+    fake!.fail({ status: 404, body: { error: { message: 'This model is unavailable for free. The paid version is available now - use this slug instead: qwen/qwen3.8-27b', code: 404 } } })
+    const r = await post(chat('hi'))
+    expect(r.status).toBe(503)
+    expect(r.json.error.code).toBe('model_unavailable')
+    expect(fake!.completions().map((c) => c.body.model)).toEqual(['qwen/qwen3.8-27b:free'])
+  })
+
   it('provider downtime: two attempts at most, then a calm error, nothing charged', async () => {
     await start()
     for (let i = 0; i < 4; i++) fake!.fail({ status: 503 })
