@@ -45,6 +45,10 @@ export async function startFakeOpenAi(options = {}) {
       res.writeHead(401, { 'content-type': 'application/json' })
       return res.end(JSON.stringify({ error: { message: 'invalid api key', code: 401 } }))
     }
+    if (!body || !Array.isArray(body.messages) || typeof body.model !== 'string') {
+      res.writeHead(422, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ detail: [{ msg: 'messages: field required' }] }))
+    }
     const f = failures.shift()
     if (f?.hangMs) {
       await new Promise((r) => setTimeout(r, f.hangMs))
