@@ -199,6 +199,11 @@ export interface ExternalOptions {
   retryBudgetMs?: number
   /** Whether a 429 is tried again (off for a quota-counted free endpoint: every attempt spends quota). */
   retryRateLimit?: boolean
+  /**
+   * OpenRouter: the only upstream hosts a request may reach (provider.only, merged LAST, so operator
+   * extras can't widen it). Unknown or unreviewed hosts are never routed to.
+   */
+  onlyProviders?: string[]
   fetch?: typeof fetch
   sleep?: (ms: number) => Promise<void>
   random?: () => number
@@ -375,7 +380,9 @@ export function externalProvider(opts: ExternalOptions): AiBinding {
 
   return {
     async run(model, inputs, hooks) {
-      const body = JSON.stringify(toProviderBody(preset, model, inputs, opts.extraBody))
+      const built = toProviderBody(preset, model, inputs, opts.extraBody)
+      if (opts.onlyProviders?.length) built.provider = { ...((built.provider as object) ?? {}), only: [...opts.onlyProviders] }
+      const body = JSON.stringify(built)
       const streamed = inputs.stream === true
       let waited = 0
       for (let attempt = 1; ; attempt++) {

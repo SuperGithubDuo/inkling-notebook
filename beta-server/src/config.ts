@@ -38,6 +38,11 @@ export interface Env {
   UPSTREAM_MODEL?: string
   /** Overrides the preset's https base URL (required for "openai-compatible"). */
   UPSTREAM_BASE_URL?: string
+  /**
+   * OpenRouter: comma-separated upstream host slugs a request may reach (provider.only), e.g. "nvidia".
+   * Required for "openrouter-free": no routing to a host whose data policy wasn't reviewed.
+   */
+  UPSTREAM_PROVIDERS?: string
   /** Extra JSON merged into every provider request (operator-only, e.g. OpenRouter provider preferences). */
   UPSTREAM_EXTRA_BODY?: string
   /** USD per million tokens, at list price (not promotional), so accounting errs high. */
@@ -187,6 +192,11 @@ export function inference(env: Env):
     // The account-wide request quota must be set.
     if (!l.globalRequestsPerDay || !l.globalRequestsPerMinute) return `GLOBAL_REQUESTS_PER_DAY and GLOBAL_REQUESTS_PER_MINUTE must be set for ${id}`
   }
+  const onlyProviders = (env.UPSTREAM_PROVIDERS ?? '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter((p) => /^[a-z0-9][a-z0-9._/-]{0,63}$/i.test(p))
+  if (id === 'openrouter-free' && !onlyProviders.length) return 'UPSTREAM_PROVIDERS must name the reviewed host(s) for openrouter-free'
   if (preset.freeLimits) {
     // A token quota too, and no quota above the provider's documented free plan: the server never plans to pass it.
     const f = preset.freeLimits
@@ -218,6 +228,7 @@ export function inference(env: Env):
       // On a quota-counted free endpoint every attempt spends quota: one retry at most, never after a 429.
       maxAttempts: num(env.UPSTREAM_MAX_ATTEMPTS, free ? 2 : 3),
       retryRateLimit: !free,
+      ...(onlyProviders.length && (id === 'openrouter-free' || id === 'openrouter') ? { onlyProviders } : {}),
       firstByteTimeoutMs: num(env.UPSTREAM_TIMEOUT_MS, 45_000),
       idleTimeoutMs: num(env.UPSTREAM_IDLE_TIMEOUT_MS, 45_000)
     })
@@ -230,7 +241,8 @@ export function inference(env: Env):
     provider,
     model,
     // The same name whoever hosts it: the app doesn't need to know the provider.
-    publicModel: 'qwen3.8-27b',
+    // (Another free model on OpenRouter is reported by its own name, so the app never labels it Qwen.)
+    publicModel: id === 'openrouter-free' && !/qwen3\.8-27b/.test(model) ? model.replace(/:free$/, '') : 'qwen3.8-27b',
     rates: {
       unit: 'usd',
       inputPerM: input * 1e6,

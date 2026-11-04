@@ -1,0 +1,135 @@
+name: AI server (OpenRouter free models, test)
+
+# Live evaluation of OpenRouter's other FREE models for Inkling (Nemotron 3.5 Super VL,
+# Gemma 4 31B, Gemma 4 26B A4B, Nemotron 3 Nano Omni, Nemotron 3.5 Lightning).
+# 1. Direct probes, each request locked as the server locks it: ":free" model, provider.only
+#    = the model's own host, no fallbacks, $0 price ceiling, data_collection "deny". A model
+#    refused under that lock is not eligible and is never tried with a looser policy.
+# 2. For up to two eligible models (vision first), the SEPARATE test Worker
+#    "inkling-ai-free-next" (wrangler.openrouter-free.jsonc) is redeployed with that model and
+#    Inkling's 13 real AI Tutor scenarios run through the app's own AiService.
+# Production ("inkling-ai-beta", Workers AI), its secrets and main are untouched. Free
+# requests only; stays inside the account's daily free allowance (50 without credits).
+#
+# Start it by pushing the branch `deploy/ai-server-free-models`.
+# Secrets: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, INKLING_ADMIN_TOKEN, OPENROUTER_API_KEY (development).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['deploy/ai-server-free-models']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-server-free
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
+
+      - name: Required secrets
+        shell: bash
+        run: |
+          missing=()
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
+          [ ${#INKLING_ADMIN_TOKEN} -ge 32 ] || missing+=(INKLING_ADMIN_TOKEN)
+          [ -n "$OPENROUTER_API_KEY" ] || missing+=(OPENROUTER_API_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then echo "::error title=Missing secrets::${missing[*]}"; exit 1; fi
+
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm --prefix beta-server ci
+          mkdir -p test-results
+
+      - name: Typecheck and unit-test the server
+        run: |
+          npm --prefix beta-server run typecheck
+          npx vitest run tests/unit/openrouterFree.test.ts tests/unit/provider.test.ts tests/unit/beta.test.ts
+
+      - name: Direct probes under the lock
+        id: probe
+        shell: bash
+        run: |
+          export OPENROUTER_API_KEY=$(printf '%s' "$OPENROUTER_API_KEY" | tr -d '\r\n')
+          node beta-server/scripts/openrouter-free-models-probe.mjs test-results/openrouter-free-models.md
+          cat test-results/openrouter-free-models.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Inkling scenarios on the best eligible models (test Worker)
+        if: steps.probe.outputs.eligible != '[]' && steps.probe.outputs.eligible != '' && steps.probe.outputs.charged != 'true'
+        shell: bash
+        env:
+          ELIGIBLE: ${{ steps.probe.outputs.eligible }}
+          REMAINING: ${{ steps.probe.outputs.free_remaining }}
+        run: |
+          set +e
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          KEY=$(printf '%s' "$OPENROUTER_API_KEY" | tr -d '\r\n')
+          left=${REMAINING:-0}
+          n=0
+          for row in $(echo "$ELIGIBLE" | jq -c '.[]'); do
+            [ $n -ge 2 ] && break
+            # 13 scenarios + a few retries; keep 2 spare.
+            if [ "$left" -lt 20 ]; then echo "::warning title=Free allowance::only $left free requests left; stopping"; break; fi
+            model=$(echo "$row" | jq -r .id); only=$(echo "$row" | jq -r .only)
+            slug=$(echo "$model" | tr '/:' '__')
+            echo "::group::$model via $only"
+            ( cd beta-server
+              for attempt in 1 2 3; do
+                npx wrangler deploy -c wrangler.openrouter-free.jsonc --var "UPSTREAM_MODEL:$model" --var "UPSTREAM_PROVIDERS:$only" --var "GLOBAL_REQUESTS_PER_DAY:$((left - 2))" --var GLOBAL_REQUESTS_PER_MINUTE:16 > /tmp/d.log 2>&1 && break
+                cat /tmp/d.log; sleep 20
+              done
+              printf '%s' "$KEY" | npx wrangler secret put INFERENCE_API_KEY -c wrangler.openrouter-free.jsonc > /dev/null 2>&1
+              printf '%s' "$ADMIN" | npx wrangler secret put ADMIN_TOKEN -c wrangler.openrouter-free.jsonc > /dev/null 2>&1 )
+            url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/d.log | head -1)
+            ok=0
+            for i in $(seq 1 60); do
+              got=$(curl -sS "$url/v1/status" -H "x-inkling-install: inst_waitwaitwaitwaitwaitwaitwait" -H 'x-inkling-notice: 4' | jq -r .model 2>/dev/null)
+              if [ "$got" = "${model%:free}" ]; then ok=$((ok + 1)); else ok=0; fi
+              [ $ok -ge 4 ] && break; sleep 3
+            done
+            curl -sS -X POST "$url/admin/pause" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"paused":false}' > /dev/null
+            INKLING_BETA_URL="$url" INKLING_LIVE_CLOUD=1 INKLING_LIVE_UNIT=usd npm run test:live:cloud 2>&1 | tee "test-results/scenarios-$slug.log" | grep -E '^\s+\[|✓|×|passed|failed' | head -60
+            for f in test-results/live-cloud-qwen3.8-27b.md test-results/live-cloud-qwen3.8-27b.json; do [ -f "$f" ] && mv "$f" "${f/qwen3.8-27b/$slug}"; done
+            { echo "## Scenarios: $model"; echo; cat "test-results/live-cloud-$slug.md" 2>/dev/null || echo "(no report)"; echo; } >> "$GITHUB_STEP_SUMMARY"
+            cat "test-results/live-cloud-$slug.md" 2>/dev/null
+            s=$(curl -sS "$url/admin/summary" -H "Authorization: Bearer $ADMIN")
+            echo "::notice title=$model::$(echo "$s" | jq -c '{upstreamRequests, upstreamRequestLimit, answers, paused, provider}')"
+            left=$(echo "$s" | jq -r '.provider.freeRequestsToday.remaining // 0')
+            echo "::endgroup::"
+            n=$((n + 1))
+          done
+          curl -sS "https://openrouter.ai/api/v1/credits" -H "Authorization: Bearer $KEY" | jq -c '{credits: .data}'
+          exit 0
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-server-free-models-reports
+          path: |
+            test-results/*.md
+            test-results/*.json
+            test-results/*.log
+          if-no-files-found: ignore

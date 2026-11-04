@@ -213,6 +213,7 @@ describe('OpenRouter Free configuration', () => {
       GLOBAL_MONTHLY_USD: '20',
       GLOBAL_REQUESTS_PER_DAY: '950',
       GLOBAL_REQUESTS_PER_MINUTE: '18',
+      UPSTREAM_PROVIDERS: 'nvidia',
       ...extra
     }) as Env
 
@@ -228,5 +229,27 @@ describe('OpenRouter Free configuration', () => {
     expect(inference(env({ GLOBAL_REQUESTS_PER_DAY: undefined }))).toMatch(/GLOBAL_REQUESTS_PER_DAY/)
     expect(inference(env({ GLOBAL_REQUESTS_PER_MINUTE: '' }))).toMatch(/GLOBAL_REQUESTS_PER_MINUTE/)
     expect(inference(env({ INFERENCE_API_KEY: '' }))).toMatch(/INFERENCE_API_KEY/)
+  })
+
+  it('fails closed without a reviewed upstream host; a host list is locked into every request', async () => {
+    expect(inference(env({ UPSTREAM_PROVIDERS: '' }))).toMatch(/UPSTREAM_PROVIDERS/)
+    expect(inference(env({ UPSTREAM_PROVIDERS: ' , ' }))).toMatch(/UPSTREAM_PROVIDERS/)
+    const inf = inference(env({ UPSTREAM_MODEL: 'google/gemma-4-31b-it:free', UPSTREAM_PROVIDERS: 'google-ai-studio' }))
+    if (typeof inf === 'string') throw new Error(inf)
+    expect(inf.publicModel).toBe('google/gemma-4-31b-it')
+    const { externalProvider } = await import('../../beta-server/src/provider')
+    let sent: any
+    const ai = externalProvider({
+      id: 'openrouter-free',
+      apiKey: 'k',
+      onlyProviders: ['google-ai-studio'],
+      extraBody: { provider: { only: ['some-other-host'], data_collection: 'allow', max_price: { prompt: 1 } } },
+      fetch: (async (_u: string, init: any) => {
+        sent = JSON.parse(init.body)
+        return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { headers: { 'content-type': 'application/json' } })
+      }) as any
+    })
+    await ai.run('google/gemma-4-31b-it:free', { messages: [{ role: 'user', content: 'hi' }], max_completion_tokens: 10 })
+    expect(sent.provider).toMatchObject({ only: ['google-ai-studio'], data_collection: 'deny', allow_fallbacks: false, max_price: { prompt: 0, completion: 0, request: 0, image: 0 } })
   })
 })
