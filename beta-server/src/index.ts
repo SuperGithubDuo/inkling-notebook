@@ -80,6 +80,7 @@ export default {
       publicModel: inf.publicModel,
       minNoticeVersion: inf.minNotice,
       inputMargin: inf.inputMargin,
+      freeProvider: inf.freeProvider,
       rates: inf.rates,
       reasoningEffort: env.REASONING_EFFORT ?? '',
       disableThinking: env.DISABLE_THINKING === 'true',

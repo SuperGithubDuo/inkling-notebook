@@ -23,6 +23,11 @@ export interface Rates {
   unit?: 'neurons' | 'usd'
   /** Multiplier for fees the token price doesn't include (e.g. OpenRouter's 5.5% on credits). */
   costMultiplier?: number
+  /**
+   * Charge tokens at these rates even when the provider reports a cost: on a free endpoint the
+   * rates are a SHADOW price that shares out the free quota fairly (the reported cost is $0).
+   */
+  ignoreReportedCost?: boolean
 }
 
 export interface Usage {
@@ -44,7 +49,7 @@ export const neuronsFor = (u: Usage, r: Rates): number => (u.inputTokens * r.inp
  */
 export function costFor(u: Usage, r: Rates): number {
   const mult = r.costMultiplier ?? 1
-  if (r.unit === 'usd' && typeof u.reportedCostUsd === 'number' && Number.isFinite(u.reportedCostUsd) && u.reportedCostUsd >= 0) return u.reportedCostUsd * 1e6 * mult
+  if (r.unit === 'usd' && !r.ignoreReportedCost && typeof u.reportedCostUsd === 'number' && Number.isFinite(u.reportedCostUsd) && u.reportedCostUsd >= 0) return u.reportedCostUsd * 1e6 * mult
   const cached = Math.min(u.inputTokens, Math.max(0, u.cachedInputTokens ?? 0))
   const cachedRate = r.cachedInputPerM ?? r.inputPerM
   return (((u.inputTokens - cached) * r.inputPerM + cached * cachedRate + u.outputTokens * r.outputPerM) / 1e6) * mult

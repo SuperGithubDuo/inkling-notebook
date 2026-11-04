@@ -9,6 +9,9 @@
  *   workers-ai   Cloudflare's `AI` binding (the original path, kept as rollback)
  *   deepinfra    DeepInfra's OpenAI-compatible API (recommended)
  *   openrouter   OpenRouter, pinned to one upstream provider, no fallbacks
+ *   openrouter-free  OpenRouter's free variant (qwen/qwen3.8-27b:free): no charge, a
+ *                account-wide daily and per-minute request quota, and a request body
+ *                locked so it can never be routed to a paid endpoint
  *
  * The desktop app never knows which one answers; it talks only to the Worker.
  *
@@ -22,7 +25,7 @@
  * carry only a kind and an HTTP status.
  */
 
-export type ProviderId = 'workers-ai' | 'deepinfra' | 'openrouter' | 'openai-compatible'
+export type ProviderId = 'workers-ai' | 'deepinfra' | 'openrouter' | 'openrouter-free' | 'openai-compatible'
 export type ExternalProviderId = Exclude<ProviderId, 'workers-ai'>
 
 /** How a provider is asked to turn Qwen's hidden ("thinking") reasoning off. */
@@ -42,6 +45,15 @@ export interface ProviderPreset {
    * (OpenRouter's 5.5% platform fee on credits).
    */
   costMultiplier: number
+  /**
+   * Request fields merged LAST, over operator extras, so configuration can't remove them
+   * (the free preset's zero price ceiling and no-fallback rule).
+   */
+  lockedBody?: Record<string, unknown>
+  /** Fields the operator's extra body may not set (they could route a request to another, paid model). */
+  forbiddenExtra?: string[]
+  /** Answers cost nothing: a reported charge above zero is a misconfiguration to stop on. */
+  free?: boolean
 }
 
 /** Checked against the providers' own documentation, Nov 2026 (docs/AI-PROVIDERS.md). */
@@ -57,7 +69,35 @@ export const PRESETS: Record<ExternalProviderId, ProviderPreset> = {
     extraBody: { provider: { order: ['deepinfra'], allow_fallbacks: false, data_collection: 'deny', zdr: true } },
     costMultiplier: 1.055
   },
+  'openrouter-free': {
+    baseUrl: 'https://openrouter.ai/api/v1',
+    model: 'qwen/qwen3.8-27b:free',
+    thinking: 'openrouter_reasoning',
+    includeUsage: false,
+    costMultiplier: 1,
+    free: true,
+    // Only endpoints that don't collect data, unless the operator deliberately allows it
+    // (that would also need a new data notice).
+    extraBody: { provider: { data_collection: 'deny' } },
+    // Never paid: a free variant has one endpoint; no fallback to another endpoint or model,
+    // and a price ceiling of zero, so OpenRouter refuses rather than bill.
+    lockedBody: { provider: { allow_fallbacks: false, max_price: { prompt: 0, completion: 0, request: 0, image: 0 } } },
+    forbiddenExtra: ['models', 'route', 'model', 'plugins']
+  },
   'openai-compatible': { baseUrl: '', model: '', thinking: 'chat_template_kwargs', includeUsage: true, costMultiplier: 1 }
+}
+
+/** Merges plain objects one level deep (the `provider` preferences object), later wins. */
+function mergeBody(...parts: Array<Record<string, unknown> | undefined>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const p of parts) {
+    if (!p) continue
+    for (const [k, v] of Object.entries(p)) {
+      const prev = out[k]
+      out[k] = v && typeof v === 'object' && !Array.isArray(v) && prev && typeof prev === 'object' && !Array.isArray(prev) ? { ...(prev as object), ...(v as object) } : v
+    }
+  }
+  return out
 }
 
 export type UpstreamKind =
@@ -112,6 +152,8 @@ export interface ExternalOptions {
   maxBackoffMs?: number
   /** Total time spent waiting between attempts. */
   retryBudgetMs?: number
+  /** Whether a 429 is tried again (off for a quota-counted free endpoint: every attempt spends quota). */
+  retryRateLimit?: boolean
   fetch?: typeof fetch
   sleep?: (ms: number) => Promise<void>
   random?: () => number
@@ -146,6 +188,15 @@ export function retryAfterSeconds(h: string | null, now = Date.now()): number | 
   return Number.isFinite(t) ? Math.max(0, (t - now) / 1000) : undefined
 }
 
+/** Seconds until an X-RateLimit-Reset time (epoch milliseconds or seconds, as OpenRouter sends it); undefined if absent. */
+export function resetSeconds(h: string | null, now = Date.now()): number | undefined {
+  if (!h) return undefined
+  const n = Number(h)
+  if (!Number.isFinite(n) || n <= 0) return undefined
+  const ms = n > 1e12 ? n : n * 1000
+  return Math.max(0, (ms - now) / 1000)
+}
+
 /** The request body for an OpenAI-compatible provider, from the inputs the handler builds for Workers AI. */
 export function toProviderBody(preset: ProviderPreset, model: string, inputs: Record<string, unknown>, extraBody?: Record<string, unknown>): Record<string, unknown> {
   const { max_completion_tokens, chat_template_kwargs, reasoning_effort, stream, ...rest } = inputs as Record<string, unknown> & { chat_template_kwargs?: { enable_thinking?: boolean } }
@@ -167,7 +218,8 @@ export function toProviderBody(preset: ProviderPreset, model: string, inputs: Re
     body.stream = true
     if (preset.includeUsage) body.stream_options = { include_usage: true }
   }
-  return { ...body, ...(preset.extraBody ?? {}), ...(extraBody ?? {}) }
+  const extra = extraBody ? Object.fromEntries(Object.entries(extraBody).filter(([k]) => !(preset.forbiddenExtra ?? []).includes(k))) : undefined
+  return mergeBody(body, preset.extraBody, extra, preset.lockedBody)
 }
 
 async function readCappedText(res: Response, max: number): Promise<string> {
@@ -298,11 +350,11 @@ export function externalProvider(opts: ExternalOptions): AiBinding {
           }
           const errBody = await readCappedText(res, 4_000)
           const kind = kindOfStatus(res.status, errBody)
-          failure = new UpstreamError(kind, res.status, retryAfterSeconds(res.headers.get('retry-after')))
-          if (!RETRYABLE.has(res.status) || kind === 'credits') throw failure
+          failure = new UpstreamError(kind, res.status, retryAfterSeconds(res.headers.get('retry-after')) ?? resetSeconds(res.headers.get('x-ratelimit-reset')))
+          if (!RETRYABLE.has(res.status) || kind === 'credits' || (res.status === 429 && opts.retryRateLimit === false)) throw failure
         } catch (err) {
           clearTimeout(timer)
-          if (err instanceof UpstreamError && !(err.status && RETRYABLE.has(err.status) && err.kind !== 'credits')) throw err
+          if (err instanceof UpstreamError && !(err.status && RETRYABLE.has(err.status) && err.kind !== 'credits' && !(err.status === 429 && opts.retryRateLimit === false))) throw err
           failure = err instanceof UpstreamError ? err : new UpstreamError(ctrl.signal.aborted ? 'timeout' : 'other')
         }
         // Retry: bounded attempts, exponential backoff with jitter, honouring a short Retry-After.

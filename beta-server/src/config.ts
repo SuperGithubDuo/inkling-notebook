@@ -30,7 +30,7 @@ export interface Env {
   IMAGE_PATCH: string
   MAX_INPUT_TOKENS: string
   // ---- External provider (unset keeps Workers AI) ----
-  /** "workers-ai" (default) | "deepinfra" | "openrouter" | "openai-compatible". */
+  /** "workers-ai" (default) | "deepinfra" | "openrouter" | "openrouter-free" | "openai-compatible". */
   INFERENCE_PROVIDER?: string
   /** Secret (wrangler secret put INFERENCE_API_KEY): the provider's API key. Never leaves the Worker except to that provider. */
   INFERENCE_API_KEY?: string
@@ -59,6 +59,12 @@ export interface Env {
   UPSTREAM_MAX_ATTEMPTS?: string
   UPSTREAM_TIMEOUT_MS?: string
   UPSTREAM_IDLE_TIMEOUT_MS?: string
+  /**
+   * The provider's account-wide request quota, per UTC day and per minute (required for
+   * "openrouter-free": set a little under OpenRouter's 1,000 a day / 20 a minute).
+   */
+  GLOBAL_REQUESTS_PER_DAY?: string
+  GLOBAL_REQUESTS_PER_MINUTE?: string
   /** Reservation margin on the input estimate (default 1.5 on an external provider). */
   INPUT_ESTIMATE_MARGIN?: string
   /** Oldest app data notice accepted. Default: 4 with an external provider (its notice names it), 0 on Workers AI. */
@@ -81,7 +87,7 @@ export const NOTICE_NOT_YET_SHIPPED = 99
 
 export function providerOf(env: Env): ProviderId {
   const p = (env.INFERENCE_PROVIDER ?? '').trim()
-  return p === 'deepinfra' || p === 'openrouter' || p === 'openai-compatible' ? p : 'workers-ai'
+  return p === 'deepinfra' || p === 'openrouter' || p === 'openrouter-free' || p === 'openai-compatible' ? p : 'workers-ai'
 }
 
 /**
@@ -109,7 +115,9 @@ export function externalLimits(env: Env): LedgerLimits | string {
     reservationTtlMs: 10 * 60_000,
     typicalNeuronsPerAnswer: micro(pos(env.TYPICAL_USD_PER_ANSWER) ?? 0.0008),
     softFraction: pos(env.SOFT_LIMIT_FRACTION) ?? 0.8,
-    softFactor: pos(env.SOFT_LIMIT_FACTOR) ?? 0.5
+    softFactor: pos(env.SOFT_LIMIT_FACTOR) ?? 0.5,
+    globalRequestsPerDay: pos(env.GLOBAL_REQUESTS_PER_DAY),
+    globalRequestsPerMinute: pos(env.GLOBAL_REQUESTS_PER_MINUTE)
   }
 }
 
@@ -133,7 +141,7 @@ export function limits(env: Env): LedgerLimits {
 }
 
 /** Who answers, and at what price, from the Worker's settings; a string explains a setting that is missing (serve nothing). */
-export function inference(env: Env): { ai: AiBinding; provider: ProviderId; model: string; publicModel: string; rates: ServerConfig['rates']; minNotice: number; inputMargin: number } | string {
+export function inference(env: Env): { ai: AiBinding; provider: ProviderId; model: string; publicModel: string; rates: ServerConfig['rates']; minNotice: number; inputMargin: number; freeProvider?: boolean } | string {
   const provider = providerOf(env)
   if (provider === 'workers-ai') {
     // Refuse rather than risk billed usage on a Workers Paid account.
@@ -154,11 +162,19 @@ export function inference(env: Env): { ai: AiBinding; provider: ProviderId; mode
   if (!key) return 'INFERENCE_API_KEY secret is missing'
   const l = externalLimits(env)
   if (typeof l === 'string') return l
-  const input = pos(env.PRICE_INPUT_USD_PER_M)
-  const output = pos(env.PRICE_OUTPUT_USD_PER_M)
+  const free = PRESETS[id].free === true
+  // On the free endpoint prices are a SHADOW price (default DeepInfra's list price): nothing is billed,
+  // but allowances in dollars still share out the free quota fairly.
+  const input = pos(env.PRICE_INPUT_USD_PER_M) ?? (free ? 0.2 : undefined)
+  const output = pos(env.PRICE_OUTPUT_USD_PER_M) ?? (free ? 2.5 : undefined)
   if (!input || !output) return 'PRICE_INPUT_USD_PER_M and PRICE_OUTPUT_USD_PER_M must be set'
   const model = env.UPSTREAM_MODEL?.trim() || PRESETS[id].model
   if (!model) return 'UPSTREAM_MODEL must be set'
+  if (free) {
+    // Never a paid model: only a ":free" variant, and the account-wide request quota must be set.
+    if (!model.endsWith(':free')) return 'UPSTREAM_MODEL must be a ":free" model for openrouter-free'
+    if (!l.globalRequestsPerDay || !l.globalRequestsPerMinute) return 'GLOBAL_REQUESTS_PER_DAY and GLOBAL_REQUESTS_PER_MINUTE must be set for openrouter-free'
+  }
   let extraBody: Record<string, unknown> | undefined
   if (env.UPSTREAM_EXTRA_BODY) {
     try {
@@ -174,7 +190,9 @@ export function inference(env: Env): { ai: AiBinding; provider: ProviderId; mode
       apiKey: key,
       baseUrl: env.UPSTREAM_BASE_URL,
       extraBody,
-      maxAttempts: num(env.UPSTREAM_MAX_ATTEMPTS, 3),
+      // On a quota-counted free endpoint every attempt spends quota: one retry at most, never after a 429.
+      maxAttempts: num(env.UPSTREAM_MAX_ATTEMPTS, free ? 2 : 3),
+      retryRateLimit: !free,
       firstByteTimeoutMs: num(env.UPSTREAM_TIMEOUT_MS, 45_000),
       idleTimeoutMs: num(env.UPSTREAM_IDLE_TIMEOUT_MS, 45_000)
     })
@@ -193,8 +211,10 @@ export function inference(env: Env): { ai: AiBinding; provider: ProviderId; mode
       inputPerM: input * 1e6,
       outputPerM: output * 1e6,
       ...(cached ? { cachedInputPerM: cached * 1e6 } : {}),
-      costMultiplier: pos(env.COST_MULTIPLIER) ?? PRESETS[id].costMultiplier
+      costMultiplier: pos(env.COST_MULTIPLIER) ?? PRESETS[id].costMultiplier,
+      ...(free ? { ignoreReportedCost: true } : {})
     },
+    freeProvider: free,
     // DeepInfra is named in the app's data notice from version 4. Any other host isn't named in a
     // shipped notice yet: it needs a new notice (and CLOUD_CONSENT_VERSION) before real users reach it.
     minNotice: num(env.MIN_NOTICE_VERSION, id === 'deepinfra' ? 4 : NOTICE_NOT_YET_SHIPPED),

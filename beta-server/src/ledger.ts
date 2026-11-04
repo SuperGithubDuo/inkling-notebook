@@ -77,6 +77,13 @@ export interface LedgerLimits {
   softFactor?: number
   /** An identical request from the same installation, already answered within this time, is refused. Unset: 10 s. */
   duplicateWindowMs?: number
+  /**
+   * Requests the whole service may send the provider per UTC day and per minute, every
+   * attempt counted: a free endpoint's account-wide quota (OpenRouter: 1,000 a day with
+   * $10 of credits bought, 20 a minute). Unset: no request quota.
+   */
+  globalRequestsPerDay?: number
+  globalRequestsPerMinute?: number
 }
 
 export interface Identity {
@@ -109,6 +116,7 @@ export type RefusalCode =
   | 'network_quota'
   | 'global_quota'
   | 'global_monthly_quota'
+  | 'free_daily_quota'
   | 'upstream_unavailable'
   | 'rate_limited'
   | 'duplicate'
@@ -127,6 +135,10 @@ interface Day {
   upstreamExhausted?: boolean
   /** When Cloudflare last reported the free allocation used up. Answers stop for UPSTREAM_RETRY_MS, then are tried again. */
   upstreamExhaustedAt?: number
+  /** The provider said its quota is used up until this time (a free endpoint's daily quota). */
+  upstreamBlockedUntil?: number
+  /** Requests sent to the provider today (UTC), every attempt counted. */
+  upstreamRequests?: number
 }
 
 /**
@@ -210,6 +222,10 @@ export const ROLLING_WINDOW_MS = 25 * HOUR_MS
 
 export interface SettleOptions {
   upstreamExhausted?: boolean
+  /** The provider's quota is used up until this time (epoch ms): stop everyone until then. */
+  upstreamBlockedUntil?: number
+  /** Attempts beyond the first that reached the provider (retries), for the request quota. */
+  extraAttempts?: number
   failedBeforeModel?: boolean
   /** A complete answer was delivered: an identical request soon after is a duplicate. */
   answered?: boolean
@@ -226,6 +242,8 @@ export class Ledger {
   private reservations: Reservation[] | null = null
   private paused: boolean | null = null
   private readonly recent = new Map<string, number[]>()
+  /** Requests sent to the provider in the last minute, whole service (memory only). */
+  private globalMinute: number[] = []
   private lock: Promise<unknown> = Promise.resolve()
   private calls = 0
 
@@ -421,12 +439,15 @@ export class Ledger {
   }
 
   private upstreamBlocked(day: Day): boolean {
+    if (day.upstreamBlockedUntil !== undefined && this.now() < day.upstreamBlockedUntil) return true
     return day.upstreamExhaustedAt !== undefined && this.now() - day.upstreamExhaustedAt < UPSTREAM_RETRY_MS
   }
 
   /** Whole seconds until answers are tried again after an upstream stop (at least 1). */
   private upstreamRetryIn(day: Day): number {
-    return Math.max(1, Math.ceil(((day.upstreamExhaustedAt ?? 0) + UPSTREAM_RETRY_MS - this.now()) / 1000))
+    const a = day.upstreamExhaustedAt !== undefined ? day.upstreamExhaustedAt + UPSTREAM_RETRY_MS : 0
+    const b = day.upstreamBlockedUntil ?? 0
+    return Math.max(1, Math.ceil((Math.max(a, b) - this.now()) / 1000))
   }
 
   private finite(v: number | undefined): v is number {
@@ -534,10 +555,21 @@ export class Ledger {
       if (u.install + expected > u.installLimit) return { ok: false, code: 'install_quota', retryAfter: resetIn, quota: q }
       if (this.finite(this.limits.installMonthly) && u.installMonth + expected > this.limits.installMonthly) return { ok: false, code: 'install_monthly_quota', retryAfter: Math.ceil((nextUtcMonth(now) - now) / 1000), quota: q }
       if (u.network + expected > u.networkLimit) return { ok: false, code: 'network_quota', retryAfter: resetIn, quota: q }
+      // The provider's account-wide request quota (a free endpoint), counted before sending, never after.
+      if (this.finite(this.limits.globalRequestsPerDay) && (day.upstreamRequests ?? 0) + 1 > this.limits.globalRequestsPerDay) return { ok: false, code: 'free_daily_quota', retryAfter: resetIn, quota: q }
+      if (this.finite(this.limits.globalRequestsPerMinute)) {
+        this.globalMinute = this.globalMinute.filter((t) => now - t < 60_000)
+        if (this.globalMinute.length + 1 > this.limits.globalRequestsPerMinute) return { ok: false, code: 'capacity', retryAfter: Math.max(1, Math.ceil((60_000 - (now - this.globalMinute[0]!)) / 1000)) }
+      }
 
       const r: Reservation = { id: this.randomId(), install: k.install, network: k.network, installMonth: k.installMonth, neurons: worst, day: day.day, at: now }
       open.push(r)
       await this.saveReservations()
+      if (this.finite(this.limits.globalRequestsPerDay) || this.finite(this.limits.globalRequestsPerMinute)) {
+        day.upstreamRequests = (day.upstreamRequests ?? 0) + 1
+        this.globalMinute.push(now)
+        await this.storage.put('day', day)
+      }
       wi.push(now)
       wn.push(now)
       if (fingerprint) this.lastRequest.set(k.install, { fp: fingerprint, reservationId: r.id })
@@ -560,6 +592,11 @@ export class Ledger {
       // Missing means it already expired, and was charged in full then.
       const r = open.find((x) => x.id === reservationId)
       if (opts.upstreamExhausted) day.upstreamExhaustedAt = this.now()
+      if (opts.upstreamBlockedUntil && opts.upstreamBlockedUntil > this.now()) day.upstreamBlockedUntil = Math.max(day.upstreamBlockedUntil ?? 0, opts.upstreamBlockedUntil)
+      if (opts.extraAttempts && opts.extraAttempts > 0) {
+        day.upstreamRequests = (day.upstreamRequests ?? 0) + opts.extraAttempts
+        for (let i = 0; i < opts.extraAttempts; i++) this.globalMinute.push(this.now())
+      }
       if (r) {
         this.reservations = open.filter((x) => x !== r)
         await this.saveReservations()
@@ -591,6 +628,8 @@ export class Ledger {
     monthLimit: number | null
     monthAnswers: number
     reduced: boolean
+    upstreamRequests: number
+    upstreamRequestLimit: number | null
     installations: number
     networks: number
     answering: number
@@ -617,6 +656,8 @@ export class Ledger {
         monthLimit: this.finite(this.limits.globalMonthly) ? this.limits.globalMonthly : null,
         monthAnswers: month.requests,
         reduced,
+        upstreamRequests: day.upstreamRequests ?? 0,
+        upstreamRequestLimit: this.finite(this.limits.globalRequestsPerDay) ? this.limits.globalRequestsPerDay : null,
         // The capped figure: the last 24 hours plus answers in progress.
         globalUsed: Math.round(this.rollingUsed(await this.hours()) + open.reduce((n, r) => n + r.neurons, 0)),
         globalLimit: this.limits.globalDailyNeurons,

@@ -1,0 +1,72 @@
+{
+  // Inkling's AI server answering through OpenRouter's FREE Qwen 3.8 27B endpoint
+  // (qwen/qwen3.8-27b:free). A separate Worker ("inkling-ai-free-next") for testing with a
+  // development key; production (wrangler.jsonc, Workers AI) is not touched by it.
+  //
+  //   npx wrangler deploy -c wrangler.openrouter-free.jsonc
+  //   npx wrangler secret put INFERENCE_API_KEY -c wrangler.openrouter-free.jsonc   # an OpenRouter key
+  //   npx wrangler secret put ADMIN_TOKEN -c wrangler.openrouter-free.jsonc         # ≥ 32 random characters
+  //
+  // Nothing is billed: the server only ever asks for the ":free" model, with no fallback and a
+  // zero price ceiling, and pauses itself if OpenRouter ever reports a charge.
+  //
+  // To switch production later, see docs/AI-PROVIDERS.md → "Production switch".
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "inkling-ai-free-next",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "alias": { "@shared": "../src/shared" },
+  // Kept so a rollback is a one-line change (INFERENCE_PROVIDER → "workers-ai"); unused otherwise.
+  "ai": { "binding": "AI" },
+  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "LedgerObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LedgerObject"] }],
+  // Error kinds only; never request content (the Worker never logs it), no per-request invocation logs.
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
+  "vars": {
+    "INFERENCE_PROVIDER": "openrouter-free",
+    "UPSTREAM_MODEL": "qwen/qwen3.8-27b:free",
+    // OpenRouter's account-wide free quota (with $10 of credits bought): 1,000 requests a UTC day,
+    // 20 a minute, every attempt counted. Kept under both so tests and probes on the same account fit.
+    "GLOBAL_REQUESTS_PER_DAY": "900",
+    "GLOBAL_REQUESTS_PER_MINUTE": "16",
+    // SHADOW prices (DeepInfra's list price): nothing is billed; they only share out the free quota.
+    "PRICE_INPUT_USD_PER_M": "0.20",
+    "PRICE_OUTPUT_USD_PER_M": "2.50",
+    "GLOBAL_DAILY_USD": "1.00",
+    "GLOBAL_MONTHLY_USD": "30",
+    // Per installation ≈ 25 answers a day; a network 3 installations' worth.
+    "INSTALL_DAILY_USD": "0.02",
+    "INSTALL_MONTHLY_USD": "0.30",
+    "NETWORK_DAILY_USD": "0.06",
+    "TYPICAL_USD_PER_ANSWER": "0.0008",
+    "SOFT_LIMIT_FRACTION": "0.8",
+    "SOFT_LIMIT_FACTOR": "0.5",
+    "INSTALL_PER_MINUTE": "6",
+    "NETWORK_PER_MINUTE": "20",
+    "INSTALL_CONCURRENT": "1",
+    "NETWORK_CONCURRENT": "4",
+    "GLOBAL_CONCURRENT": "16",
+    "UPSTREAM_MAX_ATTEMPTS": "2",
+    "UPSTREAM_TIMEOUT_MS": "45000",
+    "UPSTREAM_IDLE_TIMEOUT_MS": "45000",
+    "INPUT_ESTIMATE_MARGIN": "1.5",
+    // TEST ONLY: no shipped app's notice names OpenRouter, so production would leave this at its
+    // default (99, closed). Notice 4 lets the test suites (which send 4) reach this test Worker.
+    "MIN_NOTICE_VERSION": "4",
+    "MAX_INPUT_TOKENS": "12000",
+    "REASONING_EFFORT": "low",
+    "DISABLE_THINKING": "true",
+    "STRUCTURED": "prompt",
+    "IMAGE_PATCH": "28",
+    "MODEL": "@cf/qwen/qwen3.8-27b",
+    "ACCOUNT_PLAN": "free",
+    "GLOBAL_DAILY_NEURONS": "9000",
+    "INSTALL_DAILY_NEURONS": "900",
+    "NETWORK_DAILY_NEURONS": "2700",
+    "TYPICAL_NEURONS_PER_ANSWER": "90",
+    "INPUT_NEURONS_PER_M": "40909",
+    "OUTPUT_NEURONS_PER_M": "290909"
+  }
+}

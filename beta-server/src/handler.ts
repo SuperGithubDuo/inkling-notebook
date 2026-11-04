@@ -55,6 +55,8 @@ export interface ServerConfig {
    * worst case reserved before the call above what the provider will bill.
    */
   inputMargin?: number
+  /** The provider never bills (OpenRouter Free): a reported charge pauses the service. */
+  freeProvider?: boolean
   /** Reasoning effort sent to the model ('low' keeps hidden, billed reasoning short). Empty: not sent. */
   reasoningEffort: string
   /** Sends chat_template_kwargs.enable_thinking = false. */
@@ -80,6 +82,8 @@ export interface Deps {
 }
 
 const MIN_CHAT_TOKENS = 300
+/** A rate limit asking to wait longer than this is a used-up quota, not a burst limit. */
+export const QUOTA_WAIT_S = 300
 /** Characters per output token beyond which an answer has clearly passed its token cap (real text averages 3–4). */
 export const RUNAWAY_CHARS_PER_TOKEN = 8
 /**
@@ -154,7 +158,12 @@ function refusal(code: RefusalCode, retryAfter: number | undefined, quota?: Quot
     case 'upstream_unavailable':
       // Not Inkling's daily allowance: a short pause after Cloudflare refused, with the real retry time.
       // 'server' (not 'daily_quota') so the app keeps no day-long pause and the next try reaches the server.
-      return problem(503, 'server', `Inkling’s free AI is briefly unavailable from its provider. Try again ${inMinutes(retryAfter)}. ${keepGoing}`, retryAfter, { scope: code, quota })
+      return (retryAfter ?? 0) > 3600
+        ? problem(503, 'server', `Inkling’s free AI has reached its provider’s limit for today. Try again ${inAbout(retryAfter)}. ${keepGoing}`, retryAfter, { scope: code, quota })
+        : problem(503, 'server', `Inkling’s free AI is briefly unavailable from its provider. Try again ${inMinutes(retryAfter)}. ${keepGoing}`, retryAfter, { scope: code, quota })
+    case 'free_daily_quota':
+      // The service's own count of the provider's daily request quota (shared by everyone).
+      return problem(429, 'daily_quota', `Inkling’s free AI has answered as many questions as it can today, for everyone. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'too_large':
       return problem(413, 'bad_request', 'This request is too large for the free AI. Select a smaller part of the page or ask for fewer problems.', undefined, { scope: code })
     case 'busy':
@@ -266,7 +275,13 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   const external = providerName !== 'workers-ai'
   // A retried attempt that timed out may have been processed (and billed) by the provider: count its input, to be safe.
   let retryCharge = 0
-  const hooks = { onRetry: (kind: string) => void (kind === 'timeout' || kind === 'other' ? (retryCharge += inputCost) : undefined) }
+  let extraAttempts = 0
+  const hooks = {
+    onRetry: (kind: string) => {
+      extraAttempts++
+      if (kind === 'timeout' || kind === 'other') retryCharge += inputCost
+    }
+  }
   let upstream: unknown
   try {
     // The Workers AI binding's third argument means something else; only external providers get the hooks.
@@ -280,8 +295,15 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     else console.warn(`${providerName} error`, kind)
     // An error before any answer: the model did no work (charge only what timed-out retries may have cost).
     const exhausted = kind === 'free_allocation' || kind === 'credits'
-    if (retryCharge > 0) await ledger.settle(reservationId, Math.min(reserved, retryCharge), { upstreamExhausted: exhausted })
-    else await ledger.settle(reservationId, undefined, { failedBeforeModel: true, upstreamExhausted: exhausted })
+    // A rate limit with a long wait is a quota used up (a free endpoint's daily requests): stop everyone until it resets.
+    const wait = err instanceof Error && 'retryAfterS' in err ? Number((err as { retryAfterS?: number }).retryAfterS) : NaN
+    const quotaGone = kind === 'rate_limited' && Number.isFinite(wait) && wait > QUOTA_WAIT_S
+    const blockedUntil = quotaGone ? now() + Math.min(wait, 36 * 3600) * 1000 : undefined
+    if (quotaGone) console.warn(`${providerName} quota used up`, Math.round(wait))
+    const opts = { upstreamExhausted: exhausted, upstreamBlockedUntil: blockedUntil, extraAttempts }
+    if (retryCharge > 0) await ledger.settle(reservationId, Math.min(reserved, retryCharge), opts)
+    else await ledger.settle(reservationId, undefined, { failedBeforeModel: true, ...opts })
+    if (quotaGone) return refusal('upstream_unavailable', Math.ceil(wait))
     return upstreamProblem(kind)
   }
 
@@ -352,7 +374,13 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     if (!failed && !text && !clientGone) failed = 'empty'
     const cost =
       retryCharge + (runaway ? reserved : usage ? costFor(usage, config.rates) : clientGone || (failed && !text) ? reserved : Math.min(reserved, inputCost + ((text.length + reasoningChars) / 3) * outRate))
-    await ledger.settle(reservationId, cost, { answered: !failed && !clientGone && !!text })
+    await ledger.settle(reservationId, cost, { answered: !failed && !clientGone && !!text, extraAttempts })
+    // A free provider must never bill. A reported charge means a misconfiguration (a paid model or
+    // endpoint was reached): stop every answer until the operator looks.
+    if (config.freeProvider && usage?.reportedCostUsd !== undefined && usage.reportedCostUsd > 0) {
+      console.error(`${providerName} reported a charge on a free endpoint: answers paused`)
+      await ledger.setPaused(true)
+    }
     const quota = await ledger.quota(id)
     if (failed && !text) {
       await send('error', { code: 'server', message: 'The model stopped before answering. Try again in a moment.', quota })

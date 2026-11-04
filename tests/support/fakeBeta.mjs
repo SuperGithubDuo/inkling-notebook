@@ -157,6 +157,7 @@ export async function startBetaServer(options = {}) {
     publicModel: options.publicModel,
     minNoticeVersion: options.minNoticeVersion ?? 0,
     inputMargin: options.inputMargin ?? 1,
+    freeProvider: options.freeProvider ?? false,
     rates: options.rates ?? RATES,
     reasoningEffort: options.reasoningEffort ?? 'low',
     disableThinking: options.disableThinking ?? true,
