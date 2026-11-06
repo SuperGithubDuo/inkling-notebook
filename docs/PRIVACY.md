@@ -1,6 +1,6 @@
 # Inkling privacy policy: DRAFT for legal review
 
-*This is a plain-language draft that describes what the software actually does, checked against the code on 3 Nov 2026 (branch `migrate/external-inference`, external inference provider). It is not legal advice and has not been reviewed by a lawyer. It must be reviewed by counsel before publication, with particular care for users under 18, under 13 in the US (COPPA), schools (FERPA and local equivalents) and the EU/UK (GDPR, age of digital consent).*
+*This is a plain-language draft that describes what the software actually does, checked against the code on 6 Nov 2026 (branch `migrate/external-inference-v2`, external inference provider). It is not legal advice and has not been reviewed by a lawyer. It must be reviewed by counsel before publication, with particular care for users under 18, under 13 in the US (COPPA), schools (FERPA and local equivalents) and the EU/UK (GDPR, age of digital consent).*
 
 *Items in **[OPERATOR TO SUPPLY: …]** or **[OPERATOR DECISION REQUIRED: …]** are missing on purpose: they must come from the person or organisation that runs Inkling, not from the software.*
 

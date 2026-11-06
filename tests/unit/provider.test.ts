@@ -372,6 +372,77 @@ describe('AI server on an external provider', () => {
 
 // ------------------------------------------------------------------ economics
 
+describe('one model on an external provider, and token accounting', () => {
+  const TEXT_MODEL = { model: '@cf/google/gemma-4-26b-a4b-it', rates: { inputPerM: 9091, outputPerM: 27273 }, tasks: ['practice', 'chat', 'check'] as const }
+
+  it('never routes: even with a text model configured, every task goes to Qwen 3.8 27B on the provider', async () => {
+    await start({ server: { textModel: TEXT_MODEL } })
+    for (const task of ['chat', 'practice', 'check'] as const) {
+      const body = task === 'chat' ? chat('What is 2+2?') : { task, turns: [{ role: 'user', parts: [{ text: task === 'check' ? 'Problem: 2+2. Student answer: 4' : 'Topic: fractions. Difficulty: easy. 2 problems.' }] }] }
+      const r = await post(body, { install: 'inst_' + task.padEnd(32, 'x') })
+      expect(r.status).toBe(200)
+      await server!.settled()
+    }
+    const models = fake!.completions().map((c) => c.body.model)
+    expect(models).toEqual(['Qwen/Qwen3.8-27B', 'Qwen/Qwen3.8-27B', 'Qwen/Qwen3.8-27B'])
+  })
+
+  it('the Workers AI rollback keeps today’s text-only rule unchanged', async () => {
+    server = await startBetaServer({ textModel: { ...TEXT_MODEL, tasks: ['practice'] } })
+    const r = await post({ task: 'practice', turns: [{ role: 'user', parts: [{ text: 'Topic: fractions. 2 problems.' }] }] }, { notice: null })
+    expect(r.status).toBe(200)
+    await server.settled()
+    expect((server.ai as any).calls.map((c: any) => c.model)).toEqual(['@cf/google/gemma-4-26b-a4b-it'])
+  })
+
+  it('tracks the provider’s real tokens and cost per installation, per day, per month and per model; no content', async () => {
+    await start({ fake: { cachedTokens: 400 } })
+    fake!.model.reply({ text: 'First answer.', usage: { inputTokens: 1000, outputTokens: 100 } })
+    fake!.model.reply({ text: 'Second answer.', usage: { inputTokens: 1500, outputTokens: 200 } })
+    await post(chat('a private question'))
+    await server!.settled()
+    await post(chat('another private question'))
+    await server!.settled()
+    const sum = (await server!.admin('GET', '/admin/summary')).body
+    expect(sum.unit).toBe('usd')
+    expect(sum.tokens).toEqual({ today: { input: 2500, output: 300 }, month: { input: 2500, output: 300 } })
+    const m = sum.models.today['Qwen/Qwen3.8-27B']
+    expect(m).toMatchObject({ requests: 2, errors: 0, inputTokens: 2500, outputTokens: 300, cachedTokens: 800, estimated: 0, inputTokensPerAnswer: 1250, outputTokensPerAnswer: 150, tasks: { chat: 2 }, routes: { main: 2 } })
+    // Cost: (600 × 0.20 + 400 × 0.05 + 100 × 2.50) + (1100 × 0.20 + 400 × 0.05 + 200 × 2.50) = 390 + 740 = 1130 µ$.
+    expect(m.neurons).toBe(1130)
+    expect(sum.monthUsed).toBe(1130)
+    // Per installation (hashed key): tokens alongside cost.
+    const installKeys = [...server!.storage.store.keys()].filter((k) => k.startsWith('i:'))
+    expect(installKeys).toHaveLength(1)
+    expect(server!.storage.store.get(installKeys[0]!)).toMatchObject({ neurons: 1130, requests: 2, inputTokens: 2500, outputTokens: 300 })
+    // Nothing stored anywhere carries content or the raw installation ID.
+    const stored = JSON.stringify([...server!.storage.store.entries()])
+    expect(stored).not.toMatch(/private question|First answer/)
+    expect(stored).not.toContain(INSTALL_A)
+  })
+
+  it('without provider usage, tokens are estimated conservatively and flagged as estimated', async () => {
+    await start()
+    fake!.model.reply({ text: 'An answer with no usage report.', noUsage: true })
+    const r = await post(chat('question'))
+    expect(r.events.at(-1)!.data.usage.estimated).toBe(true)
+    await server!.settled()
+    const m = (await server!.admin('GET', '/admin/summary')).body.models.today['Qwen/Qwen3.8-27B']
+    expect(m.estimated).toBe(1)
+    expect(m.inputTokens).toBeGreaterThan(0)
+    expect(m.outputTokens).toBeGreaterThan(0)
+  })
+
+  it('a failed call is counted as an error by kind, with no tokens', async () => {
+    await start()
+    fake!.fail({ status: 404, body: { error: { message: 'model not found' } } })
+    const r = await post(chat('question'))
+    expect(r.status).toBe(503)
+    const m = (await server!.admin('GET', '/admin/summary')).body.models.today['Qwen/Qwen3.8-27B']
+    expect(m).toMatchObject({ requests: 1, errors: 1, errorKinds: { model_unavailable: 1 }, inputTokens: 0, outputTokens: 0 })
+  })
+})
+
 describe('spending caps and budget protection', () => {
   it('the daily dollar cap stops everyone before the provider is called', async () => {
     // $0.0025 a day: room for one worst-case chat (~$0.0023). After a $0.0019 answer, even a
@@ -542,7 +613,7 @@ describe('Worker configuration', () => {
     const inf = inference(env)
     if (typeof inf === 'string') throw new Error(inf)
     expect(inf).toMatchObject({ provider: 'deepinfra', model: 'Qwen/Qwen3.8-27B', publicModel: 'qwen3.8-27b', minNotice: 4, inputMargin: 1.5, rates: { unit: 'usd', inputPerM: 200_000, outputPerM: 2_500_000, costMultiplier: 1 } })
-    expect(limitsFromEnv(env)).toMatchObject({ unit: 'usd', globalDailyNeurons: 5_000_000, globalMonthly: 100_000_000, installDailyNeurons: 100_000, networkDailyNeurons: 300_000, installMonthly: 500_000, softFraction: 0.8, softFactor: 0.5 })
+    expect(limitsFromEnv(env)).toMatchObject({ unit: 'usd', globalDailyNeurons: 5_000_000, globalMonthly: 100_000_000, installDailyNeurons: 100_000, networkDailyNeurons: 1_000_000, installMonthly: 500_000, softFraction: 0.8, softFactor: 0.5 })
   })
 
   it('a daily cap above the monthly one is held to the monthly one', () => {

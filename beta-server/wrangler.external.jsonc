@@ -24,7 +24,7 @@
   "vars": {
     "INFERENCE_PROVIDER": "deepinfra",
     "UPSTREAM_MODEL": "Qwen/Qwen3.8-27B",
-    // DeepInfra's LIST price (Nov 2026: $0.20 / $2.50 / $0.05 cached per million tokens). The
+    // DeepInfra's LIST price (re-checked 6 Nov 2026: $0.20 / $2.50 / $0.05 cached per million tokens). The
     // 25% promotion ($0.15 / $1.875) is not used, so accounting errs high and survives its end.
     "PRICE_INPUT_USD_PER_M": "0.20",
     "PRICE_OUTPUT_USD_PER_M": "2.50",
@@ -33,11 +33,13 @@
     "GLOBAL_DAILY_USD": "1.00",
     "GLOBAL_MONTHLY_USD": "20",
     // Fair shares. A typical answer costs $0.0006 (measured) to $0.0008 (full-size images) at
-    // list price, so $0.02/day ≈ 25–34 answers a day per installation (today: ~10 on Workers AI);
-    // $0.30/month ≈ 380–500 a month; $0.06/day per network (a school or office shares it).
+    // list price ($0.0015 for long conversations), so $0.02/day ≈ 13–34 answers a day per
+    // installation (today: ~10 on Workers AI); $0.30/month ≈ 200–500 a month. A network gets 10
+    // installations' worth ($0.20/day ≈ 130–340 answers), so a classroom behind one school IP
+    // isn't cut off; a reinstall loop on one connection still stops there.
     "INSTALL_DAILY_USD": "0.02",
     "INSTALL_MONTHLY_USD": "0.30",
-    "NETWORK_DAILY_USD": "0.06",
+    "NETWORK_DAILY_USD": "0.20",
     "TYPICAL_USD_PER_ANSWER": "0.0008",
     // At 80% of the day's or month's budget, everyone's daily share halves.
     "SOFT_LIMIT_FRACTION": "0.8",
@@ -45,7 +47,7 @@
     "INSTALL_PER_MINUTE": "6",
     "NETWORK_PER_MINUTE": "20",
     "INSTALL_CONCURRENT": "1",
-    "NETWORK_CONCURRENT": "4",
+    "NETWORK_CONCURRENT": "8",
     "GLOBAL_CONCURRENT": "24",
     "UPSTREAM_MAX_ATTEMPTS": "3",
     "UPSTREAM_TIMEOUT_MS": "45000",

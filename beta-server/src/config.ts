@@ -96,7 +96,7 @@ export function providerOf(env: Env): ProviderId {
 /**
  * Limits for an external provider, in µ$. Each daily allowance defaults to a
  * fraction of the whole service's: an installation 1/50 of the day's budget, a
- * network 3× an installation.
+ * network 10× an installation (a school shares one address).
  */
 export function externalLimits(env: Env): LedgerLimits | string {
   const daily = pos(env.GLOBAL_DAILY_USD)
@@ -109,7 +109,7 @@ export function externalLimits(env: Env): LedgerLimits | string {
     globalMonthly: micro(monthly),
     installDailyNeurons: micro(install),
     installMonthly: pos(env.INSTALL_MONTHLY_USD) !== undefined ? micro(pos(env.INSTALL_MONTHLY_USD)!) : undefined,
-    networkDailyNeurons: micro(pos(env.NETWORK_DAILY_USD) ?? install * 3),
+    networkDailyNeurons: micro(pos(env.NETWORK_DAILY_USD) ?? install * 10),
     installPerMinute: num(env.INSTALL_PER_MINUTE, 6),
     networkPerMinute: num(env.NETWORK_PER_MINUTE, 20),
     installConcurrent: num(env.INSTALL_CONCURRENT, 1),

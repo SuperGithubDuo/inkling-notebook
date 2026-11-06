@@ -235,8 +235,11 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   const spec = taskSpec(body.task, 'cloud')
   const inputTokens = estimateInputTokens(spec.system, body.turns, config.imagePatch)
   if (inputTokens > config.maxInputTokens) return tooLarge()
-  // One model on an external provider. On Workers AI (rollback), the text-only rule may apply.
-  const choice = chooseModel(body.task, body.turns, { model: config.model, rates: config.rates, reasoningEffort: config.reasoningEffort, disableThinking: config.disableThinking }, config.textModel)
+  // One model on an external provider (no routing, whatever the settings say). On Workers AI
+  // (the rollback), the text-only rule (route.ts) may apply as it does today.
+  const providerName = config.provider ?? 'workers-ai'
+  const external = providerName !== 'workers-ai'
+  const choice = chooseModel(body.task, body.turns, { model: config.model, rates: config.rates, reasoningEffort: config.reasoningEffort, disableThinking: config.disableThinking }, external ? null : config.textModel)
   const hasImage = body.turns.some((t) => t.parts.some((p) => 'image' in p))
   const outRate = choice.rates.outputPerM / 1e6
   const inputCost = inputTokens * (choice.rates.inputPerM / 1e6) * Math.max(1, config.inputMargin ?? 1)
@@ -271,8 +274,6 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   if (streamed) inputs.stream = true
 
   const startedAt = now()
-  const providerName = config.provider ?? 'workers-ai'
-  const external = providerName !== 'workers-ai'
   // A retried attempt that timed out may have been processed (and billed) by the provider: count its input, to be safe.
   let retryCharge = 0
   const hooks = { onRetry: (kind: string) => void (kind === 'timeout' || kind === 'other' ? (retryCharge += inputCost) : undefined) }

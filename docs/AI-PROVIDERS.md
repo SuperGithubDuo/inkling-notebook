@@ -1,13 +1,17 @@
 # AI inference providers: comparison, costs, limits, switch and rollback
 
-*Researched 3 Nov 2026 from the providers' own pages (links below). Prices change; re-check them before switching production. Branch `migrate/external-inference`.*
+*Researched 3 Nov 2026 and **re-checked 6 Nov 2026** from the providers' own pages (links below). Prices change; re-check them before switching production. Branch `migrate/external-inference-v2` (the DeepInfra work from `migrate/external-inference`, rebased onto main after the 4 Nov Gemma routing release).*
+
+*Decision context (6 Nov 2026): the earlier "$0, never a paid provider" rule is superseded by the operator's request to move inference to a cost-effective paid provider with dollar spending caps, keep Qwen 3.8 27B as the only model, and add no Gemma or multi-model routing on the new path. On an external provider the server answers every task with Qwen 3.8 27B; the Gemma text-only rule (route.ts) applies only if production is rolled back to Workers AI.*
 
 ## Summary
 
 - **Recommendation: DeepInfra, called directly**, for Qwen 3.8 27B (`Qwen/Qwen3.8-27B`). At list price it costs **$0.59 per 1,000 measured answers** against $0.89 on Workers AI (−34%); during DeepInfra's current 25% promotion, $0.44 (−50%). It states no storage and no training on inference content, has an OpenAI-compatible streaming API with usage on the last chunk, and allows 200 concurrent requests per model by default.
 - **Workers AI stays as the rollback**: one setting (`INFERENCE_PROVIDER`) switches back, on the same Worker, with the same ledger and the same app.
 - **OpenRouter is supported but not recommended**: pinned to DeepInfra it is the same model on the same hardware for 5.5% more, with one more company handling notebook content, and pinning removes its main benefit (falling back to other hosts), which would be multi-provider routing.
-- **Groq and Cerebras are not recommended for now**: Groq lists the model as *Preview*, is the most expensive, and counts every image as 2,048 tokens; Cerebras is the fastest but costs about 1.6× DeepInfra on Inkling's input-heavy requests.
+- **Groq and Cerebras are not recommended for now**: Groq lists the model as *Preview*, is the most expensive, counts every image as 2,048 tokens, and its base limits for this model (30 requests/min, 1,000/day, **8,000 tokens/min**, 200,000/day, organization-wide) would cap Inkling at a handful of image answers a minute; Cerebras is by far the fastest (~800 tokens/s on OpenRouter's measurements vs ~25 for DeepInfra) but costs about 1.6–2× DeepInfra on Inkling's input-heavy requests. Cerebras is the one to revisit if answer speed becomes the priority.
+
+**What changed on 6 Nov 2026:** prices unchanged at every provider (DeepInfra's 25% promotion still on, still no end date). New: DeepInfra now lists **Flex** (0.8× price, lower priority) and **Priority** (1.5×) tiers; Groq's model page and rate-limit table were checked (limits above); OpenRouter now shows 24 hosts for the model and lists its own plan fees (Standard 5.5%, Business 8%); DeepInfra's terms were last modified 15 Oct 2026 (no change since the 3 Nov check). OpenRouter's measured speed for the DeepInfra endpoint is ~1.4 s to first token and ~25 tokens/s, about the same as Cloudflare's endpoint (~0.4 s, ~26 tokens/s), so students should see similar answer times to today; this is to be confirmed by the live run.
 
 ## Provider comparison (Qwen 3.8 27B)
 
@@ -15,12 +19,12 @@
 |---|---|---|---|---|---|
 | Supported | Yes | Yes (since 5 Oct 2026) | Yes (23 hosts; pinned to one) | Yes, **Preview** | Yes |
 | Model ID | `@cf/qwen/qwen3.8-27b` | `Qwen/Qwen3.8-27B` | `qwen/qwen3.8-27b` + `provider.order: ["deepinfra"]` | `qwen/qwen3.8-27b` | `qwen-3.8-27b` |
-| Input $/M tokens | 0.45 | **0.20 list** (0.15 promo, no end date stated) | DeepInfra's + 5.5% fee | 0.80 | 0.99 |
+| Input $/M tokens | 0.45 | **0.20 list** (0.15 promo, no end date stated; Flex 0.8×, Priority 1.5×) | DeepInfra's + 5.5% fee | 0.80 | 0.99 |
 | Output $/M tokens | 3.20 | **2.50 list** (1.875 promo) | DeepInfra's + 5.5% fee | 4.00 | 1.49 |
 | Cached input $/M | 0.05 | 0.05 list (0.038 promo) | as DeepInfra | not stated | listed at 0.99 on OpenRouter |
 | Context | 262,144 | 262,144 (1M via YaRN) | as DeepInfra | 131,072 | 65,536 free trial; 131,072 paid |
 | Max output | not stated | not stated | not stated | 16,384 | 32,768 free; 40,960 paid |
-| Rate limits | not on the model page; Workers Free stops at 10,000 Neurons/day | 200 concurrent requests per model (no RPM cap); raise on request | passed through | not on the model page | free trial 5 req/min, 1M tokens/day; Developer 300 req/min |
+| Rate limits | not on the model page; Workers Free stops at 10,000 Neurons/day | 200 concurrent requests per model (no RPM cap); raise on request | passed through | 30 req/min, 1K req/day, 8K tokens/min, 200K tokens/day (base Developer values) | free trial 5 req/min, 1M tokens/day; Developer 300 req/min |
 | Streaming | Yes | Yes; usage on the final chunk | Yes; usage always included | Yes | Yes |
 | API fit | current code | OpenAI-compatible; thinking on by default, switchable per request; `reasoning_effort` | OpenAI-compatible; `reasoning`, provider routing | OpenAI-compatible; `reasoning_effort: none`; ≤ 3 images, each **2,048 tokens** | OpenAI-compatible; reasoning defaults to `high`, `none` turns it off |
 | Data retention | Doesn't keep inputs/outputs of standard inference | Not stored on disk (memory only during processing); logs metadata only (request ID, cost, sampling params) | OpenRouter adds itself as a processor; `zdr: true` limits routing to zero-retention endpoints | No retention by default, **but** inputs/outputs may be logged up to 30 days for abuse/troubleshooting unless ZDR is switched on in Data Controls | Privacy policy says inputs/outputs aren't retained; API customer terms may differ |
@@ -35,6 +39,8 @@ Commercial use: the Qwen 3.8 weights are Apache-2.0; all five are commercial API
 - **Users under 18**: the terms set **no minimum age** for a customer's end users and no rule against services for children (unlike the Gemini API). The customer is "solely responsible" for everyone using the service under its account and must follow applicable law (sections 5(b), 10). The privacy policy says DeepInfra's own site is not for under-18s; that concerns DeepInfra's account holders, not Inkling's users. So Inkling may serve students, but COPPA/GDPR-K obligations stay with Inkling (see PRIVACY.md).
 - **Commercial terms**: customer keeps its IP in its content; no competing service, no resale, no circumventing usage limits; liability capped at six months of fees; customer indemnifies DeepInfra for its users' conduct.
 - **Billing**: in practice **prepaid** — a development key with no balance got HTTP 402 "You need positive balance to do inference" on every request (3 Nov 2026). Keep auto top-up off and set the account spending limit (`POST /payment/config`, `limit` in USD) so the provider balance is a hard backstop under Inkling's own caps. The server treats 402 as "out of credit": everyone is paused 15 minutes and the Worker logs `deepinfra account has no credit` as an error.
+
+- **Resale clause** (§11(a)(viii)): no reselling, sublicensing or "making the Services available to third parties" without permission. Inkling's server sends only its own prompts and fixed tasks (it is not a general model proxy), which reads as using DeepInfra inside Inkling's product rather than offering DeepInfra to others, but **confirm this with DeepInfra in writing before launch** (one email).
 
 Reliability: no provider publishes an SLA for this model on the pages checked, and no outage history was measured. The adapter's retries cover short hiccups; a long DeepInfra outage is handled by the operator rolling back to Workers AI (below).
 
@@ -80,15 +86,30 @@ Token profiles are **measured** with the real model (13 answers, `docs/archive/l
 | Cerebras | $0.00142 | $1.42 | $14.24 | $142 | $1,424 |
 | Groq | $0.00178 | $1.78 | $17.80 | $178 | $1,780 |
 
+**Long-conversation profile (2,500 → 400)**, a planning ceiling: follow-ups at the history limit and 5-problem practice sets
+
+| Provider | Per answer | 1,000 | 10,000 | 100,000 | 1,000,000 |
+|---|---|---|---|---|---|
+| Workers AI | $0.00241 | $2.41 | $24.05 | $241 | $2,405 |
+| **DeepInfra, list** | **$0.00150** | **$1.50** | **$15.00** | **$150** | **$1,500** |
+| DeepInfra, promo | $0.00112 | $1.13 | $11.25 | $112 | $1,125 |
+| OpenRouter → DeepInfra, list | $0.00158 | $1.58 | $15.83 | $158 | $1,583 |
+| Cerebras | $0.00307 | $3.07 | $30.71 | $307 | $3,071 |
+| Groq | $0.00360 | $3.60 | $36.00 | $360 | $3,600 |
+
+DeepInfra Flex (0.8×) would cut every DeepInfra figure by a further 20% if its lower priority doesn't hurt latency; not recommended for launch until measured.
+
+Production usage on 6 Nov 2026 (read-only `/admin/summary`): 0 answers in the previous 24 hours, so there is no real-user token distribution yet; the profiles above stay the basis until the external server's per-model token report (`models.today[…].inputTokensPerAnswer`) has a week of data.
+
 For scale: Workers AI's free 10,000 Neurons/day are worth $0.11/day (~123 measured answers). These DeepInfra figures are **estimates from Workers AI token counts**; DeepInfra's tokenizer and image accounting may differ slightly, so measure with the live suite (mode 3) before relying on them.
 
 ## Limits and budgets (recommended starting values)
 
 | Setting | Value | Means |
 |---|---|---|
-| `INSTALL_DAILY_USD` | $0.02 | ≈ 25–34 answers a day per installation (today ~10) |
+| `INSTALL_DAILY_USD` | $0.02 | ≈ 25–34 answers a day per installation (13 in long conversations; today ~10) |
 | `INSTALL_MONTHLY_USD` | $0.30 | ≈ 380–500 a month: daily use keeps its ceiling, a fresh install per day doesn't multiply a month |
-| `NETWORK_DAILY_USD` | $0.06 | 3 installations' worth per network (a classroom on one IP shares it; raise for schools) |
+| `NETWORK_DAILY_USD` | $0.20 | 10 installations' worth per network, so a classroom on one school IP isn't cut off early; also `NETWORK_CONCURRENT` 8 |
 | `GLOBAL_DAILY_USD` | $1.00 (any 24 h) | ≈ 1,300–1,700 answers a day for everyone (≈ 12× today) |
 | `GLOBAL_MONTHLY_USD` | $20 | hard monthly cap; ~25,000–34,000 answers |
 | `SOFT_LIMIT_FRACTION` / `_FACTOR` | 0.8 / 0.5 | at 80% of the day's or month's budget, every daily share halves |
