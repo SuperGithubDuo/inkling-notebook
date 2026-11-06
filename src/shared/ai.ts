@@ -11,7 +11,7 @@ import { z } from 'zod'
 
 /**
  * Where answers come from.
- * - cloud: Inkling's free AI server (Cloudflare Workers AI, Qwen 3.8). Works
+ * - cloud: Inkling's free AI server (Qwen 3.8 27B, hosted by DeepInfra or Cloudflare Workers AI). Works
  *   right away: no download, account, code or key; a daily allowance applies.
  * - ollama: a vision model on this computer. Free, private, offline, no
  *   limits, but needs a few GB of download and memory.
@@ -29,9 +29,11 @@ export const PROVIDERS: Record<AiProviderId, { label: string; local: boolean; de
   gemini: { label: 'Google Gemini', local: false, description: 'Optional cloud models. Requires a Google API key, and Google only permits users who are 18 or older.' }
 }
 
-/** The model behind the cloud AI. The server decides; this is what it is configured with. */
+/** The model behind the cloud AI, as the app knows it. The server decides who hosts it. */
 export const CLOUD_MODEL = '@cf/qwen/qwen3.8-27b'
-export const CLOUD_MODEL_LABEL = 'Qwen 3.8 27B (Cloudflare Workers AI)'
+/** The provider-neutral name a server with an external inference provider reports. */
+export const CLOUD_MODEL_PUBLIC = 'qwen3.8-27b'
+export const CLOUD_MODEL_LABEL = 'Qwen 3.8 27B'
 /**
  * What a cloud AI provider receives with a request, item by item. Shown in the
  * consent dialog, AI settings and the privacy screen, so every place that asks
@@ -76,11 +78,11 @@ export const GEMINI_SENT: readonly SentItem[] = SENT_CONTENT
 export const CLOUD_WHEN_SENT = 'Nothing is sent — not even a check of today’s allowance — until you allow it. After that, something is sent only when you ask the tutor, and when Inkling checks how many free answers are left.'
 /** What the cloud AI does with what it receives, shown wherever it can be chosen. */
 export const CLOUD_DATA_NOTE =
-  'Requests go to Inkling’s AI server and are answered by Cloudflare Workers AI. Cloudflare says it does not use them to train models or store them after answering, and Inkling’s server never stores or logs their content. To share out the free daily allowance, the server counts answers per installation and per internet connection, in scrambled form that is deleted every day.'
+  'Requests go to Inkling’s AI server, which has them answered by DeepInfra (an AI hosting company in the United States) or, as a backup, by Cloudflare Workers AI. Both say they do not use requests to train models and do not store them after answering, and Inkling’s server never stores or logs their content. To share out the free allowance, the server counts usage per installation and per internet connection, in scrambled form: daily counts are deleted every day, and this installation’s monthly count at the end of each month.'
 /** Who the permission covers and what it is not: shown wherever cloud permission is asked. */
 export const CLOUD_PERMISSION_SCOPE =
   'This permission covers everyone who uses Inkling on this computer account. Inkling does not check ages, and clicking Allow does not verify a parent’s or guardian’s consent: if you are under 18, ask a parent or guardian before allowing. Notebooks work fully without the AI.'
-export const CLOUD_TERMS_URL = 'https://developers.cloudflare.com/workers-ai/platform/privacy/'
+export const CLOUD_TERMS_URL = 'https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/PRIVACY.md'
 
 /** The AI server address: https, or http on this computer (for testing). */
 export const betaUrlSchema = z
@@ -155,7 +157,7 @@ export type AiModelId = string
 export const OLLAMA_DEFAULT_URL = 'http://127.0.0.1:11434'
 
 export const modelLabel = (id: string): string =>
-  id === CLOUD_MODEL ? 'Qwen 3.8 27B' : ([...GEMINI_MODELS, ...OLLAMA_MODELS].find((m) => m.id === id)?.label ?? id.replace(/^qwen3-vl:(\d+)b$/, 'Qwen3-VL $1B (thinking)'))
+  id === CLOUD_MODEL || id === CLOUD_MODEL_PUBLIC ? 'Qwen 3.8 27B' : ([...GEMINI_MODELS, ...OLLAMA_MODELS].find((m) => m.id === id)?.label ?? id.replace(/^qwen3-vl:(\d+)b$/, 'Qwen3-VL $1B (thinking)'))
 
 /**
  * Version of Gemini's data-use notice. Raising it asks the user to agree again.
@@ -167,8 +169,11 @@ export const CONSENT_VERSION = 3
  * older agreement is kept in the settings file but no longer counts.
  * 2: public access, anonymous IDs. 3: lists everything sent (CLOUD_SENT), including
  * recent conversation; nothing, not even the allowance check, before agreeing.
+ * 4: answered by DeepInfra (Cloudflare Workers AI as backup); a monthly count per
+ * installation. Sent to the server as x-inkling-notice, which may refuse an
+ * app whose notice doesn't name the provider it uses.
  */
-export const CLOUD_CONSENT_VERSION = 3
+export const CLOUD_CONSENT_VERSION = 4
 
 /** This installation's anonymous ID for the cloud AI's fair-use limits (not secret, not an account). */
 export const installIdSchema = z.string().regex(/^inst_[A-Za-z0-9_-]{22,64}$/)

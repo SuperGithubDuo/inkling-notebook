@@ -4,7 +4,7 @@
  * Both list what is sent, item by item, from CLOUD_SENT / GEMINI_SENT.
  * Gemini: that Google may use free-tier content (including human review), the
  * age requirement, and how to stay on the free tier.
- * Cloud AI: where it goes, what Cloudflare and Inkling keep, who the permission
+ * Cloud AI: where it goes, what the AI host and Inkling keep, who the permission
  * covers (everyone on this computer account; it is not verified parental
  * consent), and that the free allowance is limited.
  */
@@ -127,7 +127,7 @@ function CloudConsent({ answer, allow }: { answer: (ok: boolean) => Promise<void
           <p>
             Read{' '}
             <a href={CLOUD_TERMS_URL} target="_blank" rel="noreferrer" className="text-accent underline">
-              Cloudflare’s Workers AI data policy
+              Inkling’s privacy policy
             </a>
             . You can withdraw this permission any time in Settings.
           </p>

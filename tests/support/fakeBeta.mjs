@@ -25,7 +25,7 @@ export function loadServer() {
   modulePromise ??= (async () => {
     const out = await build({
       stdin: {
-        contents: `export { handle, sha256Hex } from './beta-server/src/handler.ts'\nexport { Ledger, networkOf } from './beta-server/src/ledger.ts'\nexport * as upstream from './beta-server/src/upstream.ts'`,
+        contents: `export { handle, sha256Hex } from './beta-server/src/handler.ts'\nexport { Ledger, networkOf } from './beta-server/src/ledger.ts'\nexport * as upstream from './beta-server/src/upstream.ts'\nexport * as provider from './beta-server/src/provider.ts'\nexport * as config from './beta-server/src/config.ts'`,
         resolveDir: root,
         loader: 'ts'
       },
@@ -144,13 +144,19 @@ export async function startBetaServer(options = {}) {
     networkConcurrent: options.networkConcurrent ?? 4,
     globalConcurrent: options.globalConcurrent ?? 12,
     reservationTtlMs: 10 * 60_000,
-    typicalNeuronsPerAnswer: options.typicalNeuronsPerAnswer ?? 90
+    typicalNeuronsPerAnswer: options.typicalNeuronsPerAnswer ?? 90,
+    ...(options.limits ?? {})
   }
   const ledger = new mod.Ledger(storage, limits, now)
-  const ai = options.ai ?? fakeWorkersAi()
+  // `options.makeAi(mod)` builds the model from the bundled server modules (an external provider in tests).
+  const ai = options.ai ?? (options.makeAi ? await options.makeAi(mod) : fakeWorkersAi())
   const adminToken = 'admin-token-for-tests-0123456789abcdef'
   const config = {
     model: options.model ?? '@cf/qwen/qwen3.8-27b',
+    provider: options.provider ?? 'workers-ai',
+    publicModel: options.publicModel,
+    minNoticeVersion: options.minNoticeVersion ?? 0,
+    inputMargin: options.inputMargin ?? 1,
     rates: options.rates ?? RATES,
     reasoningEffort: options.reasoningEffort ?? 'low',
     disableThinking: options.disableThinking ?? true,

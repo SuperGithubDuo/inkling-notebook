@@ -18,7 +18,15 @@
  *      Add INKLING_LIVE_PROBE=1 to first compare model settings (reasoning,
  *      thinking switch, JSON mode) on one small request each.
  *
- * Skipped (not failed) without either. Runs the same handwriting scenarios as
+ *   3. Without deploying, against an EXTERNAL provider (the migration path):
+ *      the AI server code on this computer reaches DeepInfra (or OpenRouter
+ *      pinned to DeepInfra) with a development key. Costs real money (a full
+ *      run is a few cents at most; INKLING_LIVE_BUDGET_USD caps it, default $0.05):
+ *        INKLING_LIVE_PROVIDER=deepinfra INFERENCE_API_KEY=… npm run test:live:cloud
+ *      Costs are then reported in µ$ (millionths of a dollar) at list price,
+ *      or OpenRouter's reported cost. Report: test-results/live-cloud-<provider>.md.
+ *
+ * Skipped (not failed) without any of these. Runs the same handwriting scenarios as
  * the local-model test through Inkling's AiService + CloudProvider, and
  * records each answer's latency, tokens and Neurons, then estimates how many
  * interactions the free allowance supports. Report:
@@ -45,7 +53,9 @@ const root = join(import.meta.dirname, '../..')
 const env = process.env
 const direct = !!(env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN)
 const deployed = !!env.INKLING_BETA_URL && env.INKLING_LIVE_CLOUD === '1'
-const enabled = deployed || direct
+/** An external provider with a development key (mode 3). */
+const external = (env.INKLING_LIVE_PROVIDER === 'deepinfra' || env.INKLING_LIVE_PROVIDER === 'openrouter') && !!env.INFERENCE_API_KEY ? env.INKLING_LIVE_PROVIDER : null
+const enabled = deployed || direct || !!external
 /**
  * Benchmarking another Workers AI model (direct mode only): INKLING_LIVE_MODEL picks it and
  * INKLING_LIVE_RATES="input,output" gives its published Neurons per million tokens, so the
@@ -73,7 +83,9 @@ const TEXT_MODEL = (() => {
 })()
 /** Which scenarios run: "all" (default), "core" (the original 13 answers), "text" (scenarios-text.ts) or "practice" (scenarios-practice.ts). */
 const SCENARIOS = (['core', 'text', 'practice'] as const).find((s) => s === env.INKLING_LIVE_SCENARIOS) ?? 'all'
-const SLUG = (MODEL.split('/').at(-1)! + (TEXT_MODEL ? `+${TEXT_MODEL.model.split('/').at(-1)}` : '') + (SCENARIOS === 'all' ? '' : `-${SCENARIOS}`)).replace(/[^A-Za-z0-9.+_-]/g, '_')
+const SLUG = ((external ? `${external}-` : '') + MODEL.split('/').at(-1)! + (TEXT_MODEL ? `+${TEXT_MODEL.model.split('/').at(-1)}` : '') + (SCENARIOS === 'all' ? '' : `-${SCENARIOS}`)).replace(/[^A-Za-z0-9.+_-]/g, '_')
+/** What the cost figures count: Neurons on Workers AI, µ$ on an external provider. */
+const unitLabel = external || env.INKLING_LIVE_UNIT === 'usd' ? 'µ$' : 'Neurons'
 if (!enabled) console.log('\n  Live cloud tests skipped: set INKLING_BETA_URL + INKLING_LIVE_CLOUD=1, or CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (see the comment at the top of this file).\n')
 
 const memoryCipher: SecretCipher = {
@@ -135,7 +147,31 @@ describe.skipIf(!enabled)(`live cloud AI, ${MODEL}`, () => {
     url = env.INKLING_BETA_URL ?? ''
     // The settings probe calls Workers AI directly, so it needs account credentials in either mode.
     if (env.INKLING_LIVE_PROBE === '1' && direct) await probe(workersAiRest({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN }))
-    if (!deployed) {
+    if (external && !deployed) {
+      const budget = Math.round(Number(env.INKLING_LIVE_BUDGET_USD ?? 0.05) * 1e6)
+      const { PRESETS } = await import('../../beta-server/src/provider')
+      server = await startBetaServer({
+        provider: external,
+        model: env.UPSTREAM_MODEL || PRESETS[external].model,
+        publicModel: 'qwen3.8-27b',
+        minNoticeVersion: 4,
+        // DeepInfra's list price (not the promotional one), so the report errs high.
+        rates: { unit: 'usd', inputPerM: Number(env.PRICE_INPUT_USD_PER_M ?? 0.2) * 1e6, outputPerM: Number(env.PRICE_OUTPUT_USD_PER_M ?? 2.5) * 1e6, cachedInputPerM: Number(env.PRICE_CACHED_INPUT_USD_PER_M ?? 0.05) * 1e6, costMultiplier: PRESETS[external].costMultiplier },
+        globalDailyNeurons: budget,
+        installDailyNeurons: budget,
+        networkDailyNeurons: budget,
+        typicalNeuronsPerAnswer: 800,
+        limits: { unit: 'usd', globalMonthly: budget },
+        installPerMinute: 30,
+        networkPerMinute: 30,
+        reasoningEffort: env.INKLING_LIVE_REASONING ?? 'low',
+        disableThinking: env.INKLING_LIVE_THINKING !== 'on',
+        structured: env.INKLING_LIVE_STRUCTURED === 'json_schema' ? 'json_schema' : 'prompt',
+        makeAi: (mod: any) => mod.provider.externalProvider({ id: external, apiKey: env.INFERENCE_API_KEY!, baseUrl: env.UPSTREAM_BASE_URL })
+      })
+      url = server.url
+      mode = `AI server code on this computer → ${external} (${server.config.model}), list-price accounting in µ$, budget $${(budget / 1e6).toFixed(2)}`
+    } else if (!deployed) {
       const ai = workersAiRest({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN })
       liveAi = ai
       server = await startBetaServer({
@@ -171,7 +207,7 @@ describe.skipIf(!enabled)(`live cloud AI, ${MODEL}`, () => {
     await server?.close()
     await mkdir(join(root, 'test-results'), { recursive: true })
     const base = join(root, 'test-results', `live-cloud-${SLUG}`)
-    await writeFile(`${base}.json`, JSON.stringify({ model: MODEL, textModel: TEXT_MODEL, scenarios: SCENARIOS, practiceTally, rates: LIVE_RATES, mode, at: new Date().toISOString(), quotaBefore, quotaAfter, probes, runs }, null, 2))
+    await writeFile(`${base}.json`, JSON.stringify({ model: external ? CLOUD_MODEL : MODEL, provider: external ?? 'workers-ai', textModel: TEXT_MODEL, scenarios: SCENARIOS, practiceTally, rates: LIVE_RATES, mode, at: new Date().toISOString(), quotaBefore, quotaAfter, probes, runs }, null, 2))
     await writeFile(`${base}.md`, report())
     console.log(`\n  Report: ${base}.md`)
   })
@@ -297,7 +333,8 @@ function report(): string {
     for (const p of probes) lines.push(`| ${p.name} | ${p.ok ? 'ok' : `error: ${p.error}`} | ${p.usage?.completion_tokens ?? '–'} | ${p.reasoningChars ?? '–'} | ${p.validJson === undefined ? '–' : p.validJson ? 'yes' : 'no'} | ${p.neurons?.toFixed(1) ?? '–'} | ${s(p.ms)} |`)
     lines.push('')
   }
-  lines.push('## Scenarios', '', '| Scenario | Task | Model | Result | Chunks | First text | Total | Tokens in/out | Neurons | Structured | Checks |', '|---|---|---|---|---|---|---|---|---|---|---|')
+  lines.push(`Cost figures below are in **${unitLabel}**${external ? ' (millionths of a US dollar)' : ''}.`, '')
+  lines.push('## Scenarios', '', `| Scenario | Task | Model | Result | Chunks | First text | Total | Tokens in/out | ${unitLabel} | Structured | Checks |`, '|---|---|---|---|---|---|---|---|---|---|---|')
   for (const r of runs) {
     const passed = r.checks.filter((c) => c.pass).length
     lines.push(`| ${r.scenario} | ${r.task} | ${r.model?.split('/').at(-1) ?? '–'} | ${r.ok ? 'answered' : `error: ${r.error}`} | ${r.chunks} | ${s(r.firstTokenMs)} | ${s(r.totalMs)} | ${r.inputTokens ?? '–'}/${r.outputTokens ?? '–'} | ${r.neurons?.toFixed(1) ?? '–'} | ${r.validated === undefined ? 'n/a' : r.validated ? 'valid' : 'INVALID'} | ${passed}/${r.checks.length} |`)

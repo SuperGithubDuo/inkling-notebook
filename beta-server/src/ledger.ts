@@ -38,6 +38,11 @@ export interface LedgerStorage {
   list(prefix: string): Promise<string[]>
 }
 
+/**
+ * All amounts are in the ledger's cost unit: Neurons when Workers AI answers,
+ * micro-dollars (µ$, 1e-6 USD) when an external provider does. Field names keep
+ * "Neurons" for compatibility with the Worker versions already deployed.
+ */
 export interface LedgerLimits {
   /**
    * Cap for the whole service over ANY 24 hours (not only a UTC day), below Cloudflare's
@@ -56,6 +61,22 @@ export interface LedgerLimits {
   reservationTtlMs: number
   /** Used to tell people roughly how many answers they have left. */
   typicalNeuronsPerAnswer: number
+  /** The cost unit. When it changes (a provider switch or rollback), the day's counts restart in the new unit. */
+  unit?: 'neurons' | 'usd'
+  /** Whole-service cap per calendar month (UTC). Unset: none (Workers Free bounds itself). */
+  globalMonthly?: number
+  /** Per-installation cap per calendar month (UTC). Unset: none. */
+  installMonthly?: number
+  /**
+   * Budget protection: once the whole service has used this share of its daily
+   * or monthly cap, each installation's and network's daily allowance is scaled
+   * by `softFactor`, so the remaining budget is spread over more people instead
+   * of running out for everyone. Unset or 1: off.
+   */
+  softFraction?: number
+  softFactor?: number
+  /** An identical request from the same installation, already answered within this time, is refused. Unset: 10 s. */
+  duplicateWindowMs?: number
 }
 
 export interface Identity {
@@ -67,6 +88,7 @@ export interface Identity {
 
 export interface Quota {
   installUsed: number
+  /** Today's allowance for this installation (reduced while budget protection is on). */
   installLimit: number
   networkUsed: number
   networkLimit: number
@@ -74,9 +96,26 @@ export interface Quota {
   globalLimit: number
   approxAnswersLeft: number
   resetAt: string
+  /** This calendar month, when a monthly allowance is set. */
+  installMonthUsed?: number
+  installMonthLimit?: number
+  /** True while budget protection has reduced the daily allowances. */
+  reduced?: boolean
 }
 
-export type RefusalCode = 'install_quota' | 'network_quota' | 'global_quota' | 'upstream_unavailable' | 'rate_limited' | 'busy' | 'capacity' | 'paused' | 'too_large'
+export type RefusalCode =
+  | 'install_quota'
+  | 'install_monthly_quota'
+  | 'network_quota'
+  | 'global_quota'
+  | 'global_monthly_quota'
+  | 'upstream_unavailable'
+  | 'rate_limited'
+  | 'duplicate'
+  | 'busy'
+  | 'capacity'
+  | 'paused'
+  | 'too_large'
 export type ReserveResult = { ok: true; reservationId: string; quota: Quota } | { ok: false; code: RefusalCode; retryAfter?: number; quota?: Quota }
 
 interface Day {
@@ -88,20 +127,39 @@ interface Day {
   upstreamExhausted?: boolean
   /** When Cloudflare last reported the free allocation used up. Answers stop for UPSTREAM_RETRY_MS, then are tried again. */
   upstreamExhaustedAt?: number
+  /** Today's tokens, as the provider reported them (estimated when it didn't). */
+  inputTokens?: number
+  outputTokens?: number
   /** Today's counts per model (record()). Counts only: no content, no identity. */
   models?: Record<string, ModelStats>
 }
 
-/** One model's day: requests, what kind they were, Neurons, and failures. No content, no identity. */
+/** Tokens one answer used, as the provider reported them (or estimated, flagged). */
+export interface TokenCount {
+  input: number
+  output: number
+  /** Input tokens read from the provider's prompt cache. */
+  cached?: number
+  /** True when the provider gave no usage and the server estimated. */
+  estimated?: boolean
+}
+
+/** One model's day: requests, what kind they were, cost, tokens and failures. No content, no identity. */
 export interface ModelStats {
   requests: number
   /** Requests carrying a handwriting image somewhere in the conversation. */
   image: number
   text: number
-  /** Which side of the routing rule sent it here: 'main' = main model, 'text' = text model. */
+  /** Which side of the routing rule sent it here: 'main' = main model, 'text' = text model (Workers AI only). */
   routes: Record<string, number>
   tasks: Record<string, number>
+  /** Cost in the ledger's unit (Neurons, or µ$ with an external provider); the name is kept for older readers. */
   neurons: number
+  inputTokens?: number
+  outputTokens?: number
+  cachedTokens?: number
+  /** Answers whose usage the provider didn't report (the server estimated). */
+  estimated?: number
   errors: number
   errorKinds: Record<string, number>
 }
@@ -112,12 +170,14 @@ export interface UsageRecord {
   route: 'main' | 'text'
   task: string
   image: boolean
+  /** Cost in the ledger's unit. */
   neurons: number
+  tokens?: TokenCount
   /** The upstream error kind, when the call failed. */
   error?: string
 }
 
-const emptyStats = (): ModelStats => ({ requests: 0, image: 0, text: 0, routes: {}, tasks: {}, neurons: 0, errors: 0, errorKinds: {} })
+const emptyStats = (): ModelStats => ({ requests: 0, image: 0, text: 0, routes: {}, tasks: {}, neurons: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0, estimated: 0, errors: 0, errorKinds: {} })
 const bump = (m: Record<string, number>, k: string): void => {
   m[k] = (m[k] ?? 0) + 1
 }
@@ -132,18 +192,44 @@ export const UPSTREAM_RETRY_MS = 15 * 60_000
 interface Counter {
   neurons: number
   requests: number
+  /** Tokens (provider-reported when available). Absent on counts written by older versions. */
+  inputTokens?: number
+  outputTokens?: number
+}
+
+/** The whole service's calendar month (UTC), and the salt for per-installation monthly counts. */
+interface Month {
+  month: string
+  salt: string
+  used: number
+  requests: number
+  inputTokens?: number
+  outputTokens?: number
+}
+
+interface Keys {
+  install: string
+  network: string
+  installMonth: string
 }
 
 interface Reservation {
   id: string
   install: string
   network: string
+  /** The installation's monthly key (absent on reservations made by older versions). */
+  installMonth?: string
   neurons: number
   day: string
   at: number
 }
 
 export const utcDay = (t: number): string => new Date(t).toISOString().slice(0, 10)
+export const utcMonth = (t: number): string => new Date(t).toISOString().slice(0, 7)
+export const nextUtcMonth = (t: number): number => {
+  const d = new Date(t)
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)
+}
 export const nextUtcMidnight = (t: number): number => {
   const d = new Date(t)
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1)
@@ -180,10 +266,23 @@ const HOUR_MS = 3_600_000
  */
 export const ROLLING_WINDOW_MS = 25 * HOUR_MS
 
+export interface SettleOptions {
+  upstreamExhausted?: boolean
+  failedBeforeModel?: boolean
+  /** A complete answer was delivered: an identical request soon after is a duplicate. */
+  answered?: boolean
+  /** The answer's tokens, for usage tracking (cost is what the caps count). */
+  tokens?: TokenCount
+}
+
 export class Ledger {
   /** Whole-service Neurons per hour (key: the hour's start in ms), for the rolling cap. */
   private hourState: Record<string, number> | null = null
   private dayState: Day | null = null
+  private monthState: Month | null = null
+  private unitChecked: string | null = null
+  /** The last request per installation (memory only): its fingerprint, and when it was answered. */
+  private readonly lastRequest = new Map<string, { fp: string; reservationId: string; answeredAt?: number }>()
   private reservations: Reservation[] | null = null
   private paused: boolean | null = null
   private readonly recent = new Map<string, number[]>()
@@ -215,8 +314,50 @@ export class Ledger {
 
   // ------------------------------------------------------------- state
 
+  /**
+   * After a provider switch or rollback the cost unit changes (Neurons ↔ µ$). Old
+   * counts in the other unit would be misread (a dollar figure as Neurons would close
+   * the day), so the day's and the rolling counts restart. Monthly dollar totals are
+   * kept per unit, so a rollback and return within a month keeps the month's spend.
+   */
+  private async ensureUnit(): Promise<void> {
+    const unit = this.limits.unit ?? 'neurons'
+    if (this.unitChecked === unit) return
+    const stored = (await this.storage.get<string>('unit')) ?? 'neurons'
+    if (stored !== unit) {
+      for (const prefix of ['i:', 'n:', 'mi:']) for (const key of await this.storage.list(prefix)) await this.storage.delete(key)
+      for (const key of ['hours', 'day', 'reservations']) await this.storage.delete(key)
+      this.hourState = null
+      this.dayState = null
+      this.reservations = null
+      this.monthState = null
+      this.recent.clear()
+      this.lastRequest.clear()
+      await this.storage.put('unit', unit)
+    }
+    this.unitChecked = unit
+  }
+
+  private monthKey(): string {
+    return `month:${this.limits.unit ?? 'neurons'}`
+  }
+
+  /** This calendar month's whole-service total; at a new month, last month's per-installation counts and salt are deleted. */
+  private async thisMonth(): Promise<Month> {
+    const month = utcMonth(this.now())
+    if (this.monthState && this.monthState.month !== month) this.monthState = null
+    this.monthState ??= (await this.storage.get<Month>(this.monthKey())) ?? null
+    if (!this.monthState || this.monthState.month !== month) {
+      for (const key of await this.storage.list('mi:')) await this.storage.delete(key)
+      this.monthState = { month, salt: randomHex(32), used: 0, requests: 0 }
+      await this.storage.put(this.monthKey(), this.monthState)
+    }
+    return this.monthState
+  }
+
   /** Today's totals; at a new UTC day, yesterday's per-identity counts and salt are deleted. */
   private async today(): Promise<Day> {
+    await this.ensureUnit()
     const day = utcDay(this.now())
     this.dayState ??= (await this.storage.get<Day>('day')) ?? null
     if (!this.dayState || this.dayState.day !== day) {
@@ -225,7 +366,7 @@ export class Ledger {
       for (const key of ['usage', 'testers']) await this.storage.delete(key)
       // Keep the finished day's per-model counts (counts only) so the operator can read a whole day.
       if (this.dayState?.models) await this.storage.put('modelsPrev', { day: this.dayState.day, models: this.dayState.models })
-      this.dayState = { day, salt: randomHex(32), global: 0, requests: 0 }
+      this.dayState = { day, salt: randomHex(32), global: 0, requests: 0, inputTokens: 0, outputTokens: 0 }
       await this.storage.put('day', this.dayState)
       this.recent.clear()
     }
@@ -256,20 +397,42 @@ export class Ledger {
     })
   }
 
-  private async keys(id: Identity, day: Day): Promise<{ install: string; network: string }> {
+  private async keys(id: Identity, day: Day): Promise<Keys> {
+    const month = await this.thisMonth()
     return {
       install: `i:${(await sha256Hex(`${day.salt}|install|${id.install}`)).slice(0, 32)}`,
-      network: `n:${(await sha256Hex(`${day.salt}|network|${networkOf(id.network)}`)).slice(0, 32)}`
+      network: `n:${(await sha256Hex(`${day.salt}|network|${networkOf(id.network)}`)).slice(0, 32)}`,
+      // A separate salt that changes every month: the monthly count can't be joined to the daily ones.
+      installMonth: `mi:${(await sha256Hex(`${month.salt}|install|${id.install}`)).slice(0, 32)}`
     }
+  }
+
+  /** Adds a settled cost to this month's totals: the service's, and the installation's. */
+  private async chargeMonth(installMonth: string | undefined, cost: number, at: number, tokens?: TokenCount): Promise<void> {
+    if (utcMonth(at) !== utcMonth(this.now())) return
+    const m = await this.thisMonth()
+    m.used += cost
+    m.requests++
+    if (tokens) {
+      m.inputTokens = (m.inputTokens ?? 0) + tokens.input
+      m.outputTokens = (m.outputTokens ?? 0) + tokens.output
+    }
+    await this.storage.put(this.monthKey(), m)
+    if (installMonth) await this.charge(installMonth, cost, tokens)
   }
 
   private async counter(key: string): Promise<Counter> {
     return (await this.storage.get<Counter>(key)) ?? { neurons: 0, requests: 0 }
   }
 
-  private async charge(key: string, neurons: number): Promise<void> {
+  private async charge(key: string, neurons: number, tokens?: TokenCount): Promise<void> {
     const c = await this.counter(key)
-    await this.storage.put(key, { neurons: c.neurons + neurons, requests: c.requests + 1 })
+    await this.storage.put(key, {
+      neurons: c.neurons + neurons,
+      requests: c.requests + 1,
+      inputTokens: (c.inputTokens ?? 0) + (tokens?.input ?? 0),
+      outputTokens: (c.outputTokens ?? 0) + (tokens?.output ?? 0)
+    })
   }
 
   /** The whole service's Neurons per hour still inside the rolling window (older hours dropped). */
@@ -316,6 +479,7 @@ export class Ledger {
     for (const r of stale) {
       // Whatever day it started on, the model may have worked: it counts against the rolling cap.
       await this.chargeGlobal(r.neurons, r.at)
+      await this.chargeMonth(r.installMonth, r.neurons, r.at)
       if (r.day !== day.day) continue
       await this.charge(r.install, r.neurons)
       await this.charge(r.network, r.neurons)
@@ -336,26 +500,48 @@ export class Ledger {
     return Math.max(1, Math.ceil(((day.upstreamExhaustedAt ?? 0) + UPSTREAM_RETRY_MS - this.now()) / 1000))
   }
 
-  private async quotaFor(k: { install: string; network: string }): Promise<Quota> {
+  private finite(v: number | undefined): v is number {
+    return typeof v === 'number' && Number.isFinite(v) && v > 0
+  }
+
+  /** Everything the limits are checked against, in the ledger's unit (unrounded). */
+  private async usageFor(k: Keys): Promise<{ install: number; network: number; global: number; month: number; installMonth: number; installLimit: number; networkLimit: number; reduced: boolean }> {
     const open = await this.openReservations()
     const reserved = (pred: (r: Reservation) => boolean): number => open.filter(pred).reduce((n, r) => n + r.neurons, 0)
-    const installUsed = (await this.counter(k.install)).neurons + reserved((r) => r.install === k.install)
-    const networkUsed = (await this.counter(k.network)).neurons + reserved((r) => r.network === k.network)
+    const install = (await this.counter(k.install)).neurons + reserved((r) => r.install === k.install)
+    const network = (await this.counter(k.network)).neurons + reserved((r) => r.network === k.network)
     // The whole service: the last 24 hours (rolling), not only today, plus answers in progress.
-    const globalUsed = this.rollingUsed(await this.hours()) + reserved(() => true)
-    // Inkling's own daily figures, also while Cloudflare is briefly unavailable: that pause is reported
+    const global = this.rollingUsed(await this.hours()) + reserved(() => true)
+    const month = (await this.thisMonth()).used + reserved(() => true)
+    const installMonth = (await this.counter(k.installMonth)).neurons + reserved((r) => r.installMonth === k.installMonth)
+    // Budget protection: near the daily or monthly cap, everyone's daily share shrinks.
+    const soft = this.limits.softFraction
+    const factor = this.limits.softFactor ?? 1
+    const near = this.finite(soft) && soft < 1 && factor < 1 && (global >= soft * this.limits.globalDailyNeurons || (this.finite(this.limits.globalMonthly) && month >= soft * this.limits.globalMonthly))
+    const scale = near ? Math.max(0, factor) : 1
+    return { install, network, global, month, installMonth, installLimit: this.limits.installDailyNeurons * scale, networkLimit: this.limits.networkDailyNeurons * scale, reduced: near }
+  }
+
+  private async quotaFor(k: Keys): Promise<Quota> {
+    const u = await this.usageFor(k)
+    // Inkling's own daily figures, also while the provider is briefly unavailable: that pause is reported
     // as its own refusal (upstream_unavailable), never as today's allowance being used up.
     const globalLimit = this.limits.globalDailyNeurons
-    const left = Math.max(0, Math.min(this.limits.installDailyNeurons - installUsed, this.limits.networkDailyNeurons - networkUsed, globalLimit - globalUsed))
+    const rooms = [u.installLimit - u.install, u.networkLimit - u.network, globalLimit - u.global]
+    if (this.finite(this.limits.globalMonthly)) rooms.push(this.limits.globalMonthly - u.month)
+    if (this.finite(this.limits.installMonthly)) rooms.push(this.limits.installMonthly - u.installMonth)
+    const left = Math.max(0, Math.min(...rooms))
     return {
-      installUsed: Math.round(installUsed),
-      installLimit: this.limits.installDailyNeurons,
-      networkUsed: Math.round(networkUsed),
-      networkLimit: this.limits.networkDailyNeurons,
-      globalUsed: Math.round(globalUsed),
+      installUsed: Math.round(u.install),
+      installLimit: Math.round(u.installLimit),
+      networkUsed: Math.round(u.network),
+      networkLimit: Math.round(u.networkLimit),
+      globalUsed: Math.round(u.global),
       globalLimit,
       approxAnswersLeft: Math.floor(left / Math.max(1, this.limits.typicalNeuronsPerAnswer)),
-      resetAt: new Date(nextUtcMidnight(this.now())).toISOString()
+      resetAt: new Date(nextUtcMidnight(this.now())).toISOString(),
+      ...(this.finite(this.limits.installMonthly) ? { installMonthUsed: Math.round(u.installMonth), installMonthLimit: this.limits.installMonthly } : {}),
+      ...(u.reduced ? { reduced: true } : {})
     }
   }
 
@@ -373,7 +559,7 @@ export class Ledger {
    * Reserves `worst` Neurons (the request's worst case) against the global
    * cap; the installation and network need room for `expected`.
    */
-  reserve(id: Identity, worst: number, expected: number = worst): Promise<ReserveResult> {
+  reserve(id: Identity, worst: number, expected: number = worst, fingerprint?: string): Promise<ReserveResult> {
     return this.exclusive(async () => {
       if (await this.isPaused()) return { ok: false, code: 'paused' }
       const now = this.now()
@@ -387,6 +573,13 @@ export class Ledger {
       if (open.filter((r) => r.install === k.install).length >= this.limits.installConcurrent) return { ok: false, code: 'busy', retryAfter: 5 }
       if (open.filter((r) => r.network === k.network).length >= this.limits.networkConcurrent) return { ok: false, code: 'busy', retryAfter: 10 }
       if (open.length >= this.limits.globalConcurrent) return { ok: false, code: 'capacity', retryAfter: 15 }
+
+      // The same request again, already answered moments ago (a double click, a re-render, a client retrying a success).
+      const last = this.lastRequest.get(k.install)
+      const dupWindow = this.limits.duplicateWindowMs ?? 10_000
+      if (fingerprint && last && last.fp === fingerprint && last.answeredAt !== undefined && now - last.answeredAt < dupWindow) {
+        return { ok: false, code: 'duplicate', retryAfter: Math.max(1, Math.ceil((last.answeredAt + dupWindow - now) / 1000)) }
+      }
 
       // Requests per minute, per installation and per network (kept in memory only).
       if (++this.calls % 500 === 0) for (const [key, ts] of this.recent) if (!ts.some((t) => now - t < 60_000)) this.recent.delete(key)
@@ -402,18 +595,24 @@ export class Ledger {
       if (wn.length >= this.limits.networkPerMinute) return { ok: false, code: 'rate_limited', retryAfter: wait(wn) }
 
       const q = await this.quotaFor(k)
-      // Cloudflare reported its free allocation used up a moment ago: stop briefly for everyone, then try again.
+      const u = await this.usageFor(k)
+      // The provider refused for everyone a moment ago (free allocation or credit used up): stop briefly, then try again.
       if (this.upstreamBlocked(day)) return { ok: false, code: 'upstream_unavailable', retryAfter: this.upstreamRetryIn(day), quota: q }
-      if (q.globalUsed + worst > q.globalLimit) return { ok: false, code: 'global_quota', retryAfter: this.secondsUntilRoom(await this.hours(), q.globalUsed, worst), quota: q }
+      // Hard spending caps: the request's worst case must fit, counting every answer in progress.
+      if (u.global + worst > this.limits.globalDailyNeurons) return { ok: false, code: 'global_quota', retryAfter: this.secondsUntilRoom(await this.hours(), u.global, worst), quota: q }
+      if (this.finite(this.limits.globalMonthly) && u.month + worst > this.limits.globalMonthly) return { ok: false, code: 'global_monthly_quota', retryAfter: Math.ceil((nextUtcMonth(now) - now) / 1000), quota: q }
       if (expected > this.limits.installDailyNeurons) return { ok: false, code: 'too_large', quota: q }
-      if (q.installUsed + expected > q.installLimit) return { ok: false, code: 'install_quota', retryAfter: resetIn, quota: q }
-      if (q.networkUsed + expected > q.networkLimit) return { ok: false, code: 'network_quota', retryAfter: resetIn, quota: q }
+      if (u.install + expected > u.installLimit) return { ok: false, code: 'install_quota', retryAfter: resetIn, quota: q }
+      if (this.finite(this.limits.installMonthly) && u.installMonth + expected > this.limits.installMonthly) return { ok: false, code: 'install_monthly_quota', retryAfter: Math.ceil((nextUtcMonth(now) - now) / 1000), quota: q }
+      if (u.network + expected > u.networkLimit) return { ok: false, code: 'network_quota', retryAfter: resetIn, quota: q }
 
-      const r: Reservation = { id: this.randomId(), install: k.install, network: k.network, neurons: worst, day: day.day, at: now }
+      const r: Reservation = { id: this.randomId(), install: k.install, network: k.network, installMonth: k.installMonth, neurons: worst, day: day.day, at: now }
       open.push(r)
       await this.saveReservations()
       wi.push(now)
       wn.push(now)
+      if (fingerprint) this.lastRequest.set(k.install, { fp: fingerprint, reservationId: r.id })
+      if (this.lastRequest.size > 5000) this.lastRequest.delete(this.lastRequest.keys().next().value!)
       return { ok: true, reservationId: r.id, quota: await this.quotaFor(k) }
     })
   }
@@ -422,9 +621,12 @@ export class Ledger {
    * Replaces a reservation with the real cost. `neurons` undefined keeps the
    * reserved amount charged (the real usage isn't known).
    */
-  settle(reservationId: string, neurons: number | undefined, opts: { upstreamExhausted?: boolean; failedBeforeModel?: boolean } = {}): Promise<void> {
+  settle(reservationId: string, neurons: number | undefined, opts: SettleOptions = {}): Promise<void> {
     return this.exclusive(async () => {
       const day = await this.today()
+      if (opts.answered) {
+        for (const v of this.lastRequest.values()) if (v.reservationId === reservationId) v.answeredAt = this.now()
+      }
       const open = await this.openReservations()
       // Missing means it already expired, and was charged in full then.
       const r = open.find((x) => x.id === reservationId)
@@ -435,11 +637,17 @@ export class Ledger {
         // A request the model never started costs nothing.
         const cost = opts.failedBeforeModel ? 0 : Math.max(0, neurons ?? r.neurons)
         await this.chargeGlobal(cost, r.at)
+        const tokens = opts.failedBeforeModel ? undefined : opts.tokens
+        await this.chargeMonth(r.installMonth, cost, r.at, tokens)
         if (r.day === day.day) {
-          await this.charge(r.install, cost)
-          await this.charge(r.network, cost)
+          await this.charge(r.install, cost, tokens)
+          await this.charge(r.network, cost, tokens)
           day.global += cost
           day.requests++
+          if (tokens) {
+            day.inputTokens = (day.inputTokens ?? 0) + tokens.input
+            day.outputTokens = (day.outputTokens ?? 0) + tokens.output
+          }
         }
       }
       await this.storage.put('day', day)
@@ -458,6 +666,12 @@ export class Ledger {
       bump(m.routes, r.route)
       bump(m.tasks, r.task)
       m.neurons += Math.max(0, r.neurons)
+      if (r.tokens) {
+        m.inputTokens = (m.inputTokens ?? 0) + r.tokens.input
+        m.outputTokens = (m.outputTokens ?? 0) + r.tokens.output
+        m.cachedTokens = (m.cachedTokens ?? 0) + (r.tokens.cached ?? 0)
+        if (r.tokens.estimated) m.estimated = (m.estimated ?? 0) + 1
+      }
       if (r.error) {
         m.errors++
         bump(m.errorKinds, r.error)
@@ -466,15 +680,26 @@ export class Ledger {
     })
   }
 
-  /** Per-model counts for today and the previous day, with Neurons per answer and the capacity they imply. */
-  private async modelReport(day: Day): Promise<{ today: Record<string, ModelStats & { neuronsPerAnswer: number | null }>; previous: { day: string; models: Record<string, ModelStats> } | null; estimatedCapacity: number | null }> {
+  /** Per-model counts for today and the previous day, with cost and tokens per answer and the capacity they imply. */
+  private async modelReport(day: Day): Promise<{
+    today: Record<string, ModelStats & { neuronsPerAnswer: number | null; inputTokensPerAnswer: number | null; outputTokensPerAnswer: number | null }>
+    previous: { day: string; models: Record<string, ModelStats> } | null
+    estimatedCapacity: number | null
+  }> {
     const models = day.models ?? {}
-    const today: Record<string, ModelStats & { neuronsPerAnswer: number | null }> = {}
+    const today: Record<string, ModelStats & { neuronsPerAnswer: number | null; inputTokensPerAnswer: number | null; outputTokensPerAnswer: number | null }> = {}
     let n = 0
     let answered = 0
+    const per = (v: number | undefined, ok: number): number | null => (ok > 0 && v !== undefined ? Math.round(v / ok) : null)
     for (const [k, v] of Object.entries(models)) {
       const ok = v.requests - v.errors
-      today[k] = { ...v, neurons: Math.round(v.neurons * 10) / 10, neuronsPerAnswer: ok > 0 ? Math.round((v.neurons / ok) * 10) / 10 : null }
+      today[k] = {
+        ...v,
+        neurons: Math.round(v.neurons * 10) / 10,
+        neuronsPerAnswer: ok > 0 ? Math.round((v.neurons / ok) * 10) / 10 : null,
+        inputTokensPerAnswer: per(v.inputTokens, ok),
+        outputTokensPerAnswer: per(v.outputTokens, ok)
+      }
       n += v.neurons
       answered += ok
     }
@@ -484,13 +709,46 @@ export class Ledger {
   }
 
   /** Today's totals for the operator; no identities. */
-  summary(): Promise<{ day: string; globalUsed: number; globalLimit: number; todayUsed: number; answers: number; installations: number; networks: number; answering: number; upstreamExhausted: boolean; paused: boolean; limits: LedgerLimits; models: Awaited<ReturnType<Ledger['modelReport']>> }> {
+  summary(): Promise<{
+    day: string
+    unit: string
+    globalUsed: number
+    globalLimit: number
+    todayUsed: number
+    answers: number
+    month: string
+    monthUsed: number
+    monthLimit: number | null
+    monthAnswers: number
+    reduced: boolean
+    installations: number
+    networks: number
+    answering: number
+    upstreamExhausted: boolean
+    paused: boolean
+    limits: LedgerLimits
+    tokens: { today: { input: number; output: number }; month: { input: number; output: number } }
+    models: Awaited<ReturnType<Ledger['modelReport']>>
+  }> {
     return this.exclusive(async () => {
       const day = await this.today()
       await this.expire(day)
       const open = await this.openReservations()
+      const month = await this.thisMonth()
+      const inProgress = open.reduce((n, r) => n + r.neurons, 0)
+      const rolling = this.rollingUsed(await this.hours()) + inProgress
+      const monthUsed = month.used + inProgress
+      const soft = this.limits.softFraction
+      const reduced =
+        this.finite(soft) && soft < 1 && (this.limits.softFactor ?? 1) < 1 && (rolling >= soft * this.limits.globalDailyNeurons || (this.finite(this.limits.globalMonthly) && monthUsed >= soft * this.limits.globalMonthly))
       return {
         day: day.day,
+        unit: this.limits.unit ?? 'neurons',
+        month: month.month,
+        monthUsed: Math.round(monthUsed),
+        monthLimit: this.finite(this.limits.globalMonthly) ? this.limits.globalMonthly : null,
+        monthAnswers: month.requests,
+        reduced,
         // The capped figure: the last 24 hours plus answers in progress.
         globalUsed: Math.round(this.rollingUsed(await this.hours()) + open.reduce((n, r) => n + r.neurons, 0)),
         globalLimit: this.limits.globalDailyNeurons,
@@ -502,6 +760,7 @@ export class Ledger {
         upstreamExhausted: this.upstreamBlocked(day),
         paused: await this.isPaused(),
         limits: this.limits,
+        tokens: { today: { input: day.inputTokens ?? 0, output: day.outputTokens ?? 0 }, month: { input: month.inputTokens ?? 0, output: month.outputTokens ?? 0 } },
         models: await this.modelReport(day)
       }
     })

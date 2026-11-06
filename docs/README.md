@@ -20,6 +20,7 @@
 | [Architecture](ARCHITECTURE.md) | Storage, command layer, rendering, AI requests, security |
 | [Building and releasing](RELEASING.md) | Installers, signing, the approval-gated release flow, the download site, operating the AI server |
 | [AI server](../beta-server/README.md) | The Cloudflare Worker behind the free tutor |
+| [AI providers](AI-PROVIDERS.md) | DeepInfra vs OpenRouter, Groq, Cerebras and Workers AI: prices, costs per 1k–1M answers, limits, switch and rollback |
 | [Device testing](DEVICE-TESTING.md) | The hands-on pass on real computers, pens and touch screens |
 | [Roadmap](ROADMAP.md) | What's verified, and what's left before more testers and a public launch |
 

@@ -15,6 +15,9 @@ export interface ThreadEntry {
 
 export const HISTORY_ENTRIES = 10
 export const MAX_ANSWER_CHARS = 4000
+/** Text this long or longer (notebook content, not a short question) is sent once if a later message repeats it. */
+export const REPEAT_MIN_CHARS = 300
+export const REPEATED = '(The same notebook content as in a later message.)'
 
 /**
  * The earlier messages that may go with a new question to `provider`: only those
@@ -51,9 +54,19 @@ export function buildTurns(history: ThreadEntry[], current: AiPart[]): AiTurn[] 
       }
     }
   }
+  // Notebook content repeated in a later message (the same page asked about again) is sent once,
+  // with its latest copy: the model still sees it, and the request isn't paying for it five times.
+  const later = new Set<string>()
+  for (const p of current) if ('text' in p && p.text.length >= REPEAT_MIN_CHARS) later.add(p.text)
+  const dedupedUser: AiPart[][] = new Array(kept.length)
+  for (let i = kept.length - 1; i >= 0; i--) {
+    const own = kept[i]![0].parts
+    dedupedUser[i] = own.map((p) => ('text' in p && p.text.length >= REPEAT_MIN_CHARS && later.has(p.text) ? { text: REPEATED } : p))
+    for (const p of own) if ('text' in p && p.text.length >= REPEAT_MIN_CHARS) later.add(p.text)
+  }
   const turns: AiTurn[] = []
-  kept.forEach(([u, m], i) => {
-    const parts = u.parts.filter((p) => 'text' in p || i === imageOwner)
+  kept.forEach(([, m], i) => {
+    const parts = dedupedUser[i]!.filter((p) => 'text' in p || i === imageOwner)
     turns.push({ role: 'user', parts: parts.length ? parts : [{ text: '(image omitted)' }] })
     const answer = m.parts.map((p) => ('text' in p ? p.text : '')).join('')
     turns.push({ role: 'model', parts: [{ text: answer.length > MAX_ANSWER_CHARS ? `${answer.slice(0, MAX_ANSWER_CHARS)}…` : answer || '(no answer)' }] })

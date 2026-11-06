@@ -181,7 +181,7 @@ function CloudSettings({ status }: { status: AiStatus }) {
             <span className="mt-1 block">
               {CLOUD_DATA_NOTE} {CLOUD_PERMISSION_SCOPE} Don't include sensitive personal information.{' '}
               <a href={CLOUD_TERMS_URL} target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                Cloudflare’s data policy
+                Privacy policy
               </a>
             </span>
           </span>

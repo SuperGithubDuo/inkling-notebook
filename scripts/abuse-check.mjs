@@ -53,7 +53,7 @@ function check(name, pass, detail = '') {
 async function tutor(install, body, headers = {}) {
   const res = await fetch(`${url}/v1/tutor`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(install ? { 'x-inkling-install': install } : {}), ...headers },
+    headers: { 'content-type': 'application/json', 'x-inkling-notice': '4', ...(install ? { 'x-inkling-install': install } : {}), ...headers },
     body: typeof body === 'string' ? body : JSON.stringify(body)
   })
   const type = res.headers.get('content-type') ?? ''
