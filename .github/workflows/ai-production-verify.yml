@@ -1,0 +1,35 @@
+name: AI production verify (read-mostly)
+
+# Independent check of the production AI server after a provider switch: Cloudflare's deployed
+# settings, the admin reports, status as an updated and an older app, four short answers and one
+# refused malformed request. Never deploys, changes limits or pauses. About $0.002 on DeepInfra.
+# Start it by pushing the branch `deploy/ai-production-verify` (or run it manually).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['deploy/ai-production-verify']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    environment: ai-test
+    timeout-minutes: 5
+    env:
+      URL: https://inkling-ai-beta.shenjonas9.workers.dev
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+      DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Verify production
+        run: |
+          export ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          node beta-server/scripts/production-verify.mjs | tee -a "$GITHUB_STEP_SUMMARY"
