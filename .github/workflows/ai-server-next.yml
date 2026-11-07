@@ -19,7 +19,7 @@ name: AI server (external provider, test)
 #
 # Cost: about $0.10-0.30 on the development DeepInfra account (the test Worker's own cap
 # for this run is $1, set below; the tiny-cap copy is $0.01). The Workers AI baseline uses
-# at most 4,000 Neurons of the Cloudflare account's free daily allocation (shared with
+# at most 5,500 Neurons of the Cloudflare account's free daily allocation (shared with
 # production, which has its own 9,000-Neuron cap) and costs nothing on Workers Free.
 #
 # Needs these repository secrets:
@@ -176,7 +176,7 @@ jobs:
         shell: bash
         env:
           INKLING_LIVE_LABEL: workers-ai
-          INKLING_LIVE_BUDGET: '4000'
+          INKLING_LIVE_BUDGET: '5500'
         run: |
           # Direct mode: the server code on this runner calls Workers AI's REST API with the same
           # model and settings as production, minus text-only routing (one model, as on DeepInfra).
