@@ -8,7 +8,7 @@ name: AI production verify (read-mostly)
 on:
   workflow_dispatch:
   push:
-    branches: ['deploy/ai-production-verify']
+    branches: ['deploy/ai-preflight']
 
 permissions:
   contents: read
