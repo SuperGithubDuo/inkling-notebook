@@ -1,0 +1,114 @@
+name: AI preflight (read-only on production)
+
+# Cheap checks before the production switch, without the full Workers AI comparison:
+#   1. Which provider production ("inkling-ai-beta") runs, read from Cloudflare (read-only).
+#   2. Whether the "production-ai" approval environment is configured (read-only report).
+#   3. Privacy, structurally, on the TEST Worker ("inkling-ai-next", DeepInfra development key,
+#      bridge on): canary-filled requests as a notice-4 app (DeepInfra) and as an older app
+#      (Workers AI bridge), then /admin/summary and /admin/legacy/summary must hold only numbers
+#      and identifiers, and no canary. About $0.002 on DeepInfra and ~50 Neurons.
+# Start it by pushing the branch `deploy/ai-preflight`. Production is never deployed or changed.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['deploy/ai-preflight']
+
+permissions:
+  contents: read
+  deployments: read
+
+jobs:
+  production-readonly:
+    runs-on: ubuntu-24.04
+    # Holds the Cloudflare token once it is moved out of repository secrets (docs/AI-PROVIDERS.md).
+    environment: ai-test
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Production provider (read-only)
+        run: |
+          out=$(node beta-server/scripts/production-provider.mjs) || { echo "::error title=Production provider::could not read inkling-ai-beta's settings"; exit 1; }
+          echo "::notice title=Production provider::$out"
+      - name: production-ai environment (report)
+        run: |
+          out=$(node beta-server/scripts/environment-check.mjs production-ai --report)
+          echo "$out"
+          echo "::notice title=production-ai::$(echo "$out" | tr '\n' ' ')"
+
+  privacy:
+    runs-on: ubuntu-24.04
+    # Holds the Cloudflare token once it is moved out of repository secrets (docs/AI-PROVIDERS.md).
+    environment: ai-test
+    timeout-minutes: 15
+    # Shares the test Worker with "AI server (external provider, test)".
+    concurrency:
+      group: ai-server-next
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+      DEEPINFRA_DEV_API_KEY: ${{ secrets.DEEPINFRA_DEV_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm --prefix beta-server ci
+      - name: Deploy the test Worker
+        id: deploy
+        working-directory: beta-server
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            # Test-run limits only (the committed config is the $5/month production proposal):
+            # one runner IP plays every user, so the network and installation ceilings are opened,
+            # and the test Worker may spend at most $1 this month.
+            if npx wrangler deploy -c wrangler.external.jsonc --var GLOBAL_MONTHLY_USD:1 --var NETWORK_DAILY_USD:0.25 --var INSTALL_DAILY_USD:0.05 --var INSTALL_MONTHLY_USD:0.25 > /tmp/deploy.log 2>&1; then break; fi
+            cat /tmp/deploy.log
+            [ $attempt = 3 ] && exit 1
+            sleep 20
+          done
+          cat /tmp/deploy.log
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          [ -n "$url" ] || { echo "::error title=Deploy::no workers.dev address printed"; exit 1; }
+          # Secrets go in through stdin; they never appear in the log.
+          printf '%s' "$DEEPINFRA_DEV_API_KEY" | tr -d '\r\n' | npx wrangler secret put INFERENCE_API_KEY -c wrangler.external.jsonc > /dev/null 2>&1 || { echo "::error title=INFERENCE_API_KEY::could not be set"; exit 1; }
+          token=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          printf '%s' "$token" | npx wrangler secret put ADMIN_TOKEN -c wrangler.external.jsonc > /dev/null 2>&1 || { echo "::error title=ADMIN_TOKEN::could not be set"; exit 1; }
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$url/admin/summary" -H "Authorization: Bearer $token")
+            [ "$code" = 200 ] && break
+            sleep 4
+          done
+          [ "$code" = 200 ] || { echo "::error title=Admin token::admin API answers $code"; exit 1; }
+          # The provider key is read on the first request; wait until the Worker is configured.
+          for i in $(seq 1 30); do
+            s=$(curl -sS "$url/v1/status" -H "x-inkling-install: inst_$(openssl rand -hex 16)" -H 'x-inkling-notice: 4')
+            echo "$s" | grep -q '"qwen3.8-27b"' && break
+            sleep 4
+          done
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Test AI server deployed::$url (DeepInfra; production untouched)"
+
+      - name: Privacy, structurally, on both paths
+        shell: bash
+        run: |
+          node beta-server/scripts/privacy-check.mjs "${{ steps.deploy.outputs.url }}" "$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')" | tee -a "$GITHUB_STEP_SUMMARY"

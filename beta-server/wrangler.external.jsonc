@@ -65,6 +65,12 @@
     "IMAGE_PATCH": "28",
     // Rollback settings (used only if INFERENCE_PROVIDER is set back to "workers-ai").
     "MODEL": "@cf/qwen/qwen3.8-27b",
+    // The bridge for older apps keeps production's routing (as wrangler.jsonc / wrangler.deepinfra.jsonc):
+    // practice sets on Gemma 4 26B, everything else on Qwen. Ignored on the DeepInfra path.
+    "MODEL_TEXT": "@cf/google/gemma-4-26b-a4b-it",
+    "TEXT_INPUT_NEURONS_PER_M": "9091",
+    "TEXT_OUTPUT_NEURONS_PER_M": "27273",
+    "TEXT_MODEL_TASKS": "practice",
     "ACCOUNT_PLAN": "free",
     "GLOBAL_DAILY_NEURONS": "9000",
     "INSTALL_DAILY_NEURONS": "900",

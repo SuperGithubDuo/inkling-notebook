@@ -102,6 +102,14 @@ await withWorker({ INFERENCE_API_KEY: 'dummy-key-not-used-by-status', LEGACY_WOR
   check('…and leaves the DeepInfra path running (separate ledgers)', newRunning.body?.paused === false, JSON.stringify(newRunning.body))
   await fetch(url + '/admin/legacy/pause', { method: 'POST', headers: { authorization: `Bearer ${ADMIN}`, 'content-type': 'application/json' }, body: JSON.stringify({ paused: false }) })
   check('unpausing restores old apps', (await status(url, { 'x-inkling-install': install('a') })).body?.paused === false)
+  // The emergency pause (/admin/pause, used by `npm run admin -- pause` and the ops workflow) stops BOTH paths.
+  const pause = (p) => fetch(url + '/admin/pause', { method: 'POST', headers: { authorization: `Bearer ${ADMIN}`, 'content-type': 'application/json' }, body: JSON.stringify({ paused: p }) })
+  check('the emergency pause answers 200', (await pause(true)).status === 200)
+  const both = [await status(url, { 'x-inkling-install': install('a') }), await status(url, { 'x-inkling-install': install('b'), 'x-inkling-notice': '4' })]
+  check('…and stops older apps AND notice-4 apps', both.every((r) => r.body?.paused === true), JSON.stringify(both.map((r) => r.body?.paused)))
+  await pause(false)
+  const after = [await status(url, { 'x-inkling-install': install('a') }), await status(url, { 'x-inkling-install': install('b'), 'x-inkling-notice': '4' })]
+  check('resume restores both', after.every((r) => r.body?.paused === false), JSON.stringify(after.map((r) => r.body?.paused)))
   const noAuth = await fetch(url + '/admin/legacy/summary')
   const leaked = await noAuth.text()
   check('the bridge admin API needs the admin token (hidden: 404, no data)', [401, 403, 404].includes(noAuth.status) && !/globalLimit|unit/.test(leaked), `${noAuth.status} ${leaked.slice(0, 80)}`)

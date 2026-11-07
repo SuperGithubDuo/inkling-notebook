@@ -30,7 +30,7 @@ import { aiRequestSchema, type AiRequest } from '../../src/shared/ai'
 import { taskSpec } from '../../src/main/ai/prompts'
 import { UPSTREAM_RETRY_MS, type Identity, type Ledger, type Quota, type RefusalCode } from './ledger'
 import type { AiBinding, ProviderId } from './provider'
-import { classifyUpstream, costFor, reportedCost, estimateInputTokens, parseUpstream, readSse, toMessages, type Rates, type Usage } from './upstream'
+import { classifyUpstream, costFor, reportedCost, estimateInputTokens, inputUpperBound, parseUpstream, readSse, toMessages, type Rates, type Usage } from './upstream'
 import { chooseModel, type TextModelConfig } from './route'
 
 export type { AiBinding } from './provider'
@@ -258,22 +258,26 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   const choice = chooseModel(body.task, body.turns, { model: config.model, rates: config.rates, reasoningEffort: config.reasoningEffort, disableThinking: config.disableThinking }, external ? null : config.textModel)
   const hasImage = body.turns.some((t) => t.parts.some((p) => 'image' in p))
   const outRate = choice.rates.outputPerM / 1e6
-  const inputCost = inputTokens * (choice.rates.inputPerM / 1e6) * Math.max(1, config.inputMargin ?? 1)
+  const inputRate = choice.rates.inputPerM / 1e6
+  // What a typical answer's input costs (the installation's and network's room) …
+  const inputCost = inputTokens * inputRate * Math.max(1, config.inputMargin ?? 1)
+  // … and what it can cost at most (the service's caps): never below the provider's real count.
+  const worstInputCost = Math.max(inputCost, inputUpperBound(spec.system, body.turns, config.imagePatch) * inputRate)
 
   // Reserve the worst case against the service's cap; the installation and network need room for a typical answer.
   // Near the cap a chat answer may be shortened to fit; a structured answer can't be.
   // Retried attempts that timed out may each have been billed for their input: the worst case covers them,
   // so the settled cost (retries + answer) can never exceed what was reserved against the caps.
-  const retryInputs = external ? Math.max(0, (config.upstreamAttempts ?? 1) - 1) * inputCost : 0
+  const retryInputs = external ? Math.max(0, (config.upstreamAttempts ?? 1) - 1) * worstInputCost : 0
   let maxTokens = spec.maxOutputTokens
-  let reserved = Math.ceil(retryInputs + inputCost + maxTokens * outRate)
+  let reserved = Math.ceil(retryInputs + worstInputCost + maxTokens * outRate)
   const expected = Math.ceil(inputCost + Math.min(maxTokens, EXPECTED_OUTPUT_TOKENS[body.task]) * outRate)
   let res = await ledger.reserve(id, reserved, expected, fingerprint)
   if (!res.ok && body.task === 'chat' && res.code === 'global_quota' && res.quota) {
-    const fit = Math.floor((res.quota.globalLimit - res.quota.globalUsed - inputCost - retryInputs) / outRate)
+    const fit = Math.floor((res.quota.globalLimit - res.quota.globalUsed - worstInputCost - retryInputs) / outRate)
     if (fit >= MIN_CHAT_TOKENS) {
       maxTokens = Math.min(maxTokens, fit)
-      reserved = Math.ceil(retryInputs + inputCost + maxTokens * outRate)
+      reserved = Math.ceil(retryInputs + worstInputCost + maxTokens * outRate)
       res = await ledger.reserve(id, reserved, Math.min(expected, reserved), fingerprint)
     }
   }
@@ -295,7 +299,7 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
   const startedAt = now()
   // A retried attempt that timed out may have been processed (and billed) by the provider: count its input, to be safe.
   let retryCharge = 0
-  const hooks = { onRetry: (kind: string) => void (kind === 'timeout' || kind === 'other' ? (retryCharge += inputCost) : undefined) }
+  const hooks = { onRetry: (kind: string) => void (kind === 'timeout' || kind === 'other' ? (retryCharge += worstInputCost) : undefined) }
   let upstream: unknown
   try {
     // The Workers AI binding's third argument means something else; only external providers get the hooks.
@@ -380,8 +384,10 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     // A stream stopped early has no usage report, and the model may have run on a little: charge the reservation.
     // A finished stream with nothing in it is a failure too (an empty answer helps no one).
     if (!failed && !text && !clientGone) failed = 'empty'
+    // This attempt's worst case (the reservation minus the allowance for retries that may not have happened).
+    const attemptWorst = Math.ceil(worstInputCost + maxTokens * outRate)
     const cost =
-      retryCharge + (runaway ? reserved : usage ? costFor(usage, choice.rates) : clientGone || (failed && !text) ? reserved : Math.min(reserved, inputCost + ((text.length + reasoningChars) / 3) * outRate))
+      retryCharge + (runaway ? attemptWorst : usage ? costFor(usage, choice.rates) : clientGone || (failed && !text) ? attemptWorst : Math.min(attemptWorst, inputCost + ((text.length + reasoningChars) / 3) * outRate))
     // Tokens: the provider's own count when it reported one; otherwise the server's estimate, flagged.
     const tokens = usage
       ? { input: usage.inputTokens, output: usage.outputTokens, cached: usage.cachedInputTokens ?? 0 }

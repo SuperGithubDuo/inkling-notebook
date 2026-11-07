@@ -142,6 +142,24 @@ export function estimateInputTokens(system: string, turns: AiTurn[], patch?: num
   return tokens + Math.ceil(chars / 3)
 }
 
+/**
+ * A hard upper bound on a request's input tokens, for the worst-case reservation: Qwen's tokenizer
+ * is byte-level BPE, so no text is ever more tokens than its UTF-8 bytes (digits, which it splits
+ * one per token, and non-Latin scripts are where the 3-characters-a-token estimate falls short).
+ * Images and chat formatting are counted as in estimateInputTokens (images: measured at 0.72-0.74 of
+ * that estimate on DeepInfra, 7 Nov 2026).
+ */
+export function inputUpperBound(system: string, turns: AiTurn[], patch?: number): number {
+  const enc = new TextEncoder()
+  // Chat-template tokens: role markers per message and the thinking-off block, with room to spare.
+  let tokens = 32 + enc.encode(system).length
+  for (const t of turns) {
+    tokens += 16
+    for (const p of t.parts) tokens += 'text' in p ? enc.encode(p.text).length : imageTokens(p.image.data, patch)
+  }
+  return tokens
+}
+
 // ------------------------------------------------------------- reading
 
 export interface ParsedEvent {

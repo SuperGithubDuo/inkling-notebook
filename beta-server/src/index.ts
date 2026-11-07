@@ -18,10 +18,10 @@
  *   unless both are set, along with the key and the prices. Ledger unit: µ$.
  */
 import { DurableObject } from 'cloudflare:workers'
-import { handle, sha256Hex, type ServerConfig } from './handler'
+import { handle } from './handler'
 import { Ledger, type Identity, type LedgerLimits, type Quota, type ReserveResult, type SettleOptions, type UsageRecord } from './ledger'
 import { inference, limits, type Env } from './config'
-import { textModelFrom } from './route'
+import { isLegacyApp, serverConfig } from './bridge'
 
 export type { Env } from './config'
 
@@ -76,30 +76,6 @@ export class LedgerObject extends DurableObject<WorkerEnv> {
   }
 }
 
-/** The Worker's server settings for one provider (shared by the main path and the bridge for older apps). */
-async function serverConfig(env: WorkerEnv, inf: Exclude<ReturnType<typeof inference>, string>, legacy: boolean): Promise<ServerConfig> {
-  return {
-    model: inf.model,
-    provider: inf.provider,
-    publicModel: inf.publicModel,
-    // The bridge answers apps whose notice names only Cloudflare: no notice gate there.
-    minNoticeVersion: legacy ? 0 : inf.minNotice,
-    inputMargin: inf.inputMargin,
-    upstreamAttempts: inf.upstreamAttempts ?? 1,
-    rates: inf.rates,
-    reasoningEffort: env.REASONING_EFFORT ?? '',
-    disableThinking: env.DISABLE_THINKING === 'true',
-    structured: env.STRUCTURED === 'json_schema' ? 'json_schema' : 'prompt',
-    imagePatch: Number(env.IMAGE_PATCH) || 28,
-    maxBodyBytes: 3_500_000,
-    maxInputTokens: Number(env.MAX_INPUT_TOKENS) || 12_000,
-    adminTokenHash: env.ADMIN_TOKEN && env.ADMIN_TOKEN.length >= 32 ? await sha256Hex(env.ADMIN_TOKEN) : null,
-    // Text-only routing (route.ts) is a Workers AI rollback feature only. An external provider, and the
-    // bridge for older apps, answer every request with the one model (Qwen 3.8 27B).
-    textModel: inf.provider === 'workers-ai' && !legacy ? textModelFrom(env, env.MODEL) : null
-  }
-}
-
 /** A ledger client for one Durable Object; each call carries this version's limits. */
 function ledgerFor(stub: DurableObjectStub<LedgerObject>, l: LedgerLimits): Ledger {
   return {
@@ -111,20 +87,6 @@ function ledgerFor(stub: DurableObjectStub<LedgerObject>, l: LedgerLimits): Ledg
     isPaused: () => stub.isPaused(l),
     setPaused: (p: boolean) => stub.setPaused(p, l)
   } as unknown as Ledger
-}
-
-/**
- * The bridge for apps released before the DeepInfra notice (CLOUD_CONSENT_VERSION 4), set by
- * LEGACY_WORKERS_AI="true" while the server uses an external provider. Those apps' users agreed to a
- * notice that names only Cloudflare, so their requests must not go to DeepInfra: they are answered by
- * Workers AI, as before the switch, with Qwen 3.8 27B, under the Workers Free plan's limits and in a
- * separate ledger (Neurons, GLOBAL_DAILY_NEURONS etc.). They cost nothing and never touch the dollar
- * budget. Apps on notice 4 or later go to the external provider. Turn the bridge off once old
- * versions are gone: those apps then get "Update Inkling".
- */
-function isLegacyApp(request: Request, minNotice: number): boolean {
-  const n = Number(request.headers.get('x-inkling-notice') ?? '0')
-  return !(Number.isFinite(n) && n >= minNotice)
 }
 
 export default {
@@ -153,6 +115,17 @@ export default {
       }
     }
     const stub = env.LEDGER.get(env.LEDGER.idFromName('ledger'))
-    return handle(request, { ai: inf.ai, ledger: ledgerFor(stub, limits(env)), config: await serverConfig(env, inf, false), waitUntil: (p) => ctx.waitUntil(p) })
+    // The emergency pause is one switch: with the bridge on, /admin/pause also pauses (or resumes) the
+    // bridge's ledger, so older apps stop too. Only after the main pause succeeded (authorised, valid).
+    const pausing = bridgeOn && url.pathname === '/admin/pause' && request.method === 'POST' ? request.clone() : null
+    const res = await handle(request, { ai: inf.ai, ledger: ledgerFor(stub, limits(env)), config: await serverConfig(env, inf, false), waitUntil: (p) => ctx.waitUntil(p) })
+    if (pausing && res.status === 200) {
+      const body = (await pausing.json().catch(() => null)) as { paused?: unknown } | null
+      if (typeof body?.paused === 'boolean') {
+        const wenv = { ...env, INFERENCE_PROVIDER: 'workers-ai' } as WorkerEnv
+        await env.LEDGER.get(env.LEDGER.idFromName('ledger-workers-ai-bridge')).setPaused(body.paused, limits(wenv))
+      }
+    }
+    return res
   }
 } satisfies ExportedHandler<WorkerEnv>

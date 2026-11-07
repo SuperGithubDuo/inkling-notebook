@@ -8,7 +8,7 @@
  * nothing here reaches the internet.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { costFor, parseUpstream, reportedCost } from '../../beta-server/src/upstream'
+import { costFor, estimateInputTokens, inputUpperBound, parseUpstream, reportedCost } from '../../beta-server/src/upstream'
 import { PRESETS, externalProvider, guardStream, kindOfStatus, retryAfterSeconds, toProviderBody, UpstreamError } from '../../beta-server/src/provider'
 import { inference, limits as limitsFromEnv, NOTICE_NOT_YET_SHIPPED, providerOf, type Env } from '../../beta-server/src/config'
 import { Ledger, type LedgerLimits } from '../../beta-server/src/ledger'
@@ -343,8 +343,8 @@ describe('AI server on an external provider', () => {
     const shown = r.events.filter((e) => e.event === 'delta').map((e) => e.data.text).join('')
     expect(shown.length).toBeLessThanOrEqual(900 * 8 + 120)
     expect(r.events.at(-1)!).toMatchObject({ event: 'done', data: { finishReason: 'MAX_TOKENS' } })
-    // Charged the reservation (≈ input estimate + 900 × $2.50/M), not the 3,000 tokens reported.
-    expect(r.events.at(-1)!.data.neurons).toBeLessThan(300 * 0.2 + 900 * 2.5 + 200)
+    // Charged this attempt's worst case (input bound: the request's bytes + 900 × $2.50/M), not the 3,000 tokens reported.
+    expect(r.events.at(-1)!.data.neurons).toBeLessThan(900 * 2.5 + 600)
     expect(r.events.at(-1)!.data.neurons).toBeGreaterThan(900 * 2.5)
     expect(JSON.stringify(warn.mock.calls)).toMatch(/runaway_output/)
   })
@@ -808,5 +808,111 @@ describe('app on the external provider', () => {
     }
     await expect(run()).rejects.toMatchObject({ code: 'bad_request', message: expect.stringMatching(/Update Inkling/) })
     expect(fake!.completions()).toHaveLength(0)
+  })
+})
+
+
+// ------------------------------------------------------------------ stress: the $5 budget (7 Nov 2026 review)
+
+describe('budget stress: large inputs, overshoot, a school network', () => {
+  /** The production DeepInfra settings in µ$ ($5/month, $0.25/day, $0.01 and $0.05 per day). */
+  const PROD = { server: { globalDailyNeurons: 250_000, installDailyNeurons: 10_000, networkDailyNeurons: 50_000, typicalNeuronsPerAnswer: 800, networkConcurrent: 4, globalConcurrent: 8, upstreamAttempts: 3 }, limits: { globalMonthly: 5_000_000, installMonthly: 150_000 } }
+  const digits = (n: number): string => Array.from({ length: n }, (_, i) => String((i * 7) % 10)).join('')
+
+  it('the input upper bound is never below the bytes the tokenizer can split into', () => {
+    const turns = [{ role: 'user' as const, parts: [{ text: digits(6000) }] }]
+    // The 3-characters-a-token estimate: ~2,000 tokens; Qwen splits digits one per token: 6,000+.
+    expect(estimateInputTokens('', turns)).toBeLessThan(2100)
+    expect(inputUpperBound('', turns)).toBeGreaterThanOrEqual(6000)
+    // Non-Latin text: 1 character can be several bytes and several tokens.
+    const cjk = [{ role: 'user' as const, parts: [{ text: '微积分'.repeat(500) + '😀'.repeat(100) }] }]
+    expect(inputUpperBound('', cjk)).toBeGreaterThanOrEqual(1500 * 3 + 100 * 4)
+  })
+
+  it('a digit-heavy notebook page billed at the worst possible count never costs more than its reservation', async () => {
+    await start(PROD)
+    const text = 'Check my long division: ' + digits(6000)
+    const worstIn = inputUpperBound('', [{ role: 'user', parts: [{ text }] }]) + 800 // + the system prompt, generously
+    fake!.model.reply({ text: 'ok', usage: { inputTokens: worstIn, outputTokens: 900 } })
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const r = await post(chat(text))
+    expect(r.events.at(-1)!.event).toBe('done')
+    await server!.settled()
+    const sum = (await server!.admin('GET', '/admin/summary')).body
+    expect(sum.overshoot).toEqual({ count: 0, total: 0 })
+  })
+
+  it('the largest allowed request, three attempts, billed at the worst case: inside the reservation; one above the limit is refused for free', async () => {
+    await start({ ...PROD, adapter: { firstByteTimeoutMs: 150 } })
+    // Two 16,500-character parts (24,000 a part is the schema's limit): ~11,000 estimated tokens, under MAX_INPUT_TOKENS (12,000).
+    const big2 = { task: 'chat', turns: [{ role: 'user', parts: [{ text: 'x'.repeat(16_500) }, { text: 'z'.repeat(16_500) }] }] }
+    fake!.fail({ hangMs: 600 })
+    fake!.fail({ hangMs: 600 })
+    // Billed at the most the tokenizer can produce: one token per byte of text and the system prompt.
+    fake!.model.reply({ text: 'ok', usage: { inputTokens: 33_000 + 1_000, outputTokens: 900 } })
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const r = await post(big2)
+    expect(r.json ?? r.events.at(-1)).toMatchObject({ event: 'done' })
+    await server!.settled()
+    const sum = (await server!.admin('GET', '/admin/summary')).body
+    expect(sum.overshoot.count).toBe(0)
+    expect(sum.monthUsed).toBeLessThan(40_000) // < $0.04 even in this worst case
+    const big = await post({ task: 'chat', turns: [{ role: 'user', parts: [{ text: 'y'.repeat(20_000) }, { text: 'w'.repeat(20_000) }] }] }, { install: INSTALL_B })
+    expect(big.status).toBe(413)
+    expect(fake!.completions()).toHaveLength(3)
+  })
+
+  it('30 worst-case requests at once against an almost-spent month: the hard cap holds exactly', async () => {
+    await start({ ...PROD, server: { ...PROD.server, globalConcurrent: 40, networkConcurrent: 40, networkPerMinute: 100, networkDailyNeurons: 5_000_000 }, limits: { globalMonthly: 20_000, installMonthly: 150_000 } })
+    for (let i = 0; i < 30; i++) fake!.model.reply({ text: 'ok', usage: { inputTokens: 900, outputTokens: 900 } })
+    const installs = Array.from({ length: 30 }, (_, i) => 'inst_' + String(i).padStart(32, 'c'))
+    const results = await Promise.all(installs.map((install, i) => post(chat(`question ${i}`), { install, ip: `203.0.113.${i}` })))
+    await server!.settled()
+    const sum = (await server!.admin('GET', '/admin/summary')).body
+    const answered = results.filter((r) => r.events.at(-1)?.event === 'done').length
+    expect(answered).toBeGreaterThan(0)
+    expect(results.filter((r) => r.json?.error?.scope === 'global_monthly_quota').length).toBe(30 - answered)
+    expect(sum.monthUsed).toBeLessThanOrEqual(20_000)
+    expect(sum.overshoot.count).toBe(0)
+  })
+
+  it('a classroom of 30 behind one school address: a minute, then a day', async () => {
+    await start(PROD)
+    const install = (i: number): string => 'inst_' + String(i).padStart(32, 's')
+    const school = '198.51.100.40'
+    // In one minute, one after another: the network's 20-a-minute limit is what a class meets first.
+    const minute: string[] = []
+    for (let i = 0; i < 30; i++) {
+      fake!.model.reply({ text: 'ok', usage: { inputTokens: 640, outputTokens: 300 } }) // ~$0.00088, a typical answer
+      const r = await post(chat(`student ${i}`), { install: install(i), ip: school })
+      minute.push(r.events.at(-1)?.event === 'done' ? 'answered' : r.json.error.scope)
+      await server!.settled()
+    }
+    expect(minute.filter((x) => x === 'answered')).toHaveLength(20)
+    expect(minute.slice(20).every((x) => x === 'rate_limited')).toBe(true)
+    // Another school is unaffected.
+    fake!.model.reply({ text: 'ok', usage: { inputTokens: 640, outputTokens: 300 } })
+    expect((await post(chat('elsewhere'), { install: 'inst_' + 'E'.repeat(32), ip: '192.0.2.7' })).events.at(-1)?.event).toBe('done')
+  })
+
+  it('…and over a day the school shares $0.05: ~55 typical answers, then a message naming the shared connection', async () => {
+    await start({ ...PROD, server: { ...PROD.server, networkPerMinute: 1000 } })
+    const school = '198.51.100.41'
+    let answered = 0
+    let refusal: any
+    for (let i = 0; i < 80 && !refusal; i++) {
+      fake!.model.reply({ text: 'ok', usage: { inputTokens: 640, outputTokens: 300 } })
+      const r = await post(chat(`q${i}`), { install: 'inst_' + String(i % 30).padStart(32, 't'), ip: school })
+      if (r.events.at(-1)?.event === 'done') answered++
+      else if (r.json?.error?.scope !== 'duplicate') refusal = r.json.error
+      await server!.settled()
+    }
+    expect(answered).toBeGreaterThanOrEqual(50)
+    expect(answered).toBeLessThanOrEqual(60)
+    expect(refusal.scope).toBe('network_quota')
+    expect(refusal.message).toMatch(/internet connection \(shared by everyone on it, such as a school or office\)/)
+    // The service as a whole still has budget for everyone else.
+    const sum = (await server!.admin('GET', '/admin/summary')).body
+    expect(sum.globalUsed).toBeLessThan(60_000)
   })
 })

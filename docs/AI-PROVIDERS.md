@@ -166,7 +166,17 @@ Steps:
 
 By hand instead of the workflow: `cd beta-server && npx wrangler secret put INFERENCE_API_KEY -c wrangler.deepinfra.jsonc && npx wrangler deploy -c wrangler.deepinfra.jsonc`.
 
-Note: the *Beta AI server* workflow (push to `deploy/beta-server`) deploys `wrangler.jsonc`, i.e. switches production back to Workers AI. Don't run it while on DeepInfra unless that's intended.
+**What can change the production Worker** (all share the concurrency lock `beta-server-production`, run only by hand from `main`, and wait for a `production-ai` reviewer's approval):
+
+| Workflow | Deploys | Guard |
+|---|---|---|
+| *AI server - switch provider (production)* | `wrangler.deepinfra.jsonc` or `wrangler.jsonc` | typed confirmation; gate job checks `production-ai` has a required reviewer and main-only deployments; recovery to Workers AI on any failure or cancellation after the key or deploy step started, verified from Cloudflare and the live server |
+| *Beta AI server* | `wrangler.jsonc` | refuses while production runs DeepInfra (it would revert it) or when the provider can't be read |
+| *AI routing smoke test* | `wrangler.jsonc` (its rollback) | same |
+
+No workflow deploys production on a push any more. *AI server emergency switch* (pause/resume) only calls the admin API; `/admin/pause` pauses or resumes both ledgers (DeepInfra and the bridge) at once. *AI preflight* (push `deploy/ai-preflight`) reads production's provider and the `production-ai` settings without changing anything, and runs the structural privacy check on the test Worker.
+
+Remaining gap, closed in GitHub settings rather than code: an old commit's copy of a workflow (from before these guards) could still be pushed to its old branch and would see repository-level secrets. To close it (optional, settings only): move `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` from repository secrets into environment secrets of `production-ai` (deployments: `main` only) and `ai-test` (deployments: `deploy/ai-server-next`, `deploy/ai-preflight`, `deploy/workers-ai-bench`, `ops/cloudflare`). Every current workflow that needs them already names one of these environments; an old copy names none and gets no token.
 
 ## Rollback
 

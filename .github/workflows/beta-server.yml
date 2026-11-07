@@ -17,9 +17,11 @@ name: Beta AI server
 # the run instead of eating into testers' answers. Before testers are invited, the commit
 # message can contain "[no-testers-yet]" to run anyway (Cloudflare still has to accept).
 #
-# Start it by pushing the branch `deploy/beta-server` (works from any branch,
-# without touching main), or Actions → Beta AI server → Run workflow once this
-# file is on the default branch.
+# Start it ONLY by hand: Actions → Beta AI server → Run workflow (from main). It no longer runs
+# on a push. It runs in the "production-ai" environment (GitHub waits for a required reviewer's
+# approval) and shares the production lock with "AI server - switch provider". It refuses to run
+# while production is on DeepInfra, because deploying wrangler.jsonc would revert it to Workers AI;
+# while on DeepInfra, server updates and the rollback go through the switch workflow.
 #
 # Needs these repository secrets (Settings → Secrets and variables → Actions):
 #   CLOUDFLARE_ACCOUNT_ID   your account ID (dashboard → Workers & Pages → right-hand column)
@@ -40,20 +42,20 @@ on:
         description: Also run the full real-model test (~1,100 Neurons of the 1,000-a-day test budget; normally off)
         type: boolean
         default: false
-  push:
-    branches: ['deploy/beta-server']
 
 permissions:
   contents: read
 
+# One lock for everything that deploys the production Worker (inkling-ai-beta).
 concurrency:
-  group: beta-server
+  group: beta-server-production
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    environment: production-ai
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -76,6 +78,22 @@ jobs:
           [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
           [ ${#INKLING_ADMIN_TOKEN} -ge 32 ] || missing+=("INKLING_ADMIN_TOKEN (at least 32 characters)")
           if [ ${#missing[@]} -gt 0 ]; then echo "::error title=Missing secrets::Add these repository secrets: ${missing[*]} (see the top of .github/workflows/beta-server.yml)"; exit 1; fi
+
+      - name: Production must be on Workers AI (this workflow deploys wrangler.jsonc)
+        shell: bash
+        run: |
+          # This workflow deploys the Workers AI configuration. If production runs DeepInfra, deploying it
+          # would silently switch everyone back: refuse, and use "AI server - switch provider" instead.
+          # Unreadable = unknown = refuse (fail closed).
+          set +e
+          node beta-server/scripts/production-provider.mjs --expect workers-ai
+          code=$?
+          set -e
+          case $code in
+            0) echo "::notice title=Production provider::workers-ai: this deploy keeps it" ;;
+            1) echo "::error title=Production is on DeepInfra::refusing: this workflow would revert it to Workers AI. Use Actions → AI server - switch provider (production)."; exit 1 ;;
+            *) echo "::error title=Production provider unknown::could not read inkling-ai-beta's settings from Cloudflare; refusing to deploy."; exit 1 ;;
+          esac
 
       - name: Check the Cloudflare plan (free usage only)
         shell: bash

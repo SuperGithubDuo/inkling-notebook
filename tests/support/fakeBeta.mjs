@@ -157,6 +157,8 @@ export async function startBetaServer(options = {}) {
     publicModel: options.publicModel,
     minNoticeVersion: options.minNoticeVersion ?? 0,
     inputMargin: options.inputMargin ?? 1,
+    // As in production (UPSTREAM_MAX_ATTEMPTS, default 3): an external provider's worst case covers its retries.
+    upstreamAttempts: options.upstreamAttempts ?? (options.provider && options.provider !== 'workers-ai' ? 3 : 1),
     rates: options.rates ?? RATES,
     reasoningEffort: options.reasoningEffort ?? 'low',
     disableThinking: options.disableThinking ?? true,

@@ -12,25 +12,26 @@ name: AI routing smoke test (production)
 # If the routing smoke test fails, the Worker is redeployed at once with routing off
 # (MODEL_TEXT not a model id → every request on Qwen, exactly as before).
 #
-# Start it by pushing the branch `deploy/ai-routing-smoke`.
+# Start it ONLY by hand (Actions → Run workflow, from main), with a required reviewer's approval
+# (environment "production-ai"), under the production lock. It refuses to run while production is on
+# DeepInfra: its rollback deploys wrangler.jsonc, which would revert DeepInfra to Workers AI.
 # Secrets: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, INKLING_ADMIN_TOKEN.
 
 on:
   workflow_dispatch:
-  push:
-    branches: ['deploy/ai-routing-smoke']
 
 permissions:
   contents: read
 
 concurrency:
-  group: beta-server
+  group: beta-server-production
   cancel-in-progress: false
 
 jobs:
   smoke:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    environment: production-ai
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -47,6 +48,22 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             beta-server/package-lock.json
+
+      - name: Production must be on Workers AI (this workflow's rollback deploys wrangler.jsonc)
+        shell: bash
+        run: |
+          # This workflow deploys the Workers AI configuration. If production runs DeepInfra, deploying it
+          # would silently switch everyone back: refuse, and use "AI server - switch provider" instead.
+          # Unreadable = unknown = refuse (fail closed).
+          set +e
+          node beta-server/scripts/production-provider.mjs --expect workers-ai
+          code=$?
+          set -e
+          case $code in
+            0) echo "::notice title=Production provider::workers-ai: this deploy keeps it" ;;
+            1) echo "::error title=Production is on DeepInfra::refusing: this workflow would revert it to Workers AI. Use Actions → AI server - switch provider (production)."; exit 1 ;;
+            *) echo "::error title=Production provider unknown::could not read inkling-ai-beta's settings from Cloudflare; refusing to deploy."; exit 1 ;;
+          esac
 
       - name: Install
         env:

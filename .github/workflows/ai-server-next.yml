@@ -47,6 +47,8 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    # Holds the Cloudflare token once it is moved out of repository secrets (docs/AI-PROVIDERS.md).
+    environment: ai-test
     timeout-minutes: 40
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -126,7 +128,7 @@ jobs:
           [ "$code" = 200 ] || { echo "::error title=Admin token::admin API answers $code"; exit 1; }
           # The provider key is read on the first request; wait until the Worker is configured.
           for i in $(seq 1 30); do
-            s=$(curl -sS "$url/v1/status" -H "x-inkling-install: inst_$(openssl rand -hex 16)")
+            s=$(curl -sS "$url/v1/status" -H "x-inkling-install: inst_$(openssl rand -hex 16)" -H 'x-inkling-notice: 4')
             echo "$s" | grep -q '"qwen3.8-27b"' && break
             sleep 4
           done
@@ -177,11 +179,10 @@ jobs:
         if: (success() || failure()) && env.LIVE == 'true' && steps.deploy.outputs.url != ''
         shell: bash
         run: |
-          # Words that appear only in the scenarios' notebook text and questions.
-          for w in Priya 'Calvin cycle' 'Homework 4' 'lab partner' 'free-body'; do
-            if grep -qi "$w" test-results/deepinfra-summary.json; then echo "::error title=Privacy::usage report contains scenario text ($w)"; exit 1; fi
-          done
-          echo "::notice title=Privacy::usage report holds counts only (no scenario text found)"
+          # Structural: the whole usage report must be numbers and short identifiers (no free text),
+          # whatever the scenarios said. Then a canary run on both paths (beta-server/scripts/privacy-check.mjs).
+          node -e "import('./beta-server/scripts/privacy-check.mjs').then(m => { const p = m.checkUsageReport(JSON.parse(require('fs').readFileSync('test-results/deepinfra-summary.json','utf8'))); if (p.length) { console.log(p.join('\n')); process.exit(1) } console.log('summary after the scenarios: numbers and identifiers only') })"
+          node beta-server/scripts/privacy-check.mjs "${{ steps.deploy.outputs.url }}" "$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Same scenarios on Workers AI (baseline)
         # Only once DeepInfra answered: no free Neurons spent on a comparison that can't happen.

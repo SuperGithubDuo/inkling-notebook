@@ -25,6 +25,8 @@ concurrency:
 jobs:
   diagnose:
     runs-on: ubuntu-24.04
+    # Holds the Cloudflare token once it is moved out of repository secrets (docs/AI-PROVIDERS.md).
+    environment: ai-test
     timeout-minutes: 5
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
