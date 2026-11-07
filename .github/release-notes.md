@@ -37,8 +37,8 @@ Windows (PowerShell): `Get-FileHash .\Downloads\<file>` · macOS (Terminal): `sh
 ### Your notebooks and the AI
 
 - **Notebooks stay on your computer.** No account, no cloud storage; we can't see them. Updating or uninstalling keeps them.
-- **The AI tutor is free but limited:** about 10 answers a day per computer (resetting at 00:00 UTC), and about 110 in any 24 hours for everyone together.
-- **Nothing is sent until you click *Allow*** — not even a check of how many answers are left. Then each question sends Inkling's server on Cloudflare (model: Qwen on Workers AI) your question, the selection or page you include (image, title, typed and PDF text), and the recent conversation on that page. Inkling's server doesn't store it, and Cloudflare says it doesn't keep it or train on it. An anonymous installation ID and your internet address go with it for the daily limits, kept only as scrambled counts replaced every day. Don't send personal or sensitive information. AI answers can be wrong.
+- **The AI tutor is free but limited:** about 12 answers a day per computer (resetting at 00:00 UTC), a monthly limit per computer, and a shared budget for everyone, so on a busy day it can stop earlier. The tutor shows how much is left.
+- **Nothing is sent until you click *Allow*** — not even a check of how many answers are left. Then each question sends Inkling's server on Cloudflare your question, the selection or page you include (image, title, typed and PDF text), and the recent conversation on that page. It is answered by Qwen 3.8 27B, hosted by DeepInfra (United States), with Cloudflare Workers AI as a backup. Inkling's server doesn't store it. Both companies say they don't train on it or keep it after answering, apart from limited exceptions such as support cases and legal obligations. An anonymous installation ID and your internet address go with it for the limits, kept only as scrambled counts (daily ones replaced every day, each computer's monthly one at the end of the month). Updating from an earlier version, Inkling asks for permission again because the notice changed. Don't send personal or sensitive information. AI answers can be wrong.
 - **Under 18?** Inkling doesn't check ages, and clicking *Allow* isn't verified parental consent; one *Allow* covers everyone on that computer account. A parent or guardian should read the privacy notice (a draft pending legal review), install Inkling and decide whether to allow the AI (see the install guide).
 
 ### What's new
@@ -47,7 +47,7 @@ See [RELEASE_NOTES.md](https://github.com/SuperGithubDuo/inkling-notebook/blob/v
 
 ### Known limitations
 
-Not yet tested by people with real pens and touch screens — that's what we most want to hear about. Handwriting isn't searchable. No iPad, Android or web version.
+Not yet tested by people with real pens and touch screens — that's what we most want to hear about. AI answers can be wrong, including the answers to practice problems; check them. Prefer nothing to leave your computer? The local Ollama tutor is still available. Handwriting isn't searchable. No iPad, Android or web version.
 
 ### Feedback
 

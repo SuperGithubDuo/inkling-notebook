@@ -139,16 +139,16 @@ The Windows uninstaller is configured with `deleteAppDataOnUninstall: false`. Re
 
 | Choice | Does |
 |---|---|
-| `summary` | Read-only: Neurons used in the last 24 h of the 9,000 cap, today's use, answers, installations, networks, whether paused. Shown as the run's annotation and summary. |
-| `pause` | Stops all AI answers at once (the app says the AI is paused; notebooks work). |
+| `summary` | Read-only: spending in the last 24 h against the daily cap ($0.25, lower when the month needs pacing), the month against $5, answers, tokens, installations, networks, whether paused. Older apps' Workers AI use (Neurons) is reported separately. Shown as the run's annotation and summary. |
+| `pause` | Stops all AI answers at once, on DeepInfra and on the Workers AI bridge for older apps (the app says the AI is paused; notebooks work). |
 | `resume` | Turns AI answers back on. |
 
-Fallback: push a branch `ops/summary`, `ops/pause` or `ops/resume`, then delete it. With the token on your own computer, `cd beta-server && npm run admin -- summary` does the same. *Actions → Cloudflare AI diagnostics → Run workflow* shows the account's hourly Workers AI use and whether Cloudflare accepts requests right now; Cloudflare's dashboard (*Workers AI → Usage*) shows its own count.
+Fallback: push a branch `ops/summary`, `ops/pause` or `ops/resume`, then delete it. With the token on your own computer, `cd beta-server && npm run admin -- summary` does the same. *AI production verify* (`.github/workflows/ai-production-verify.yml`) checks the deployed server after a provider switch: Cloudflare's settings, both ledgers, and four short answers (about $0.002). *Actions → Cloudflare AI diagnostics → Run workflow* shows the account's hourly Workers AI use and whether Cloudflare accepts requests right now; Cloudflare's dashboard (*Workers AI → Usage*) shows its own count.
 
 ## Release checklist
 
 1. All workflow jobs green. The Windows and macOS jobs run on real systems (virtual machines), but without real pens or touch screens.
-2. Install the built `.exe` and `.dmg` on a real Windows PC and Mac, and go through `docs/DEVICE-TESTING.md`.
+2. Install the built `.exe` and `.dmg` on a real Windows PC and Mac, and go through `docs/DEVICE-TESTING.md`. The workflow also installs the build over the last published release (*Upgrade from the last published release*) on both systems.
 3. Update `RELEASE_NOTES.md`. Bump the version.
 4. *Run workflow → draft-release*; when it's green, check the draft's assets: one `.exe`, two `.dmg`, two `.zip`, `Inkling-<version>-SHA256SUMS.txt`, `latest.yml`, `latest-mac.yml`, `.blockmap` files, and that the notes contain no DO NOT PUBLISH.
 5. Publish as a pre-release. The download site follows within minutes. Announce to testers with `docs/INSTALL.md`.
@@ -157,7 +157,7 @@ Fallback: push a branch `ops/summary`, `ops/pause` or `ops/resume`, then delete 
 
 How an approved build reaches a first-time user in one click, and why an unapproved or failed build never can.
 
-**Status:** live since 3 Nov 2026 (GitHub Pages, deployed from `main`). It has offered `v0.2.0-beta.2` since that release was published on 3 Nov 2026, 05:17 UTC.
+**Status:** live since 3 Nov 2026 (GitHub Pages, deployed from `main`). It offers the newest approved release (`v0.2.0-beta.2`, published 3 Nov 2026, until the next one is published).
 
 - Address (GitHub Pages, free): `https://supergithubduo.github.io/inkling-notebook/`
 - Source: `site/` (one page, no frameworks, no third-party requests, fonts and images self-hosted)

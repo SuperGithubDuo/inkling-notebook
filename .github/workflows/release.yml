@@ -217,6 +217,27 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then rm -rf "$APPDATA/Inkling"; a=$(ls release/Inkling-Setup-*.exe | head -1); b=$(ls release-next/Inkling-Setup-*.exe | head -1)
           else rm -rf "$HOME/Library/Application Support/Inkling"; a=$(ls release/Inkling-*-arm64.dmg | head -1); b=$(ls release-next/Inkling-*-arm64.dmg | head -1); fi
           node scripts/ci-run.mjs "installer lifecycle" node tests/e2e/installer.e2e.mjs "$a" "$b"
+      - name: Upgrade from the last published release (notebooks and settings must survive)
+        shell: bash
+        env:
+          INKLING_EXPECT_BETA_URL: ${{ vars.INKLING_BETA_URL }}
+          INKLING_UPGRADE_FROM_RELEASE: '1'
+        run: |
+          # The newest published release that is not this version: what real users upgrade from.
+          me="v$(node -p "require('./package.json').version")"
+          prev=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=20" --jq "[.[] | select(.draft == false and .tag_name != \"$me\")][0].tag_name")
+          if [ -z "$prev" ] || [ "$prev" = null ]; then echo "::notice title=Upgrade test::no earlier published release; skipped"; exit 0; fi
+          mkdir -p release-prev
+          if [ "$RUNNER_OS" = Windows ]; then gh release download "$prev" -p 'Inkling-Setup-*-x64.exe' -D release-prev; else gh release download "$prev" -p 'Inkling-*-arm64.dmg' -D release-prev; fi
+          if [ "$RUNNER_OS" = Windows ]; then
+            # Remove the lifecycle test's install and its data: start as a fresh user of the old release.
+            for u in "$(cygpath -u "$LOCALAPPDATA")"/Programs/*/Uninstall*.exe; do if [ -f "$u" ]; then "$u" /S || true; fi; done; sleep 20
+            rm -rf "$APPDATA/Inkling"; a=$(ls release-prev/Inkling-Setup-*.exe | head -1); b=$(ls release/Inkling-Setup-*.exe | head -1)
+          else
+            rm -rf "$HOME/Applications/Inkling.app" "$HOME/Library/Application Support/Inkling"; a=$(ls release-prev/Inkling-*-arm64.dmg | head -1); b=$(ls release/Inkling-*-arm64.dmg | head -1)
+          fi
+          echo "::notice title=Upgrade test::$prev → $me"
+          node scripts/ci-run.mjs "upgrade from $prev" node tests/e2e/installer.e2e.mjs "$a" "$b"
       # The installer on its own, so testers download just the .exe (or .dmg).
       - name: Upload the installer
         id: installer
