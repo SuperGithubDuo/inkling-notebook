@@ -5,10 +5,16 @@ name: AI server - switch provider (production)
 #               $5/month and $0.25/day hard caps; older apps keep Workers AI (free) on the bridge.
 #   workers-ai  wrangler.jsonc: everything on Workers AI Free, exactly as before (the rollback).
 #
-# Start it ONLY with the operator's approval, by pushing any commit to one of these branches:
-#   ops/switch-ai-deepinfra     → DeepInfra
-#   ops/switch-ai-workers-ai    → back to Workers AI (rollback)
-# (or Actions → this workflow → Run workflow, once the file is on the default branch).
+# It never runs on a push. Three manual gates, all required:
+#   1. Someone with write access starts it: Actions → this workflow → Run workflow (the file must be
+#      on the default branch, so the migration has to be merged first).
+#   2. They type the exact confirmation phrase for the direction chosen:
+#        deepinfra    →  switch production to deepinfra
+#        workers-ai   →  switch production to workers-ai
+#      Anything else stops the run before it touches Cloudflare.
+#   3. The job runs in the GitHub environment "production-ai". Add yourself as a required reviewer
+#      (Settings → Environments → production-ai → Required reviewers), and GitHub then waits for
+#      your click on "Approve and deploy" before any step runs. Until that is set, gates 1 and 2 apply.
 #
 # After deploying it checks, without any model request: the provider, the dollar limits, that an app
 # on notice 4 gets the DeepInfra allowance and an older app the Workers AI one. Then ONE short real
@@ -26,8 +32,10 @@ on:
         type: choice
         options: [deepinfra, workers-ai]
         required: true
-  push:
-    branches: ['ops/switch-ai-deepinfra', 'ops/switch-ai-workers-ai']
+      confirm:
+        description: 'Type exactly: switch production to <provider> (e.g. switch production to deepinfra)'
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -40,13 +48,24 @@ jobs:
   switch:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # Required reviewers on this environment make GitHub wait for an explicit approval.
+    environment: production-ai
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
       DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
-      TARGET: ${{ inputs.provider || (github.ref_name == 'ops/switch-ai-deepinfra' && 'deepinfra') || 'workers-ai' }}
+      TARGET: ${{ inputs.provider }}
+      CONFIRM: ${{ inputs.confirm }}
     steps:
+      - name: Manual confirmation
+        shell: bash
+        run: |
+          [ "${{ github.event_name }}" = workflow_dispatch ] || { echo "::error title=Not allowed::only a manual run can switch production"; exit 1; }
+          case "$TARGET" in deepinfra|workers-ai) ;; *) echo "::error title=Provider::unknown provider '$TARGET'"; exit 1 ;; esac
+          [ "$CONFIRM" = "switch production to $TARGET" ] || { echo "::error title=Not confirmed::type exactly: switch production to $TARGET"; exit 1; }
+          echo "::notice title=Confirmed::$GITHUB_ACTOR confirmed: switch production to $TARGET"
+
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:

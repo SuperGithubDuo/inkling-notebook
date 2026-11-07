@@ -160,7 +160,7 @@ Steps:
 
 1. **Live test passes** on the separate test Worker: push this branch to `deploy/ai-server-next` (secret `DEEPINFRA_DEV_API_KEY`, account with credit). Its comparison report must be acceptable.
 2. **Production key**: repository secret `DEEPINFRA_API_KEY` (a separate key on a prepaid account, auto top-up off, at most one month's budget loaded).
-3. **Switch**: push any commit to `ops/switch-ai-deepinfra` (workflow *AI server - switch provider (production)*). It checks the key has credit, sets the `INFERENCE_API_KEY` secret, deploys `wrangler.deepinfra.jsonc`, then verifies the dollar limits, both paths' allowances and one short real answer on each path. Any failure rolls back to `wrangler.jsonc` automatically.
+3. **Switch, manually only**: after merging, *Actions → AI server - switch provider (production) → Run workflow*, choose `deepinfra` and type `switch production to deepinfra`. If `production-ai` has a required reviewer (Settings → Environments), GitHub also waits for "Approve and deploy". No push can start it. It checks the key has credit, sets the `INFERENCE_API_KEY` secret, deploys `wrangler.deepinfra.jsonc`, then verifies the dollar limits, both paths' allowances and one short real answer on each path. Any failure rolls back to `wrangler.jsonc` automatically.
 4. **Release the app** with notice 4 (merge, then the usual release). Users agree to the new notice once; their AI then runs on DeepInfra.
 5. **Watch** `/admin/summary` (`monthUsed`, `paced`, `overshoot`, tokens and `providerReported` per model) and `/admin/legacy/summary`, plus DeepInfra's usage page.
 
@@ -170,7 +170,7 @@ Note: the *Beta AI server* workflow (push to `deploy/beta-server`) deploys `wran
 
 ## Rollback
 
-- **One step:** push any commit to `ops/switch-ai-workers-ai`, or `cd beta-server && npx wrangler deploy` (deploys `wrangler.jsonc`). Everyone is on Workers AI Free again at once; both app versions work. The ledger restarts its day in Neurons and keeps the month's dollar total.
+- **One step:** the same workflow with `workers-ai` and `switch production to workers-ai`, or by hand `cd beta-server && npx wrangler deploy` (deploys `wrangler.jsonc`). Everyone is on Workers AI Free again at once; both app versions work. The ledger restarts its day in Neurons and keeps the month's dollar total.
 - **Emergency:** `npm run admin -- pause` stops all answers; `npx wrangler secret delete INFERENCE_API_KEY -c wrangler.deepinfra.jsonc` makes the DeepInfra path refuse to serve (fails closed, no charges).
 
 ## Sources
