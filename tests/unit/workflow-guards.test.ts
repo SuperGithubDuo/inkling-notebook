@@ -30,14 +30,14 @@ describe('production-ai environment configuration', () => {
   const me = { type: 'User', reviewer: { login: 'operator' } }
   const good = { protection_rules: [{ type: 'required_reviewers', prevent_self_review: false, reviewers: [me] }], deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }
   it('configured: a required reviewer and main-only deployments', () => {
-    expect(environmentProblems(good, { branch_policies: [{ name: 'main' }] })).toEqual([])
+    expect(environmentProblems(good, { total_count: 1, branch_policies: [{ name: 'main', type: 'branch' }] })).toEqual([])
   })
   it('each missing piece is named', () => {
     expect(environmentProblems(null, null)[0]).toMatch(/does not exist/)
-    expect(environmentProblems({ ...good, protection_rules: [] }, { branch_policies: [{ name: 'main' }] })[0]).toMatch(/no required reviewer/)
+    expect(environmentProblems({ ...good, protection_rules: [] }, { total_count: 1, branch_policies: [{ name: 'main', type: 'branch' }] })[0]).toMatch(/no required reviewer/)
     expect(environmentProblems({ ...good, deployment_branch_policy: null }, null)[0]).toMatch(/any branch can deploy/)
-    expect(environmentProblems(good, { branch_policies: [{ name: 'main' }, { name: 'ops/*' }] })[0]).toMatch(/other than "main"/)
-    expect(environmentProblems({ ...good, protection_rules: [{ ...good.protection_rules[0], prevent_self_review: true }] }, { branch_policies: [{ name: 'main' }] })[0]).toMatch(/self-review/)
+    expect(environmentProblems(good, { total_count: 2, branch_policies: [{ name: 'main', type: 'branch' }, { name: 'ops/*', type: 'branch' }] })[0]).toMatch(/other than "main"/)
+    expect(environmentProblems({ ...good, protection_rules: [{ ...good.protection_rules[0], prevent_self_review: true }] }, { total_count: 1, branch_policies: [{ name: 'main', type: 'branch' }] })[0]).toMatch(/self-review/)
   })
 })
 

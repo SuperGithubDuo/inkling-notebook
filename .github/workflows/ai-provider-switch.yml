@@ -44,7 +44,7 @@ on:
 permissions:
   contents: read
   # environment-check.mjs reads the production-ai environment's protection rules.
-  deployments: read
+  actions: read
 
 concurrency:
   group: beta-server-production
@@ -63,6 +63,7 @@ jobs:
         shell: bash
         run: |
           [ "${{ github.event_name }}" = workflow_dispatch ] || { echo "::error title=Not allowed::only a manual run can switch production"; exit 1; }
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error title=Branch::production switches require main"; exit 1; }
           case "$TARGET" in deepinfra|workers-ai) ;; *) echo "::error title=Provider::unknown provider '$TARGET'"; exit 1 ;; esac
           [ "$CONFIRM" = "switch production to $TARGET" ] || { echo "::error title=Not confirmed::type exactly: switch production to $TARGET"; exit 1; }
           echo "::notice title=Confirmed::$GITHUB_ACTOR confirmed: switch production to $TARGET"

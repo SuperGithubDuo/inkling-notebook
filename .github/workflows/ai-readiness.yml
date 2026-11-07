@@ -1,0 +1,31 @@
+name: AI readiness (no deployment or inference)
+
+# Deliberately no Cloudflare, admin or provider secrets; verifies the real GITHUB_TOKEN permissions.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['prep/deepinfra-production-readiness']
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  approval-configuration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Validate actual GitHub environment and default branch access
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node beta-server/scripts/environment-check.mjs production-ai
+      - name: Production health (no model request)
+        shell: bash
+        run: |
+          curl --fail --silent --show-error https://inkling-ai-beta.shenjonas9.workers.dev/
+          curl --fail --silent --show-error https://inkling-ai-beta.shenjonas9.workers.dev/v1/status -H 'x-inkling-install: inst_operatorstatuscheck000000' -H 'x-inkling-notice: 4' | tee /tmp/status.json
+          node --input-type=module -e 'import {readFileSync} from "node:fs"; const s=JSON.parse(readFileSync("/tmp/status.json")); if(s.quota?.installLimit!==900 || s.paused!==false) throw Error("production is not serving its existing Workers AI allowance")'

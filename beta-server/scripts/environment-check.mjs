@@ -14,6 +14,8 @@
  * printed); 2 = could not read. With --report it always exits 0 and only prints (for a status run).
  */
 
+import { pathToFileURL } from 'node:url'
+
 /** Problems with an environment, from the GitHub API's environment and branch-policy responses (exported for tests). */
 export function environmentProblems(env, policies, defaultBranch = 'main') {
   const problems = []
@@ -24,43 +26,58 @@ export function environmentProblems(env, policies, defaultBranch = 'main') {
   if (rule?.prevent_self_review && reviewers.length === 1) problems.push('"Prevent self-review" is on with a single reviewer: nobody could approve their own run (turn it off, or add a second reviewer)')
   const policy = env.deployment_branch_policy
   if (!policy) problems.push(`any branch can deploy (Deployment branches and tags → Selected branches → add "${defaultBranch}")`)
-  else if (policy.custom_branch_policies) {
-    const names = (policies?.branch_policies ?? []).map((p) => p.name)
-    if (!names.includes(defaultBranch)) problems.push(`the selected deployment branches (${names.join(', ') || 'none'}) don't include "${defaultBranch}"`)
-    const extra = names.filter((n) => n !== defaultBranch)
-    if (extra.length) problems.push(`branches other than "${defaultBranch}" may deploy: ${extra.join(', ')}`)
+  else if (policy.custom_branch_policies !== true || policy.protected_branches !== false) {
+    problems.push('use Selected branches (custom branch policies), not all protected branches: only main may deploy')
+  } else {
+    const branches = policies?.branch_policies
+    if (!Array.isArray(branches) || !Number.isInteger(policies?.total_count) || policies.total_count !== branches.length) {
+      problems.push('deployment branch policies are unreadable or incomplete')
+    } else {
+      if (!branches.some((p) => p.name === 'main' && p.type === 'branch')) problems.push('the selected deployment branches do not include the main branch')
+      const extra = branches.filter((p) => p.name !== 'main' || p.type !== 'branch')
+      if (extra.length) problems.push(`branches or tags other than "main" may deploy: ${extra.map((p) => `${p.type ?? 'unknown'}:${p.name}`).join(', ')}`)
+    }
   }
-  // protected_branches: true is acceptable when main is the only protected branch; reported for the operator.
+  if (defaultBranch !== 'main') problems.push('the repository default branch must be main')
   return problems
 }
 
-async function main() {
-  const args = process.argv.slice(2).filter((a) => !a.startsWith('--'))
-  const report = process.argv.includes('--report')
-  const name = args[0] ?? 'production-ai'
-  const { GITHUB_TOKEN: token, GITHUB_REPOSITORY: repo } = process.env
-  const api = async (path) => {
-    const r = await fetch(`https://api.github.com/repos/${repo}${path}`, { headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' } })
-    return { status: r.status, body: await r.json().catch(() => null) }
+// Both environment endpoints require Actions: read; repository metadata needs implicit Metadata: read.
+export async function checkEnvironment({ token, repo, name = 'production-ai', fetch: request = globalThis.fetch }) {
+  if (!token || !repo) throw new Error('GITHUB_TOKEN and GITHUB_REPOSITORY are required')
+  const api = async (path, missingAllowed = false) => {
+    const response = await request(`https://api.github.com/repos/${repo}${path}`, {
+      headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
+      signal: AbortSignal.timeout(30_000)
+    })
+    if (missingAllowed && response.status === 404) return null
+    if (response.status !== 200) throw new Error(`could not read ${path || 'repository'}: HTTP ${response.status}`)
+    const body = await response.json()
+    if (!body || typeof body !== 'object') throw new Error(`invalid API response for ${path || 'repository'}`)
+    return body
   }
-  if (!token || !repo) {
-    console.error('GITHUB_TOKEN and GITHUB_REPOSITORY are required')
-    process.exit(report ? 0 : 2)
-  }
-  const env = await api(`/environments/${encodeURIComponent(name)}`)
-  if (env.status !== 200 && env.status !== 404) {
-    console.error(`could not read environment ${name}: HTTP ${env.status} ${JSON.stringify(env.body).slice(0, 200)}`)
-    process.exit(report ? 0 : 2)
-  }
+  const env = await api(`/environments/${encodeURIComponent(name)}`, true)
   const meta = await api('')
-  const defaultBranch = meta.body?.default_branch ?? 'main'
-  const policies = env.status === 200 && env.body?.deployment_branch_policy?.custom_branch_policies ? (await api(`/environments/${encodeURIComponent(name)}/deployment-branch-policies`)).body : null
-  const problems = environmentProblems(env.status === 200 ? env.body : null, policies, defaultBranch)
-  const reviewers = env.status === 200 ? (env.body.protection_rules ?? []).filter((r) => r.type === 'required_reviewers').flatMap((r) => r.reviewers ?? []).map((r) => r.reviewer?.login ?? r.reviewer?.name ?? r.type) : []
-  console.log(`environment ${name}: ${env.status === 200 ? 'exists' : 'missing'}; reviewers: ${reviewers.join(', ') || 'none'}; branch policy: ${JSON.stringify(env.body?.deployment_branch_policy ?? null)}${policies ? ` (${(policies.branch_policies ?? []).map((p) => p.name).join(', ')})` : ''}`)
-  for (const p of problems) console.log(`  problem: ${p}`)
-  if (!problems.length) console.log('  configured: required reviewer and default-branch-only deployments')
-  process.exit(report || !problems.length ? 0 : 1)
+  if (typeof meta.default_branch !== 'string' || !meta.default_branch) throw new Error('could not read repository default branch')
+  const policies = env?.deployment_branch_policy?.custom_branch_policies
+    ? await api(`/environments/${encodeURIComponent(name)}/deployment-branch-policies?per_page=100`) : null
+  return { env, policies, defaultBranch: meta.default_branch, problems: environmentProblems(env, policies, meta.default_branch) }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main()
+async function main() {
+  const name = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? 'production-ai'
+  const report = process.argv.includes('--report')
+  try {
+    const { env, policies, problems } = await checkEnvironment({ token: process.env.GITHUB_TOKEN, repo: process.env.GITHUB_REPOSITORY, name })
+    const reviewers = (env?.protection_rules ?? []).filter((r) => r.type === 'required_reviewers').flatMap((r) => r.reviewers ?? []).map((r) => r.reviewer?.login ?? r.reviewer?.name ?? r.type)
+    console.log(`environment ${name}: ${env ? 'exists' : 'missing'}; reviewers: ${reviewers.join(', ') || 'none'}; branch policy: ${JSON.stringify(env?.deployment_branch_policy ?? null)}${policies ? ` (${(policies.branch_policies ?? []).map((p) => `${p.type}:${p.name}`).join(', ')})` : ''}`)
+    for (const problem of problems) console.log(`  problem: ${problem}`)
+    if (!problems.length) console.log('  configured: required reviewer and main-branch-only deployments')
+    process.exitCode = report || !problems.length ? 0 : 1
+  } catch (error) {
+    console.error(error.message)
+    process.exitCode = report ? 0 : 2
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main()

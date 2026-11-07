@@ -5,8 +5,8 @@ name: AI server emergency switch
 # in beta-server/.
 #
 # Start one with Actions → AI server emergency switch → Run workflow, choosing:
-#   summary  → usage (no identities): Neurons used in the last 24 h of the cap, today's use,
-#                  answers, installations, networks, paused or not. Read-only.
+#   summary  → usage (no identities): dollars or Neurons used in the last 24 h,
+#                  today's use, monthly budget/remaining, answers and pause state. Read-only.
 #   pause    → stop ALL AI answers now. The app says the AI is paused for
 #                  maintenance; notebooks work as usual.
 #   resume   → turn AI answers back on.
@@ -35,6 +35,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Pause, resume or summarize
         shell: bash
         env:
@@ -52,13 +55,20 @@ jobs:
             if [ "$ACTION" = pause ]; then paused=true; else paused=false; fi
             code=$(curl -sS -o /tmp/res.json -w '%{http_code}' -X POST "$URL/admin/pause" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d "{\"paused\":$paused}")
             [ "$code" = 200 ] || { echo "::error title=AI server switch::The server answered $code."; exit 1; }
-            now=$(curl -sS "$URL/v1/status" -H 'x-inkling-install: inst_operatorstatuscheck000000' | jq -r .paused)
-            [ "$now" = "$paused" ] || { echo "::error title=AI server switch::Asked for paused=$paused but the server reports $now."; exit 1; }
+            # Check the current notice-4 app and old apps without the notice header.
+            for notice in 4 legacy; do
+              headers=(-H 'x-inkling-install: inst_operatorstatuscheck000000')
+              [ "$notice" = legacy ] || headers+=(-H "x-inkling-notice: $notice")
+              code=$(curl -sS -o /tmp/status.json -w '%{http_code}' "$URL/v1/status" "${headers[@]}")
+              [ "$code" = 200 ] || { echo "::error title=AI server switch::Status ($notice) answered $code."; exit 1; }
+              now=$(jq -r .paused /tmp/status.json)
+              [ "$now" = "$paused" ] || { echo "::error title=AI server switch::Asked for paused=$paused but the server reports $now ($notice)."; exit 1; }
+            done
             echo "::notice title=AI server switch::AI answers are now $([ "$paused" = true ] && echo PAUSED || echo ON) at $URL"
           fi
           # Today's totals (UTC day), after any switch. Counts only: no identities or content.
           code=$(curl -sS -o /tmp/sum.json -w '%{http_code}' "$URL/admin/summary" -H "Authorization: Bearer $ADMIN")
           [ "$code" = 200 ] || { echo "::error title=AI usage::The server answered $code."; exit 1; }
-          line=$(jq -r '"\(.day) UTC: \(.globalUsed) of \(.globalLimit) Neurons used in the last 24 h (\((100*.globalUsed/.globalLimit)|floor)%), \(.todayUsed // "?") today, \(.answers) answers today, \(.installations) installations, \(.networks) networks, \(.answering) answering now, paused=\(.paused), Cloudflare free allowance used up=\(.upstreamExhausted)"' /tmp/sum.json)
+          line=$(node beta-server/scripts/usage-summary.mjs < /tmp/sum.json)
           echo "::notice title=AI usage today::$line"
           { echo "### Inkling AI usage"; echo; echo "$line"; echo; echo '```json'; jq . /tmp/sum.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
