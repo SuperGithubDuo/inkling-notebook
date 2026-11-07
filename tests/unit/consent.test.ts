@@ -272,7 +272,7 @@ describe('the notice itself', () => {
     const text = JSON.stringify([CLOUD_SENT, CLOUD_WHEN_SENT, CLOUD_DATA_NOTE, CLOUD_PERMISSION_SCOPE])
     const hash = createHash('sha256').update(text).digest('hex').slice(0, 16)
     // If this fails, the notice changed: raise CLOUD_CONSENT_VERSION in src/shared/ai.ts, then record the new hash here.
-    expect({ version: CLOUD_CONSENT_VERSION, hash }).toEqual({ version: 3, hash: NOTICE_HASH_V3 })
+    expect({ version: CLOUD_CONSENT_VERSION, hash }).toEqual({ version: 4, hash: NOTICE_HASH_V4 })
   })
 })
 
@@ -292,5 +292,6 @@ describe('tutor history and the provider', () => {
   })
 })
 
-/** sha256 (first 16 hex) of the cloud notice at CLOUD_CONSENT_VERSION 3. */
-const NOTICE_HASH_V3 = 'd570a5ef00716354'
+/** sha256 (first 16 hex) of the cloud notice at CLOUD_CONSENT_VERSION 4 (DeepInfra, Workers AI as backup, monthly count). */
+// v4 is unreleased (main and every published app are on v3), so its wording could still be corrected without a v5.
+const NOTICE_HASH_V4 = '79703d6f2f73086b'

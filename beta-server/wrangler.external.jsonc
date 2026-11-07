@@ -1,0 +1,82 @@
+{
+  // Inkling's AI server answering through an EXTERNAL inference provider (DeepInfra).
+  // A separate Worker ("inkling-ai-next") for testing with development credentials;
+  // production (wrangler.jsonc, "inkling-ai-beta" on Workers AI) is not touched by it.
+  //
+  //   npx wrangler deploy -c wrangler.external.jsonc
+  //   npx wrangler secret put INFERENCE_API_KEY -c wrangler.external.jsonc   # a DeepInfra key
+  //   npx wrangler secret put ADMIN_TOKEN -c wrangler.external.jsonc         # ≥ 32 random characters
+  //
+  // To switch production later, see docs/AI-PROVIDERS.md → "Production switch".
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "inkling-ai-next",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "alias": { "@shared": "../src/shared" },
+  // Kept so a rollback is a one-line change (INFERENCE_PROVIDER → "workers-ai"); unused otherwise.
+  "ai": { "binding": "AI" },
+  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "LedgerObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LedgerObject"] }],
+  // Error kinds only; never request content (the Worker never logs it), no per-request invocation logs.
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
+  "vars": {
+    "INFERENCE_PROVIDER": "deepinfra",
+    "UPSTREAM_MODEL": "Qwen/Qwen3.8-27B",
+    // DeepInfra's LIST price (re-checked 6 Nov 2026: $0.20 / $2.50 / $0.05 cached per million tokens). The
+    // 25% promotion ($0.15 / $1.875) is not used, so accounting errs high and survives its end.
+    "PRICE_INPUT_USD_PER_M": "0.20",
+    "PRICE_OUTPUT_USD_PER_M": "2.50",
+    "PRICE_CACHED_INPUT_USD_PER_M": "0.05",
+    // Budget (6 Nov 2026 review): a $5 hard monthly cap, at most $0.25 in any 24 hours. Monthly
+    // pacing keeps each day's cap at or below (budget left this month / days left) x 1.5, so a busy
+    // start can't spend the last days' share: with nothing spent yet that is $0.24-0.25 a day.
+    "GLOBAL_DAILY_USD": "0.25",
+    "GLOBAL_MONTHLY_USD": "5",
+    "MONTHLY_PACING": "1.5",
+    // One installation's ceiling: $0.01/day at list price = ~17 measured answers, ~13 app-size,
+    // ~7 long-conversation; $0.15/month. This is a ceiling, not a promise: the app shows the
+    // smaller of this and what is left of today's shared budget.
+    "INSTALL_DAILY_USD": "0.01",
+    "INSTALL_MONTHLY_USD": "0.15",
+    // One connection (a school, an office, a reinstall loop): 5 installations' worth, a fifth of the day.
+    "NETWORK_DAILY_USD": "0.05",
+    "TYPICAL_USD_PER_ANSWER": "0.0008",
+    // No reduced allowances near the cap (SOFT_LIMIT_* unset): pacing spreads the budget instead.
+    "INSTALL_PER_MINUTE": "6",
+    "NETWORK_PER_MINUTE": "20",
+    "INSTALL_CONCURRENT": "1",
+    "NETWORK_CONCURRENT": "4",
+    "GLOBAL_CONCURRENT": "8",
+    "UPSTREAM_MAX_ATTEMPTS": "3",
+    "UPSTREAM_TIMEOUT_MS": "45000",
+    "UPSTREAM_IDLE_TIMEOUT_MS": "45000",
+    // Only apps whose data notice names DeepInfra (CLOUD_CONSENT_VERSION 4).
+    "MIN_NOTICE_VERSION": "4",
+    // Apps on older notices are answered by Workers AI (free) instead of being told to update.
+    "LEGACY_WORKERS_AI": "true",
+    // The input estimate is reserved ×1.5 (DeepInfra may count image tokens differently); real cost is still what is charged.
+    "INPUT_ESTIMATE_MARGIN": "1.5",
+    "MAX_INPUT_TOKENS": "12000",
+    "REASONING_EFFORT": "low",
+    "DISABLE_THINKING": "true",
+    "STRUCTURED": "prompt",
+    "IMAGE_PATCH": "28",
+    // Rollback settings (used only if INFERENCE_PROVIDER is set back to "workers-ai").
+    "MODEL": "@cf/qwen/qwen3.8-27b",
+    // The bridge for older apps keeps production's routing (as wrangler.jsonc / wrangler.deepinfra.jsonc):
+    // practice sets on Gemma 4 26B, everything else on Qwen. Ignored on the DeepInfra path.
+    "MODEL_TEXT": "@cf/google/gemma-4-26b-a4b-it",
+    "TEXT_INPUT_NEURONS_PER_M": "9091",
+    "TEXT_OUTPUT_NEURONS_PER_M": "27273",
+    "TEXT_MODEL_TASKS": "practice",
+    "ACCOUNT_PLAN": "free",
+    "GLOBAL_DAILY_NEURONS": "9000",
+    "INSTALL_DAILY_NEURONS": "900",
+    "NETWORK_DAILY_NEURONS": "2700",
+    "TYPICAL_NEURONS_PER_ANSWER": "90",
+    "INPUT_NEURONS_PER_M": "40909",
+    "OUTPUT_NEURONS_PER_M": "290909"
+  }
+}

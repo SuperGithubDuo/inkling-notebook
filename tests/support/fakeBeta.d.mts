@@ -24,7 +24,7 @@ export interface FakeWorkersAi {
   run(model: string, inputs: Record<string, unknown>): Promise<unknown>
 }
 export interface AiBindingLike {
-  run(model: string, inputs: Record<string, unknown>): Promise<unknown>
+  run(model: string, inputs: Record<string, unknown>, hooks?: unknown): Promise<unknown>
 }
 export interface BetaServerOptions {
   ai?: AiBindingLike
@@ -39,7 +39,15 @@ export interface BetaServerOptions {
   maxInputTokens?: number
   typicalNeuronsPerAnswer?: number
   model?: string
-  rates?: { inputPerM: number; outputPerM: number }
+  rates?: { inputPerM: number; outputPerM: number; cachedInputPerM?: number; unit?: 'neurons' | 'usd'; costMultiplier?: number }
+  /** Builds the model from the bundled server modules (e.g. an external provider). */
+  makeAi?: (mod: any) => AiBindingLike | Promise<AiBindingLike>
+  provider?: 'workers-ai' | 'deepinfra' | 'openrouter' | 'openai-compatible'
+  publicModel?: string
+  minNoticeVersion?: number
+  inputMargin?: number
+  /** Extra ledger limits (unit, globalMonthly, installMonthly, softFraction, softFactor, duplicateWindowMs). */
+  limits?: Record<string, unknown>
   reasoningEffort?: string
   disableThinking?: boolean
   structured?: 'json_schema' | 'prompt'

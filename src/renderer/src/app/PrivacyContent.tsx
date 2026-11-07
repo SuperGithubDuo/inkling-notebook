@@ -1,4 +1,4 @@
-import { CLOUD_PERMISSION_SCOPE, CLOUD_SENT } from '@shared/ai'
+import { CLOUD_DATA_NOTE, CLOUD_PERMISSION_SCOPE, CLOUD_SENT } from '@shared/ai'
 import { SentList } from '@/ai/ConsentDialog'
 
 /** What Inkling does with your notebooks, in plain words. Used in the Privacy dialog and in Settings. */
@@ -12,7 +12,7 @@ export function PrivacyContent() {
         With Ollama, everything stays on this computer. With Inkling AI (cloud, the default), nothing is sent — not even a check of today’s free answers — until you click Allow. After that, each question sends Inkling’s AI server:
         <SentList items={CLOUD_SENT} testId="privacy-cloud-sent" />
         <p className="mt-1.5">
-          It is answered by Cloudflare Workers AI. Cloudflare says it does not train on this content and does not keep it after answering; Inkling’s server never stores or logs it. Usage is counted per installation and per internet connection in scrambled form, deleted every day. {CLOUD_PERMISSION_SCOPE}
+          {CLOUD_DATA_NOTE} {CLOUD_PERMISSION_SCOPE}
         </p>
         <p className="mt-1.5">
           Google Gemini, with your own key, is only in development versions of Inkling, not in the published installers; it is for adults only.

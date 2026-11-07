@@ -32,7 +32,7 @@ src/
     ai/         Tutor chat, practice, markup (annotation planning + preview), context building, Markdown/KaTeX rendering
     store/      Zustand store: library, pages, history, selection, tools
     services/   Debounced save queue
-beta-server/    Cloudflare Worker for the free cloud AI: anonymous daily allowance ledger (Durable Object), Workers AI streaming
+beta-server/    Cloudflare Worker for the free cloud AI: anonymous daily/monthly allowance and dollar-budget ledger (Durable Object), streaming from DeepInfra (OpenAI-compatible) or Workers AI
 tests/
   unit/         vitest
   e2e/          Playwright-driven Electron acceptance tests

@@ -51,3 +51,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# Temporary configs written by beta-server/scripts/bridge-check.mjs
+beta-server/.bridge-check-*.jsonc

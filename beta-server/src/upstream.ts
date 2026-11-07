@@ -6,20 +6,58 @@
  * or the older `{ response }`).
  */
 import type { AiTurn } from '../../src/shared/ai'
+import { UpstreamError, type UpstreamKind } from './provider'
 
+/**
+ * Prices in the ledger's cost unit per million tokens: Neurons on Workers AI,
+ * micro-dollars (µ$, 1e-6 USD) on an external provider.
+ */
 export interface Rates {
-  /** Neurons per million input tokens (Cloudflare's price list). */
+  /** Cost units per million input tokens. */
   inputPerM: number
-  /** Neurons per million output tokens, reasoning included. */
+  /** Cost units per million output tokens, reasoning included. */
   outputPerM: number
+  /** Cost units per million input tokens read from the provider's prompt cache (defaults to inputPerM). */
+  cachedInputPerM?: number
+  /** 'usd': units are micro-dollars and a provider-reported dollar cost is used when present. */
+  unit?: 'neurons' | 'usd'
+  /** Multiplier for fees the token price doesn't include (e.g. OpenRouter's 5.5% on credits). */
+  costMultiplier?: number
 }
 
 export interface Usage {
   inputTokens: number
   outputTokens: number
+  /** Input tokens the provider served from its prompt cache (billed at the cached rate). */
+  cachedInputTokens?: number
+  /** What the provider says it charged, in USD (OpenRouter's usage.cost), when reported. */
+  reportedCostUsd?: number
 }
 
 export const neuronsFor = (u: Usage, r: Rates): number => (u.inputTokens * r.inputPerM + u.outputTokens * r.outputPerM) / 1e6
+
+/**
+ * The cost of an answer in the ledger's unit. The provider's own token counts
+ * are used (its tokenizer, its image accounting, its cached-token count), priced
+ * at the configured list price. When the provider also reports a dollar cost
+ * (OpenRouter's usage.cost, DeepInfra's usage.estimated_cost), the HIGHER of the
+ * two is charged: a promotional price never makes the caps count less than list
+ * price, and a price rise above the configured one is still counted in full.
+ */
+export function costFor(u: Usage, r: Rates): number {
+  const mult = r.costMultiplier ?? 1
+  const cached = Math.min(u.inputTokens, Math.max(0, u.cachedInputTokens ?? 0))
+  const cachedRate = r.cachedInputPerM ?? r.inputPerM
+  const listed = (((u.inputTokens - cached) * r.inputPerM + cached * cachedRate + u.outputTokens * r.outputPerM) / 1e6) * mult
+  const reported = reportedCost(u, r)
+  return reported === undefined ? listed : Math.max(listed, reported)
+}
+
+/** The provider's own reported charge in the ledger's unit (µ$, fees included), when it gave one. */
+export function reportedCost(u: Usage, r: Rates): number | undefined {
+  if (r.unit !== 'usd' || typeof u.reportedCostUsd !== 'number' || !Number.isFinite(u.reportedCostUsd) || u.reportedCostUsd < 0) return undefined
+  return u.reportedCostUsd * 1e6 * (r.costMultiplier ?? 1)
+}
 
 type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
 export interface ChatMessage {
@@ -104,6 +142,24 @@ export function estimateInputTokens(system: string, turns: AiTurn[], patch?: num
   return tokens + Math.ceil(chars / 3)
 }
 
+/**
+ * A hard upper bound on a request's input tokens, for the worst-case reservation: Qwen's tokenizer
+ * is byte-level BPE, so no text is ever more tokens than its UTF-8 bytes (digits, which it splits
+ * one per token, and non-Latin scripts are where the 3-characters-a-token estimate falls short).
+ * Images and chat formatting are counted as in estimateInputTokens (images: measured at 0.72-0.74 of
+ * that estimate on DeepInfra, 7 Nov 2026).
+ */
+export function inputUpperBound(system: string, turns: AiTurn[], patch?: number): number {
+  const enc = new TextEncoder()
+  // Chat-template tokens: role markers per message and the thinking-off block, with room to spare.
+  let tokens = 32 + enc.encode(system).length
+  for (const t of turns) {
+    tokens += 16
+    for (const p of t.parts) tokens += 'text' in p ? enc.encode(p.text).length : imageTokens(p.image.data, patch)
+  }
+  return tokens
+}
+
 // ------------------------------------------------------------- reading
 
 export interface ParsedEvent {
@@ -112,6 +168,8 @@ export interface ParsedEvent {
   reasoning?: string
   usage?: Usage
   finishReason?: string
+  /** The provider reported an error inside a 200 response or mid-stream (OpenRouter does this). */
+  error?: true
 }
 
 interface UpstreamUsage {
@@ -119,20 +177,31 @@ interface UpstreamUsage {
   completion_tokens?: number
   input_tokens?: number
   output_tokens?: number
+  prompt_tokens_details?: { cached_tokens?: number }
+  /** OpenRouter: what it charged, in USD. */
+  cost?: number
+  /** DeepInfra: its own cost estimate, in USD, when it reports one. */
+  estimated_cost?: number
 }
 
 function readUsage(u: UpstreamUsage | undefined): Usage | undefined {
-  if (!u) return undefined
+  if (!u || typeof u !== 'object') return undefined
   const input = u.prompt_tokens ?? u.input_tokens
   const output = u.completion_tokens ?? u.output_tokens
-  if (typeof input !== 'number' || typeof output !== 'number') return undefined
-  return { inputTokens: input, outputTokens: output }
+  if (typeof input !== 'number' || typeof output !== 'number' || !Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) return undefined
+  const usage: Usage = { inputTokens: input, outputTokens: output }
+  const cached = u.prompt_tokens_details?.cached_tokens
+  if (typeof cached === 'number' && cached > 0) usage.cachedInputTokens = cached
+  const cost = typeof u.cost === 'number' ? u.cost : typeof u.estimated_cost === 'number' ? u.estimated_cost : undefined
+  if (cost !== undefined && Number.isFinite(cost) && cost >= 0) usage.reportedCostUsd = cost
+  return usage
 }
 
 /** One parsed upstream event (a streamed chunk or a whole response). */
 export function parseUpstream(json: unknown, whole = false): ParsedEvent {
   if (!json || typeof json !== 'object') return {}
   const o = json as Record<string, unknown>
+  if (o.error && typeof o.error === 'object') return { error: true }
   const usage = readUsage(o.usage as UpstreamUsage | undefined)
   const choice = Array.isArray(o.choices) ? (o.choices[0] as Record<string, unknown> | undefined) : undefined
   if (choice) {
@@ -140,6 +209,7 @@ export function parseUpstream(json: unknown, whole = false): ParsedEvent {
     const text = typeof d?.content === 'string' ? d.content : undefined
     const reasoning = typeof d?.reasoning_content === 'string' ? d.reasoning_content : typeof d?.reasoning === 'string' ? d.reasoning : undefined
     const finishReason = typeof choice.finish_reason === 'string' ? choice.finish_reason : undefined
+    if (finishReason === 'error') return { text, reasoning, usage, finishReason, error: true }
     return { text, reasoning, usage, finishReason }
   }
   // Older Workers AI shape. In JSON mode `response` may already be an object.
@@ -188,10 +258,15 @@ export async function* readSse(stream: ReadableStream<Uint8Array>): AsyncGenerat
 
 // ------------------------------------------------------------- errors
 
-export type UpstreamErrorKind = 'free_allocation' | 'rate_limited' | 'capacity' | 'model_unavailable' | 'json_mode' | 'bad_request' | 'other'
+export type UpstreamErrorKind = UpstreamKind
 
-/** Sorts a Workers AI error by its message (they carry numeric codes such as 4006). */
+/**
+ * Sorts a provider error. External providers throw an UpstreamError that
+ * already carries its kind; Workers AI errors are sorted by their message
+ * (they carry numeric codes such as 4006).
+ */
 export function classifyUpstream(err: unknown): { kind: UpstreamErrorKind; detail: string } {
+  if (err instanceof UpstreamError) return { kind: err.kind, detail: err.message }
   const detail = String((err as Error)?.message ?? err).slice(0, 300)
   if (/\b4006\b|daily free allocation/i.test(detail)) return { kind: 'free_allocation', detail }
   if (/3040|capacity/i.test(detail)) return { kind: 'capacity', detail }

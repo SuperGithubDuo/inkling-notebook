@@ -1,6 +1,6 @@
 # Inkling privacy policy: DRAFT for legal review
 
-*This is a plain-language draft that describes what the software actually does, checked against the code on 2 Nov 2026 (branch `fix/pre-consent-privacy`). It is not legal advice and has not been reviewed by a lawyer. It must be reviewed by counsel before publication, with particular care for users under 18, under 13 in the US (COPPA), schools (FERPA and local equivalents) and the EU/UK (GDPR, age of digital consent).*
+*This is a plain-language draft that describes what the software actually does, checked against the code on 6 Nov 2026 (branch `migrate/external-inference-v2`, external inference provider). It is not legal advice and has not been reviewed by a lawyer. It must be reviewed by counsel before publication, with particular care for users under 18, under 13 in the US (COPPA), schools (FERPA and local equivalents) and the EU/UK (GDPR, age of digital consent).*
 
 *Items in **[OPERATOR TO SUPPLY: …]** or **[OPERATOR DECISION REQUIRED: …]** are missing on purpose: they must come from the person or organisation that runs Inkling, not from the software.*
 
@@ -23,7 +23,7 @@ We have no account system and no cloud storage, and we can't see your notebooks.
 
 The AI Tutor can use one of these services, chosen in Settings → AI Tutor:
 
-- **Inkling AI (cloud, the default in the published installers).** Inkling's server on Cloudflare, answered by Cloudflare Workers AI (model: Qwen 3.8 27B).
+- **Inkling AI (cloud, the default in the published installers).** Inkling's server on Cloudflare, answered by Qwen 3.8 27B hosted by **DeepInfra** (DeepInfra Inc., United States). If DeepInfra is unavailable for a long time, the operator may switch the server back to **Cloudflare Workers AI**, which hosts the same model. The app's permission notice names both. Versions of Inkling released before this notice keep being answered by Cloudflare Workers AI, the only provider their notice names, until they are updated.
 - **Ollama.** A program on your own computer. Nothing leaves your computer.
 - **Google Gemini, with your own key.** Only in development versions of Inkling; the published installers don't include it. Adults only, under Google's terms.
 
@@ -42,9 +42,15 @@ The allowance check sends only the installation ID (and, like any connection, yo
 **What Inkling's server does with it.**
 - It doesn't store or log the content of questions, images or answers. Its logs record only the kind of an error, never content.
 - To enforce the free daily limits, it counts usage per installation ID and per network address (IPv6 grouped by its /64 block), stored only as SHA-256 hashes with a random salt. The salt and the per-installation and per-network counts are replaced with the first request the server handles after 00:00 UTC each day. A total for the whole service, with no identities, is kept for about 25 hours.
+- To enforce the monthly limit, it also counts this calendar month's usage per installation ID, under a **separate** salt that changes every month (UTC), so the monthly count can't be joined to the daily ones. The salt and the monthly counts are deleted with the first request after the month ends. A monthly total for the whole service, with no identities, is kept until the next month.
+- Usage is counted as tokens and an estimated cost in US dollars, never as content.
 - An answer in progress is held as a reservation (hashed IDs and a cost estimate) for at most 10 minutes.
 
-**What Cloudflare does with it.** Cloudflare processes the content to produce the answer. It states that it doesn't use it to train models and doesn't keep it afterwards ([Cloudflare's Workers AI data usage](https://developers.cloudflare.com/workers-ai/platform/privacy/)). Cloudflare also keeps operational metadata for its platform, such as request times and usage counts. [OPERATOR TO SUPPLY: confirm against Cloudflare's current terms and data processing agreement before publication.]
+**What DeepInfra does with it.** Inkling's server sends DeepInfra the question, images and conversation listed above, with Inkling's instructions, and **not** the installation ID or your IP address (DeepInfra sees only Inkling's server). DeepInfra states that standard inference requests are held in memory only while they are processed and are not stored on disk, that it doesn't use them to train models, that it doesn't share them, and that its logs keep only metadata such as request IDs, cost and sampling settings, not content ([DeepInfra data privacy](https://docs.deepinfra.com/account/data-privacy)). DeepInfra states it holds SOC 2 and ISO 27001 certifications. Its [terms of service](https://deepinfra.com/terms) (section 7(b), "Zero Data Retention") commit it not to retain, store or log customer content beyond processing the request and not to use it to train or improve models; the exceptions are support cases (deleted within 30 days of resolution), non-content metadata such as request counts and billing records, records kept to comply with law or to investigate fraud or abuse, and features Inkling doesn't use (batch requests, paid cache retention). A data processing agreement (trust.deepinfra.com) is incorporated into those terms (section 5(a)); its text is not publicly readable and has not been reviewed for this notice. DeepInfra's [privacy policy](https://deepinfra.com/privacy) (modified 15 Aug 2026) says its services are not intended for people under 18; how that applies to the users of a customer's app, such as students using Inkling, is being confirmed with DeepInfra. Inkling does not claim zero data retention. [OPERATOR TO SUPPLY: obtain, review and accept DeepInfra's DPA, and DeepInfra's written answer on minors, before publication.]
+
+**What Cloudflare does with it.** Cloudflare runs Inkling's server, so content passes through Cloudflare's network on its way to DeepInfra; the server doesn't store or log it. When the server uses Cloudflare Workers AI instead (as a backup), Cloudflare processes the content to produce the answer and states that it doesn't use it to train models and doesn't keep it afterwards ([Cloudflare's Workers AI data usage](https://developers.cloudflare.com/workers-ai/platform/privacy/)). Cloudflare also keeps operational metadata for its platform, such as request times and usage counts. [OPERATOR TO SUPPLY: confirm against Cloudflare's current terms and data processing agreement before publication.]
+
+Inkling does not claim "zero data retention": that would depend on the providers' contractual terms, which the operator has to confirm.
 
 **Who the permission covers.** One permission covers everyone who uses Inkling on that computer account. You can withdraw it at any time in Settings → AI Tutor; from then on nothing is sent until it is given again.
 
@@ -81,7 +87,7 @@ What the software does today:
 - Delete your data on this computer by deleting the Inkling folders:
   - Windows: `%APPDATA%\Inkling`
   - macOS: `~/Library/Application Support/Inkling`
-- The cloud AI's usage counts are replaced every day and can't be linked back to you by us.
+- The cloud AI's daily usage counts are replaced every day, and the monthly count per installation at the end of each month; neither can be linked back to you by us.
 - Questions or requests about your data: [OPERATOR TO SUPPLY: contact email and how requests are handled, including for parents and guardians.]
 
 ## Changes

@@ -1,0 +1,256 @@
+name: AI server (external provider, test)
+
+# Deploys a SEPARATE test copy of Inkling's AI server, "inkling-ai-next"
+# (beta-server/wrangler.external.jsonc), that answers through DeepInfra instead of
+# Workers AI, and checks it against the real provider. The production server
+# ("inkling-ai-beta", Workers AI), its secrets and its workflow are not touched.
+#
+# Start it by pushing the branch `deploy/ai-server-next` (works before this file is on
+# the default branch), or Actions → Run workflow once it is.
+#
+# Steps: unit tests · direct DeepInfra probes (streaming, thinking switch, real image
+# tokens, error statuses, a 20-request burst) · deploy the test Worker · the notice gate
+# and the security checks · the real-model scenarios on DeepInfra (handwriting, notes, PDF
+# text, practice, long histories, a complex explanation: quality, latency, tokens, cost)
+# · the SAME scenarios on Workers AI (direct REST, the production model, no routing) ·
+# a side-by-side report · a check that usage reports hold no notebook content · a
+# temporary copy with a tiny dollar cap hit by a burst of concurrent long requests,
+# deleted afterwards.
+#
+# Cost: about $0.10-0.30 on the development DeepInfra account (the test Worker's own cap
+# for this run is $1, set below; the tiny-cap copy is $0.01). The Workers AI baseline uses
+# at most 5,500 Neurons of the Cloudflare account's free daily allocation (shared with
+# production, which has its own 9,000-Neuron cap) and costs nothing on Workers Free.
+#
+# Needs these repository secrets:
+#   CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN   as for the production workflow
+#   INKLING_ADMIN_TOKEN                           ≥ 32 characters (the test Workers' admin API)
+#   DEEPINFRA_DEV_API_KEY                         a DeepInfra key for DEVELOPMENT (not production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      live_test:
+        description: Run the real-model scenarios on DeepInfra and Workers AI (about $0.10-0.30)
+        type: boolean
+        default: true
+  push:
+    branches: ['deploy/ai-server-next']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-server-next
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    # Holds the Cloudflare token once it is moved out of repository secrets (docs/AI-PROVIDERS.md).
+    environment: ai-test
+    timeout-minutes: 40
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+      DEEPINFRA_DEV_API_KEY: ${{ secrets.DEEPINFRA_DEV_API_KEY }}
+      LIVE: ${{ github.event_name == 'push' || inputs.live_test }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
+
+      - name: Required secrets
+        shell: bash
+        run: |
+          missing=()
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
+          [ ${#INKLING_ADMIN_TOKEN} -ge 32 ] || missing+=("INKLING_ADMIN_TOKEN (at least 32 characters)")
+          [ -n "$DEEPINFRA_DEV_API_KEY" ] || missing+=(DEEPINFRA_DEV_API_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then echo "::error title=Missing secrets::Add these repository secrets: ${missing[*]} (see the top of .github/workflows/ai-server-next.yml)"; exit 1; fi
+
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm --prefix beta-server ci
+          mkdir -p test-results
+
+      - name: Typecheck and unit-test the server
+        run: |
+          npm --prefix beta-server run typecheck
+          npx vitest run tests/unit/provider.test.ts tests/unit/beta.test.ts
+
+      - name: Routing check on the real Worker, locally (older apps → Workers AI, notice 4 → DeepInfra)
+        run: node beta-server/scripts/bridge-check.mjs wrangler.deepinfra.jsonc
+
+      - name: Direct DeepInfra probes
+        id: probes
+        shell: bash
+        run: |
+          INFERENCE_API_KEY=$(printf '%s' "$DEEPINFRA_DEV_API_KEY" | tr -d '\r\n') node beta-server/scripts/deepinfra-probe.mjs test-results/deepinfra-probe.md
+          cat test-results/deepinfra-probe.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy the test Worker
+        id: deploy
+        working-directory: beta-server
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            # Test-run limits only (the committed config is the $5/month production proposal):
+            # one runner IP plays every user, so the network and installation ceilings are opened,
+            # and the test Worker may spend at most $1 this month.
+            if npx wrangler deploy -c wrangler.external.jsonc --var GLOBAL_MONTHLY_USD:1 --var NETWORK_DAILY_USD:0.25 --var INSTALL_DAILY_USD:0.05 --var INSTALL_MONTHLY_USD:0.25 > /tmp/deploy.log 2>&1; then break; fi
+            cat /tmp/deploy.log
+            [ $attempt = 3 ] && exit 1
+            sleep 20
+          done
+          cat /tmp/deploy.log
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          [ -n "$url" ] || { echo "::error title=Deploy::no workers.dev address printed"; exit 1; }
+          # Secrets go in through stdin; they never appear in the log.
+          printf '%s' "$DEEPINFRA_DEV_API_KEY" | tr -d '\r\n' | npx wrangler secret put INFERENCE_API_KEY -c wrangler.external.jsonc > /dev/null 2>&1 || { echo "::error title=INFERENCE_API_KEY::could not be set"; exit 1; }
+          token=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          printf '%s' "$token" | npx wrangler secret put ADMIN_TOKEN -c wrangler.external.jsonc > /dev/null 2>&1 || { echo "::error title=ADMIN_TOKEN::could not be set"; exit 1; }
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$url/admin/summary" -H "Authorization: Bearer $token")
+            [ "$code" = 200 ] && break
+            sleep 4
+          done
+          [ "$code" = 200 ] || { echo "::error title=Admin token::admin API answers $code"; exit 1; }
+          # The provider key is read on the first request; wait until the Worker is configured.
+          for i in $(seq 1 30); do
+            s=$(curl -sS "$url/v1/status" -H "x-inkling-install: inst_$(openssl rand -hex 16)" -H 'x-inkling-notice: 4')
+            echo "$s" | grep -q '"qwen3.8-27b"' && break
+            sleep 4
+          done
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Test AI server deployed::$url (DeepInfra; production untouched)"
+
+      - name: Notice gate and security checks
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          curl -sS -X POST "$URL/admin/pause" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"paused":false}' >/dev/null
+          # An app on the old (Cloudflare-only) notice, as every published version: answered by the
+          # Workers AI bridge (Neurons, its own ledger), never by DeepInfra.
+          inst="inst_$(openssl rand -hex 16)"
+          code=$(curl -sS -o /tmp/old.json -w '%{http_code}' -X POST "$URL/v1/tutor" -H 'content-type: application/json' -H "x-inkling-install: $inst" -d '{"task":"chat","turns":[{"role":"user","parts":[{"text":"In one sentence: what is 2 + 2?"}]}]}')
+          [ "$code" = 200 ] || { echo "::error title=Older apps::an app without notice 4 got $code: $(head -c 400 /tmp/old.json)"; exit 1; }
+          grep -q '"neurons"' /tmp/old.json || grep -q 'event: done' /tmp/old.json || { echo "::error title=Older apps::no answer: $(head -c 400 /tmp/old.json)"; exit 1; }
+          legacy=$(curl -sS "$URL/admin/legacy/summary" -H "Authorization: Bearer $ADMIN" | jq -c '{unit, answers, models: (.models.today | keys)}')
+          echo "$legacy" | jq -e '.unit == "neurons" and .answers >= 1 and (.models | index("@cf/qwen/qwen3.8-27b"))' > /dev/null || { echo "::error title=Older apps::bridge ledger: $legacy"; exit 1; }
+          di=$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c '{unit, answers}')
+          echo "$di" | jq -e '.answers == 0' > /dev/null || { echo "::error title=Older apps::the old app's request reached the DeepInfra ledger: $di"; exit 1; }
+          echo "::notice title=Older apps::answered by Workers AI on the bridge ($legacy); nothing sent to DeepInfra"
+          node scripts/abuse-check.mjs security "$URL" | tee test-results/security.txt
+          echo "::notice title=Test AI server after security checks::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c '{unit, globalUsed, globalLimit, monthUsed, monthLimit, answers}')"
+
+      - name: Real-model scenarios (quality, latency, cost)
+        if: env.LIVE == 'true'
+        shell: bash
+        env:
+          INKLING_BETA_URL: ${{ steps.deploy.outputs.url }}
+          INKLING_LIVE_CLOUD: '1'
+          INKLING_LIVE_UNIT: usd
+          INKLING_LIVE_LABEL: deepinfra
+        run: |
+          set +e
+          npm run test:live:cloud
+          status=$?
+          set -e
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          curl -sS "$INKLING_BETA_URL/admin/summary" -H "Authorization: Bearer $ADMIN" > test-results/deepinfra-summary.json
+          echo "::notice title=Test AI server after the scenarios::$(jq -c '{unit, globalUsed, monthUsed, answers, overshoot, tokens}' test-results/deepinfra-summary.json)"
+          exit $status
+
+      - name: No notebook content in usage reports
+        # Runs even when a quality check failed: privacy is checked on every run.
+        if: (success() || failure()) && env.LIVE == 'true' && steps.deploy.outputs.url != ''
+        shell: bash
+        run: |
+          # Structural: the whole usage report must be numbers and short identifiers (no free text),
+          # whatever the scenarios said. Then a canary run on both paths (beta-server/scripts/privacy-check.mjs).
+          node -e "import('./beta-server/scripts/privacy-check.mjs').then(m => { const p = m.checkUsageReport(JSON.parse(require('fs').readFileSync('test-results/deepinfra-summary.json','utf8'))); if (p.length) { console.log(p.join('\n')); process.exit(1) } console.log('summary after the scenarios: numbers and identifiers only') })"
+          node beta-server/scripts/privacy-check.mjs "${{ steps.deploy.outputs.url }}" "$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Same scenarios on Workers AI (baseline)
+        # Only once DeepInfra answered: no free Neurons spent on a comparison that can't happen.
+        if: (success() || failure()) && env.LIVE == 'true' && steps.probes.outcome == 'success'
+        shell: bash
+        env:
+          INKLING_LIVE_LABEL: workers-ai
+          INKLING_LIVE_BUDGET: '5500'
+        run: |
+          # Direct mode: the server code on this runner calls Workers AI's REST API with the same
+          # model and settings as production, minus text-only routing (one model, as on DeepInfra).
+          unset INKLING_BETA_URL INKLING_LIVE_CLOUD
+          npm run test:live:cloud || echo "::warning title=Workers AI baseline::some checks failed (see the comparison)"
+
+      - name: Side-by-side comparison
+        if: (success() || failure()) && env.LIVE == 'true' && steps.probes.outcome == 'success'
+        shell: bash
+        run: |
+          di=$(ls test-results/live-cloud-deepinfra-*.json 2>/dev/null | head -1)
+          wai=$(ls test-results/live-cloud-workers-ai-*.json 2>/dev/null | head -1)
+          node beta-server/scripts/compare-live.mjs "${di:-missing}" "${wai:-missing}" test-results/live-comparison.md test-results/deepinfra-summary.json > /dev/null
+          cat test-results/live-comparison.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Spending cap under concurrency (temporary Worker, tiny cap)
+        if: (success() || failure()) && steps.deploy.outputs.url != ''
+        working-directory: beta-server
+        shell: bash
+        env:
+          NAME: inkling-ai-next-caps
+        run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          export INKLING_ADMIN_TOKEN="$ADMIN"
+          # Same code and provider; separate ledger; a $0.01 day; network limits opened up so the
+          # whole burst (one runner IP) reaches the global cap.
+          vars=(--name "$NAME" --var GLOBAL_DAILY_USD:0.01 --var GLOBAL_MONTHLY_USD:1 --var NETWORK_DAILY_USD:1 --var INSTALL_DAILY_USD:0.02 --var NETWORK_CONCURRENT:32 --var GLOBAL_CONCURRENT:32 --var NETWORK_PER_MINUTE:100 --var SOFT_LIMIT_FRACTION:1)
+          for attempt in 1 2 3; do
+            npx wrangler deploy -c wrangler.external.jsonc "${vars[@]}" > /tmp/caps.log 2>&1 && break
+            [ $attempt = 3 ] && { echo "::error title=Temporary server::$(tail -5 /tmp/caps.log | tr '\n' ' ')"; exit 1; }
+            sleep 20
+          done
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/caps.log | head -1)
+          printf '%s' "$DEEPINFRA_DEV_API_KEY" | tr -d '\r\n' | npx wrangler secret put INFERENCE_API_KEY --name "$NAME" > /dev/null 2>&1
+          printf '%s' "$ADMIN" | npx wrangler secret put ADMIN_TOKEN --name "$NAME" > /dev/null 2>&1
+          ok=0
+          for i in $(seq 1 60); do
+            got=$(curl -sS "$url/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c '[.unit, .limits.globalDailyNeurons, .limits.networkConcurrent]' 2>/dev/null || true)
+            if [ "$got" = '["usd",10000,32]' ]; then ok=$((ok + 1)); else ok=0; fi
+            [ $ok -ge 5 ] && break
+            sleep 3
+          done
+          [ $ok -ge 5 ] || { echo "::error title=Temporary server::$url not serving the tiny cap (got $got)"; exit 1; }
+          sleep 10
+          node scripts/cap-check.mjs "$url" daily ../test-results/cap-check.md
+
+      - name: Delete the temporary Worker
+        if: always()
+        shell: bash
+        run: |
+          res=$(curl -sS -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/inkling-ai-next-caps?force=true")
+          if [ "$(echo "$res" | jq -r .success)" = true ]; then echo "::notice title=Temporary Worker::deleted"; else echo "::warning title=Temporary Worker::$(echo "$res" | jq -c .errors)"; fi
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-server-next-reports
+          path: |
+            test-results/*.md
+            test-results/*.json
+            test-results/*.txt
+          if-no-files-found: ignore

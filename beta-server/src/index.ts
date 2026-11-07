@@ -1,74 +1,37 @@
 /**
  * Cloudflare Worker entry for Inkling's free AI service. See handler.ts for
- * the API and ledger.ts for how the free allowance is protected.
+ * the API, ledger.ts for how the allowance is protected and provider.ts for
+ * who answers.
  *
- * Deploy on the Workers **Free** plan. There, Workers AI stops with an error
- * once the account's free 10,000 Neurons for the day are used: it can't bill.
- * On Workers Paid the same usage would be billed, so this Worker refuses to
- * serve unless ACCOUNT_PLAN is "free" (a deliberate, manual declaration).
+ * INFERENCE_PROVIDER chooses who answers:
+ *
+ *   "workers-ai" (default, the rollback path): Cloudflare Workers AI through
+ *   the AI binding. Deploy on the Workers **Free** plan, where Workers AI stops
+ *   with an error once the free 10,000 Neurons a day are used: it can't bill.
+ *   The Worker refuses to serve unless ACCOUNT_PLAN is "free". Ledger unit:
+ *   Neurons.
+ *
+ *   "deepinfra" | "openrouter" | "openai-compatible": an external provider,
+ *   paid per token with a key in the INFERENCE_API_KEY secret. Cloudflare no
+ *   longer bills inference, so the dollar caps (GLOBAL_DAILY_USD,
+ *   GLOBAL_MONTHLY_USD) are what bound spending; the Worker refuses to serve
+ *   unless both are set, along with the key and the prices. Ledger unit: µ$.
  */
 import { DurableObject } from 'cloudflare:workers'
-import { handle, sha256Hex, type ServerConfig } from './handler'
-import { Ledger, type Identity, type LedgerLimits, type Quota, type ReserveResult, type UsageRecord } from './ledger'
-import { textModelFrom } from './route'
+import { handle } from './handler'
+import { Ledger, type Identity, type LedgerLimits, type Quota, type ReserveResult, type SettleOptions, type UsageRecord } from './ledger'
+import { inference, limits, type Env } from './config'
+import { isLegacyApp, serverConfig } from './bridge'
 
-export interface Env {
-  AI: Ai
-  LEDGER: DurableObjectNamespace<LedgerObject>
-  MODEL: string
-  ACCOUNT_PLAN: string
-  GLOBAL_DAILY_NEURONS: string
-  INSTALL_DAILY_NEURONS: string
-  NETWORK_DAILY_NEURONS: string
-  INSTALL_PER_MINUTE: string
-  NETWORK_PER_MINUTE: string
-  INSTALL_CONCURRENT: string
-  NETWORK_CONCURRENT: string
-  GLOBAL_CONCURRENT: string
-  TYPICAL_NEURONS_PER_ANSWER: string
-  INPUT_NEURONS_PER_M: string
-  OUTPUT_NEURONS_PER_M: string
-  REASONING_EFFORT: string
-  DISABLE_THINKING: string
-  STRUCTURED: string
-  IMAGE_PATCH: string
-  MAX_INPUT_TOKENS: string
-  /**
-   * The text-only model (route.ts). Empty (the default): every request goes to MODEL, as before.
-   * Set it with both prices to send requests with no handwriting context to it.
-   */
-  MODEL_TEXT?: string
-  TEXT_INPUT_NEURONS_PER_M?: string
-  TEXT_OUTPUT_NEURONS_PER_M?: string
-  /** Tasks the text model may answer: a comma-separated subset of chat, practice, check (default practice). */
-  TEXT_MODEL_TASKS?: string
-  /** Secret (wrangler secret put ADMIN_TOKEN): the operator's pause switch and summary. Without it the admin API is off. */
-  ADMIN_TOKEN?: string
-}
+export type { Env } from './config'
 
-/** Cloudflare gives every account 10,000 free Neurons a day; the service never plans to use all of them. */
-const CLOUDFLARE_FREE_NEURONS = 10_000
-
-function limits(env: Env): LedgerLimits {
-  const num = (v: string | undefined, d: number): number => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d)
-  return {
-    globalDailyNeurons: Math.min(num(env.GLOBAL_DAILY_NEURONS, 9000), CLOUDFLARE_FREE_NEURONS * 0.95),
-    installDailyNeurons: num(env.INSTALL_DAILY_NEURONS, 900),
-    networkDailyNeurons: num(env.NETWORK_DAILY_NEURONS, 2700),
-    installPerMinute: num(env.INSTALL_PER_MINUTE, 6),
-    networkPerMinute: num(env.NETWORK_PER_MINUTE, 20),
-    installConcurrent: num(env.INSTALL_CONCURRENT, 1),
-    networkConcurrent: num(env.NETWORK_CONCURRENT, 4),
-    globalConcurrent: num(env.GLOBAL_CONCURRENT, 12),
-    reservationTtlMs: 10 * 60_000,
-    typicalNeuronsPerAnswer: num(env.TYPICAL_NEURONS_PER_ANSWER, 90)
-  }
-}
+/** The settings plus the bindings Cloudflare provides. */
+type WorkerEnv = Env & { AI: Ai; LEDGER: DurableObjectNamespace<LedgerObject> }
 
 /** One object holds the whole ledger, so every reservation is decided one at a time. */
-export class LedgerObject extends DurableObject<Env> {
+export class LedgerObject extends DurableObject<WorkerEnv> {
   private readonly ledger: Ledger
-  constructor(ctx: DurableObjectState, env: Env) {
+  constructor(ctx: DurableObjectState, env: WorkerEnv) {
     super(ctx, env)
     const s = ctx.storage
     this.ledger = new Ledger(
@@ -81,24 +44,30 @@ export class LedgerObject extends DurableObject<Env> {
       limits(env)
     )
   }
-  reserve(id: Identity, worst: number, expected: number, l?: LedgerLimits): Promise<ReserveResult> {
+  reserve(id: Identity, worst: number, expected: number, l?: LedgerLimits, fingerprint?: string): Promise<ReserveResult> {
     this.ledger.useLimits(l)
-    return this.ledger.reserve(id, worst, expected)
+    return this.ledger.reserve(id, worst, expected, fingerprint)
   }
-  settle(id: string, neurons: number | undefined, opts?: { upstreamExhausted?: boolean; failedBeforeModel?: boolean }): Promise<void> {
+  settle(id: string, neurons: number | undefined, opts?: SettleOptions, l?: LedgerLimits): Promise<void> {
+    this.ledger.useLimits(l)
     return this.ledger.settle(id, neurons, opts)
   }
   quota(id: Identity, l?: LedgerLimits): Promise<Quota> {
     this.ledger.useLimits(l)
     return this.ledger.quota(id)
   }
-  record(r: UsageRecord): Promise<void> {
+  // Every call carries the caller's limits: one class serves two ledgers (DeepInfra in µ$, the bridge
+  // for older apps in Neurons), and a restarted object must never apply the other one's unit.
+  record(r: UsageRecord, l?: LedgerLimits): Promise<void> {
+    this.ledger.useLimits(l)
     return this.ledger.record(r)
   }
-  isPaused(): Promise<boolean> {
+  isPaused(l?: LedgerLimits): Promise<boolean> {
+    this.ledger.useLimits(l)
     return this.ledger.isPaused()
   }
-  setPaused(p: boolean): Promise<void> {
+  setPaused(p: boolean, l?: LedgerLimits): Promise<void> {
+    this.ledger.useLimits(l)
     return this.ledger.setPaused(p)
   }
   summary(l?: LedgerLimits): ReturnType<Ledger['summary']> {
@@ -107,36 +76,56 @@ export class LedgerObject extends DurableObject<Env> {
   }
 }
 
+/** A ledger client for one Durable Object; each call carries this version's limits. */
+function ledgerFor(stub: DurableObjectStub<LedgerObject>, l: LedgerLimits): Ledger {
+  return {
+    reserve: (id: Identity, worst: number, expected: number, fp?: string) => stub.reserve(id, worst, expected, l, fp),
+    quota: (id: Identity) => stub.quota(id, l),
+    summary: () => stub.summary(l),
+    settle: (id: string, n: number | undefined, o?: SettleOptions) => stub.settle(id, n, o, l),
+    record: (r: UsageRecord) => stub.record(r, l),
+    isPaused: () => stub.isPaused(l),
+    setPaused: (p: boolean) => stub.setPaused(p, l)
+  } as unknown as Ledger
+}
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
-    if (env.ACCOUNT_PLAN !== 'free') {
-      // Refuse rather than risk billed usage on a Workers Paid account.
-      return Response.json({ error: { code: 'beta_closed', message: 'Inkling’s AI server is not configured. (ACCOUNT_PLAN must be "free".)' } }, { status: 503 })
+    const inf = inference(env)
+    if (typeof inf === 'string') {
+      // Fail closed: a missing key, price or spending cap means no answers, never unbounded ones.
+      return Response.json({ error: { code: 'beta_closed', message: `Inkling’s AI server is not configured. (${inf}.)` } }, { status: 503 })
+    }
+    const url = new URL(request.url)
+    const external = inf.provider !== 'workers-ai'
+    const bridgeOn = external && env.LEGACY_WORKERS_AI === 'true'
+    // Older apps on the bridge: /v1/* without notice 4. The operator reads the bridge's ledger at /admin/legacy/*.
+    const legacyAdmin = bridgeOn && url.pathname.startsWith('/admin/legacy/')
+    const legacy = bridgeOn && (legacyAdmin || (url.pathname.startsWith('/v1/') && isLegacyApp(request, inf.minNotice)))
+    if (legacy) {
+      const wenv = { ...env, INFERENCE_PROVIDER: 'workers-ai' } as WorkerEnv
+      const winf = inference(wenv)
+      // The bridge needs the Workers Free guard like the rollback path; misconfigured, old apps are told to update.
+      if (typeof winf === 'string') {
+        console.error('legacy bridge not configured', winf)
+      } else {
+        const r = legacyAdmin ? new Request(new URL(url.pathname.replace('/admin/legacy/', '/admin/') + url.search, url), request) : request
+        const stub = env.LEDGER.get(env.LEDGER.idFromName('ledger-workers-ai-bridge'))
+        return handle(r, { ai: winf.ai, ledger: ledgerFor(stub, limits(wenv)), config: await serverConfig(wenv, winf, true), waitUntil: (p) => ctx.waitUntil(p) })
+      }
     }
     const stub = env.LEDGER.get(env.LEDGER.idFromName('ledger'))
-    const config: ServerConfig = {
-      model: env.MODEL,
-      rates: { inputPerM: Number(env.INPUT_NEURONS_PER_M), outputPerM: Number(env.OUTPUT_NEURONS_PER_M) },
-      reasoningEffort: env.REASONING_EFFORT ?? '',
-      disableThinking: env.DISABLE_THINKING === 'true',
-      structured: env.STRUCTURED === 'json_schema' ? 'json_schema' : 'prompt',
-      imagePatch: Number(env.IMAGE_PATCH) || 28,
-      maxBodyBytes: 3_500_000,
-      maxInputTokens: Number(env.MAX_INPUT_TOKENS) || 12_000,
-      adminTokenHash: env.ADMIN_TOKEN && env.ADMIN_TOKEN.length >= 32 ? await sha256Hex(env.ADMIN_TOKEN) : null,
-      textModel: textModelFrom(env, env.MODEL)
+    // The emergency pause is one switch: with the bridge on, /admin/pause also pauses (or resumes) the
+    // bridge's ledger, so older apps stop too. Only after the main pause succeeded (authorised, valid).
+    const pausing = bridgeOn && url.pathname === '/admin/pause' && request.method === 'POST' ? request.clone() : null
+    const res = await handle(request, { ai: inf.ai, ledger: ledgerFor(stub, limits(env)), config: await serverConfig(env, inf, false), waitUntil: (p) => ctx.waitUntil(p) })
+    if (pausing && res.status === 200) {
+      const body = (await pausing.json().catch(() => null)) as { paused?: unknown } | null
+      if (typeof body?.paused === 'boolean') {
+        const wenv = { ...env, INFERENCE_PROVIDER: 'workers-ai' } as WorkerEnv
+        await env.LEDGER.get(env.LEDGER.idFromName('ledger-workers-ai-bridge')).setPaused(body.paused, limits(wenv))
+      }
     }
-    // The stub's methods match Ledger's (RPC returns plain data); each call carries this version's limits.
-    const l = limits(env)
-    const ledger = {
-      reserve: (id: Identity, worst: number, expected: number) => stub.reserve(id, worst, expected, l),
-      quota: (id: Identity) => stub.quota(id, l),
-      summary: () => stub.summary(l),
-      settle: (id: string, n: number | undefined, o?: { upstreamExhausted?: boolean; failedBeforeModel?: boolean }) => stub.settle(id, n, o),
-      record: (r: UsageRecord) => stub.record(r),
-      isPaused: () => stub.isPaused(),
-      setPaused: (p: boolean) => stub.setPaused(p)
-    } as unknown as Ledger
-    return handle(request, { ai: env.AI as unknown as { run(m: string, i: Record<string, unknown>): Promise<unknown> }, ledger, config, waitUntil: (p) => ctx.waitUntil(p) })
+    return res
   }
-} satisfies ExportedHandler<Env>
+} satisfies ExportedHandler<WorkerEnv>
