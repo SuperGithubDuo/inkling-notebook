@@ -12,13 +12,19 @@
  *
  *   node tests/e2e/installer.e2e.mjs <installer-or-dmg A> <installer-or-dmg B>
  *
+ * With INKLING_UPGRADE_FROM_RELEASE=1, A is the last PUBLISHED release (an upgrade a real user
+ * makes). After using A, the test records the AI settings an A user who had allowed the cloud AI
+ * would have (their installation ID and their agreement to A's data notice), and checks after the
+ * update that B kept them as they were: same installation ID, same Ollama/model choices, and the
+ * old agreement still on record but not upgraded (B's newer notice asks again; tests/unit/consent.test.ts).
+ *
  * It installs and uninstalls Inkling for the current user, so it refuses to
  * run outside CI unless INKLING_INSTALLER_TEST=1 is set.
  */
 import { _electron as electron } from 'playwright-core'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
-import { cp, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import assert from 'node:assert/strict'
@@ -135,16 +141,53 @@ try {
   // 1–2. Install A and use it.
   let exe = await install(pkgA)
   step(`installed ${exe}`)
-  const smoke = spawnSync(process.execPath, [join(root, 'tests/e2e/packaged.e2e.mjs')], { stdio: 'inherit', env: { ...process.env, INKLING_PACKAGED_APP: exe } })
+  // Upgrading from the published release: A is an older version than this checkout.
+  const versionA = process.env.INKLING_UPGRADE_FROM_RELEASE === '1' ? /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+?)?)(?:-(?:x64|arm64))?\.(?:exe|dmg)$/.exec(pkgA)?.[1] : undefined
+  if (process.env.INKLING_UPGRADE_FROM_RELEASE === '1') assert.ok(versionA, `version of ${pkgA}`)
+  const smoke = spawnSync(process.execPath, [join(root, 'tests/e2e/packaged.e2e.mjs')], { stdio: 'inherit', env: { ...process.env, INKLING_PACKAGED_APP: exe, ...(versionA ? { INKLING_EXPECT_VERSION: versionA } : {}) } })
   assert.equal(smoke.status, 0, 'the packaged-app smoke test passed on the installed app')
   const state = JSON.parse(await readFile(join(shots, 'packaged-state.json'), 'utf8'))
   step(`the installed app works (first launch, handwriting, PDF import/export), data in ${state.userData}`)
+
+  // An upgrade from the published release: the AI settings of a user who allowed the cloud AI there.
+  const upgrade = process.env.INKLING_UPGRADE_FROM_RELEASE === '1'
+  const settingsPath = join(state.userData, 'ai-settings.json')
+  let seeded = null
+  if (upgrade) {
+    const current = await readFile(settingsPath, 'utf8').then(JSON.parse).catch(() => null)
+    const oldNotice = Number(process.env.INKLING_OLD_NOTICE_VERSION ?? 3)
+    seeded = {
+      version: 3,
+      provider: 'cloud',
+      models: current?.models ?? { gemini: 'gemini-3.5-flash-lite', ollama: 'qwen3-vl:2b-instruct' },
+      consent: current?.consent ?? null,
+      cloudConsent: { version: oldNotice, acceptedAt: '2026-11-03T12:00:00.000Z' },
+      cloudUrl: null,
+      installId: current?.installId ?? 'inst_upgradeTestInstallation0123456789'
+    }
+    await writeFile(settingsPath, JSON.stringify(seeded, null, 2))
+    // Open A once more: it must accept these settings as its own (they are what A writes).
+    const { app } = await versionOf(exe)
+    await app.firstWindow().then((w) => w.waitForSelector('[data-testid="page-surface"]', { timeout: 30000 }))
+    await app.close()
+    const after = JSON.parse(await readFile(settingsPath, 'utf8'))
+    assert.equal(after.cloudConsent?.version, oldNotice, 'the published release keeps its own agreement')
+    step(`recorded a ${state.version} user who allowed the cloud AI (notice ${oldNotice}, installation ${seeded.installId.slice(0, 12)}…)`)
+  }
 
   // 3. Update: install B over A.
   exe = await install(pkgB)
   const vB = await checkLibrary(exe, state, null, 'after update')
   assert.notEqual(vB, state.version, 'the update installed a different version')
   step(`installing ${vB} over ${state.version} kept every notebook`)
+  if (seeded) {
+    const kept = JSON.parse(await readFile(settingsPath, 'utf8'))
+    assert.equal(kept.installId, seeded.installId, 'the update kept the installation ID')
+    assert.equal(kept.provider, 'cloud', 'the update kept the chosen tutor')
+    assert.deepEqual(kept.models, seeded.models, 'the update kept the model choices (Ollama included)')
+    assert.ok(kept.cloudConsent === null || kept.cloudConsent?.version === seeded.cloudConsent.version, `the old agreement is not silently upgraded to the new notice (${JSON.stringify(kept.cloudConsent)})`)
+    step('the update kept the AI settings; the agreement to the old notice was not carried over to the new one')
+  }
 
   // 4. Uninstall.
   await uninstall(exe)

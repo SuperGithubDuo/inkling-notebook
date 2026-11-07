@@ -16,7 +16,7 @@ Handwritten notes on your computer, with an AI tutor that reads your working and
 
 Free beta · Windows 10/11 · macOS 12 or later
 
-**Status:** public beta. Beta 2 (`0.2.0-beta.2`) is available from the download page.
+**Status:** public beta. The latest version is on the [download page](https://supergithubduo.github.io/inkling-notebook/); see [release notes](RELEASE_NOTES.md).
 
 </div>
 
@@ -79,9 +79,9 @@ Saved on your computer as you write, backed up every day, with one-click restore
 
 ## The AI tutor, in plain words
 
-- **Free, with a daily limit.** About 10 answers a day per computer, and a shared limit for everyone together. When an allowance runs out, or the AI provider is briefly unavailable, the tutor pauses and the rest of Inkling works as usual. It never costs you anything.
-- **Nothing is sent until you click *Allow*** — not even a check of how many answers are left. Then, when you ask, Inkling sends Inkling's AI server your question, what you include with it (an image of your selection, or the page's title, typed text, PDF text and an image of its handwriting), and the recent conversation on that page (up to your last 5 questions, the tutor's answers and the most recent earlier image). The server gets the answer from an AI model (Qwen 3.8 27B) hosted by DeepInfra, or Cloudflare Workers AI as a backup. Inkling's server doesn't store or log your questions, images or answers. Both providers state that they don't store them after answering or use them for training.
-- **What else goes with a question:** an anonymous installation ID (a random number the app makes) and your internet address, used only to share out the free daily limits. The server keeps them only as scrambled counts, replaced every day.
+- **Free, with limits.** About 12 answers a day per computer (longer answers use more), a monthly limit per computer, and a shared budget for everyone together, so on a busy day the tutor can stop earlier. When an allowance runs out, or the AI provider is briefly unavailable, the tutor pauses and the rest of Inkling works as usual. It never costs you anything.
+- **Nothing is sent until you click *Allow*** — not even a check of how many answers are left. Then, when you ask, Inkling sends Inkling's AI server your question, what you include with it (an image of your selection, or the page's title, typed text, PDF text and an image of its handwriting), and the recent conversation on that page (up to your last 5 questions, the tutor's answers and the most recent earlier image). The server gets the answer from an AI model (Qwen 3.8 27B) hosted by DeepInfra, with Cloudflare Workers AI as a backup. Versions before 0.2.0-beta.3 keep using Cloudflare Workers AI until they are updated. Inkling's server doesn't store or log your questions, images or answers. Both providers say they don't use them for training and don't keep them after answering, apart from limited exceptions such as support cases and legal obligations.
+- **What else goes with a question:** an anonymous installation ID (a random number the app makes) and your internet address, used only to share out the free limits. The server keeps them only as scrambled counts: daily counts are replaced every day, and each computer's monthly count at the end of the month.
 - **One *Allow* covers everyone on that computer account,** and it doesn't verify a parent's or guardian's consent.
 - **Prefer nothing to leave your computer?** Use the [local Ollama option](docs/AI.md#local-ollama-default-in-development-builds) instead. It needs a separate free app (Ollama) and a 2–6 GB model download.
 - **AI answers can be wrong.** Check them. Please don't send personal or sensitive information.

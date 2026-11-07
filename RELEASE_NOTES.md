@@ -1,6 +1,22 @@
 # Inkling release notes
 
-## 0.2.0-beta.2 — first invited beta (draft, not published)
+## 0.2.0-beta.3 — new AI host, same free tutor
+
+**AI tutor**
+- **A new host for the free AI.** Questions are now answered by the same model, Qwen 3.8 27B, hosted by **DeepInfra** (an AI hosting company in the United States). Cloudflare still runs Inkling's server, and Cloudflare Workers AI stays as a backup. Older versions of Inkling keep working on Cloudflare Workers AI until you update.
+- **Inkling asks for permission again** after the update, because the data notice now names DeepInfra. Nothing is sent until you click *Allow*. DeepInfra and Cloudflare say they don't train on your requests or keep them after answering, apart from limited exceptions such as support cases and legal obligations. Inkling's server doesn't store or log them.
+- **Still free, with limits:** about 12 answers a day per computer (long answers use more), a monthly limit per computer, and a shared budget for everyone, so on a busy day the tutor can stop earlier. The tutor shows how much is left and says which limit was reached.
+- **Practice problems** are now written by Qwen too, as everything else. Their answers can still be wrong: check them.
+- **Asking about the same page again** sends its content once instead of once per question, so long conversations use less of your allowance.
+- The local Ollama tutor is unchanged and still available.
+
+**Saving**
+- **While you write without pausing**, Inkling now saves at least every 2 seconds, so a crash loses at most that.
+- **A page repaired at startup** (for example after a crash during saving) is now reported when you open it, instead of silently.
+
+Notebooks, settings and backups carry over unchanged; the update was tested by installing it over 0.2.0-beta.2.
+
+## 0.2.0-beta.2 — first invited beta (published 3 Nov 2026)
 
 Fixes from independent QA of the Beta 1 Windows installer. Beta 1 was never published; this build replaces it.
 

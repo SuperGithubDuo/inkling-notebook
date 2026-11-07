@@ -19,7 +19,9 @@ import { join, resolve } from 'node:path'
 import assert from 'node:assert/strict'
 
 const root = resolve(import.meta.dirname, '../..')
-const version = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version
+const thisVersion = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version
+// The installer test's upgrade check runs this against the last published release, an older version.
+const version = process.env.INKLING_EXPECT_VERSION || thisVersion
 const defaultApp = { linux: 'release/linux-unpacked/inkling', win32: 'release/win-unpacked/Inkling.exe', darwin: 'release/mac-arm64/Inkling.app/Contents/MacOS/Inkling' }[process.platform]
 const executablePath = resolve(root, process.env.INKLING_PACKAGED_APP ?? defaultApp)
 const shots = process.env.SHOTS ?? join(root, 'test-results')
@@ -98,7 +100,14 @@ try {
     const probe = await win.evaluate(() => window.inkling.ai.test())
     assert.equal(probe?.ok, true, `the AI server answered: ${JSON.stringify(probe)}`)
     const quota = (await win.evaluate(() => window.inkling.ai.status())).cloud.quota
-    assert.ok(quota && quota.installLimit > 0 && quota.globalLimit <= 9500, `today’s allowance came back: ${JSON.stringify(quota)}`)
+    // This version (notice 4) is answered by DeepInfra: a dollar allowance in µ$ ($0.01 a day per
+    // installation, with a monthly limit, under the $0.25 daily cap). Older versions are answered by
+    // the Workers AI bridge: a Neuron allowance under the 9,000 free-plan cap.
+    const onDeepInfra = version === thisVersion
+    assert.ok(
+      quota && quota.installLimit > 0 && (onDeepInfra ? quota.installMonthLimit > 0 && quota.globalLimit <= 250_000 : quota.installMonthLimit === undefined && quota.globalLimit <= 9500),
+      `today’s allowance came back (${onDeepInfra ? 'DeepInfra, µ$' : 'Workers AI bridge, Neurons'}): ${JSON.stringify(quota)}`
+    )
     let answered = 'not asked (set INKLING_LIVE_AI_CHECK=1)'
     if (process.env.INKLING_LIVE_AI_CHECK === '1') {
       // One tiny real question, as a new user would ask it after allowing the upload.
@@ -127,7 +136,7 @@ try {
       assert.match(end.text, /56/)
       // Beta 1 QA: the count shown didn't change until a restart. The server's new figures must reach the window with the answer.
       assert.ok(end.pushed && end.pushed.installUsed > 0, `the server's allowance reached the window with the answer: ${JSON.stringify(end.pushed)}`)
-      answered = `answered “${end.text.trim().slice(0, 40)}” (${Math.round(end.usage?.neurons ?? 0)} Neurons); window told ${end.pushed.approxAnswersLeft} answers left`
+      answered = `answered “${end.text.trim().slice(0, 40)}” (cost ${Math.round(end.usage?.neurons ?? 0)} ${onDeepInfra ? 'µ$' : 'Neurons'}); window told ${end.pushed.approxAnswersLeft} answers left`
     }
     await win.screenshot({ path: join(shots, 'packaged-cloud-default.png') })
     step(`cloud AI is the default and ready with no code or key, ${ai.cloud.url} built in; status check OK (${quota.approxAnswersLeft} answers left here); real question: ${answered}`)
