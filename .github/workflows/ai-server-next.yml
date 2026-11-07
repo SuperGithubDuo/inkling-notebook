@@ -173,7 +173,8 @@ jobs:
           exit $status
 
       - name: No notebook content in usage reports
-        if: env.LIVE == 'true' && steps.deploy.outputs.url != ''
+        # Runs even when a quality check failed: privacy is checked on every run.
+        if: (success() || failure()) && env.LIVE == 'true' && steps.deploy.outputs.url != ''
         shell: bash
         run: |
           # Words that appear only in the scenarios' notebook text and questions.
