@@ -67,6 +67,11 @@ export interface Env {
   SOFT_LIMIT_FACTOR?: string
   /** External providers: each day's global cap is at most (monthly budget left ÷ days left) × this. Unset: off. */
   MONTHLY_PACING?: string
+  /**
+   * "true": while an external provider answers, apps on an older data notice (before 4, which names
+   * only Cloudflare) are answered by Workers AI on the Free plan instead of being told to update.
+   */
+  LEGACY_WORKERS_AI?: string
   UPSTREAM_MAX_ATTEMPTS?: string
   UPSTREAM_TIMEOUT_MS?: string
   UPSTREAM_IDLE_TIMEOUT_MS?: string

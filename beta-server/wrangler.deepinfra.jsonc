@@ -1,0 +1,91 @@
+{
+  // PRODUCTION on DeepInfra (not active until deployed with your approval):
+  //   npx wrangler deploy -c wrangler.deepinfra.jsonc      (or Actions → "AI server: switch provider")
+  // Same Worker as wrangler.jsonc ("inkling-ai-beta", same ledger, same URL); only who answers changes.
+  // Rollback = deploy wrangler.jsonc again (Workers AI, unchanged).
+  // Needs the INFERENCE_API_KEY secret (a DeepInfra key) besides ADMIN_TOKEN.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "inkling-ai-beta",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  // Shares Inkling's request schema and tutor prompts with the app (src/shared, src/main/ai/prompts.ts).
+  "alias": { "@shared": "../src/shared" },
+  // No Cloudflare API token is needed at runtime: the Worker reaches Workers AI through this binding.
+  "ai": { "binding": "AI" },
+  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "LedgerObject" }] },
+  // SQLite-backed Durable Objects are the kind included in the Workers Free plan.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LedgerObject"] }],
+  // Keep the Worker's own console lines (error kinds, never content) but not per-request invocation logs.
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
+  "vars": {
+    // ---- DeepInfra answers apps on data notice 4 or later (all tasks: Qwen 3.8 27B, no routing).
+    "INFERENCE_PROVIDER": "deepinfra",
+    "UPSTREAM_MODEL": "Qwen/Qwen3.8-27B",
+    // DeepInfra's LIST price (re-checked 6 Nov 2026: $0.20 / $2.50 / $0.05 cached per million tokens). The
+    // 25% promotion ($0.15 / $1.875) is not used, so accounting errs high and survives its end.
+    "PRICE_INPUT_USD_PER_M": "0.20",
+    "PRICE_OUTPUT_USD_PER_M": "2.50",
+    "PRICE_CACHED_INPUT_USD_PER_M": "0.05",
+    // Budget (6 Nov 2026 review): a $5 hard monthly cap, at most $0.25 in any 24 hours. Monthly
+    // pacing keeps each day's cap at or below (budget left this month / days left) x 1.5, so a busy
+    // start can't spend the last days' share: with nothing spent yet that is $0.24-0.25 a day.
+    "GLOBAL_DAILY_USD": "0.25",
+    "GLOBAL_MONTHLY_USD": "5",
+    "MONTHLY_PACING": "1.5",
+    // One installation's ceiling: $0.01/day at list price = ~17 measured answers, ~13 app-size,
+    // ~7 long-conversation; $0.15/month. This is a ceiling, not a promise: the app shows the
+    // smaller of this and what is left of today's shared budget.
+    "INSTALL_DAILY_USD": "0.01",
+    "INSTALL_MONTHLY_USD": "0.15",
+    // One connection (a school, an office, a reinstall loop): 5 installations' worth, a fifth of the day.
+    "NETWORK_DAILY_USD": "0.05",
+    "TYPICAL_USD_PER_ANSWER": "0.0008",
+    // No reduced allowances near the cap (SOFT_LIMIT_* unset): pacing spreads the budget instead.
+    "INSTALL_PER_MINUTE": "6",
+    "NETWORK_PER_MINUTE": "20",
+    "INSTALL_CONCURRENT": "1",
+    "NETWORK_CONCURRENT": "4",
+    "GLOBAL_CONCURRENT": "8",
+    "UPSTREAM_MAX_ATTEMPTS": "3",
+    "UPSTREAM_TIMEOUT_MS": "45000",
+    "UPSTREAM_IDLE_TIMEOUT_MS": "45000",
+    // Only apps whose data notice names DeepInfra (CLOUD_CONSENT_VERSION 4).
+    "MIN_NOTICE_VERSION": "4",
+    // The input estimate is reserved ×1.5 (DeepInfra may count image tokens differently); real cost is still what is charged.
+    "INPUT_ESTIMATE_MARGIN": "1.5",
+    "MAX_INPUT_TOKENS": "12000",
+    "REASONING_EFFORT": "low",
+    "DISABLE_THINKING": "true",
+    "STRUCTURED": "prompt",
+    "IMAGE_PATCH": "28",
+    // ---- Apps released before notice 4 (whose notice names only Cloudflare) keep being answered by
+    // Workers AI, free, in their own ledger, with the Workers AI values below, so updating is never
+    // forced. Set to "false" once old versions are gone; they then get "Update Inkling".
+    "LEGACY_WORKERS_AI": "true",
+    // ---- Workers AI values (the bridge for older apps, and the rollback):
+    "MODEL": "@cf/qwen/qwen3.8-27b",
+    // Set to "free" only for an account on the Workers Free plan, where Workers AI stops instead of billing.
+    "ACCOUNT_PLAN": "free",
+    // Cloudflare's free allowance is 10,000 Neurons a day per account (00:00 UTC reset). Leave headroom.
+    "GLOBAL_DAILY_NEURONS": "9000",
+    // Fair shares of the day for anonymous users (an installation can be reinstalled and a network
+    // changed, so these spread the allowance; the global cap above is what bounds use).
+    "INSTALL_DAILY_NEURONS": "900",
+    "NETWORK_DAILY_NEURONS": "2700",
+    "TYPICAL_NEURONS_PER_ANSWER": "90",
+    // Cloudflare's published price for @cf/qwen/qwen3.8-27b, in Neurons per million tokens.
+    "INPUT_NEURONS_PER_M": "40909",
+    "OUTPUT_NEURONS_PER_M": "290909",
+    // Text-only routing (src/route.ts): practice generation goes to Gemma 4 26B A4B (Apache 2.0,
+    // Cloudflare Workers AI, same free allocation and data notice); every other task, and anything
+    // with handwriting, stays on MODEL. To turn routing off (rollback), set MODEL_TEXT to "".
+    "MODEL_TEXT": "@cf/google/gemma-4-26b-a4b-it",
+    "TEXT_INPUT_NEURONS_PER_M": "9091",
+    "TEXT_OUTPUT_NEURONS_PER_M": "27273",
+    // Which text-only tasks it may answer: practice generation only for the first trial. Chat and
+    // answer checks are left out on purpose (see src/route.ts).
+    "TEXT_MODEL_TASKS": "practice"
+  }
+}

@@ -147,29 +147,31 @@ Accounting: before the call, the request's worst case (estimated input + the tas
 
 ## Production switch (needs your approval; nothing here has been done)
 
-1. **Test Worker.** Add the repository secret `DEEPINFRA_DEV_API_KEY` (a development key) and run *Actions → AI server (external provider, test)* with *live test* on. Compare its report with the Workers AI baseline (`docs/archive/live-results/cloud-qwen3.8-27b.md`): the 50 checks, first-text and total latency, tokens per answer and µ$ per answer. From a computer instead: `INKLING_LIVE_PROVIDER=deepinfra INFERENCE_API_KEY=… npm run test:live:cloud`.
-2. **Check DeepInfra's terms** (minors, DPA, abuse-monitoring retention) and fill the `[OPERATOR TO SUPPLY]` items in PRIVACY.md.
-3. **Release the app first.** Merge this branch and publish a release: users see the new notice (version 4, naming DeepInfra) and agree again. The production server still answers with Workers AI, and accepts both old and new apps.
-4. **Switch the production Worker** (same account, same name, same ledger), once most users have updated:
-   ```bash
-   cd beta-server
-   npx wrangler secret put INFERENCE_API_KEY      # the PRODUCTION DeepInfra key
-   # in wrangler.jsonc → vars, add the external block from wrangler.external.jsonc:
-   #   INFERENCE_PROVIDER=deepinfra, UPSTREAM_MODEL, PRICE_*, GLOBAL_DAILY_USD, GLOBAL_MONTHLY_USD,
-   #   INSTALL_DAILY_USD, INSTALL_MONTHLY_USD, NETWORK_DAILY_USD, TYPICAL_USD_PER_ANSWER,
-   #   MONTHLY_PACING, NETWORK_CONCURRENT=4, GLOBAL_CONCURRENT=8, UPSTREAM_*, MIN_NOTICE_VERSION=4
-   npx wrangler deploy
-   npm run admin -- summary                       # unit "usd", limits as set
-   ```
-   The Worker can stay on **Workers Free**: inference is no longer on Cloudflare's bill, the SSE handling is the same work it does today, and staying Free keeps the rollback unable to bill. The existing deploy workflow's real-model step measures Neurons and needs adapting before it is used on an external-provider configuration.
-   From that moment apps still on notice 3 get "Update Inkling to keep using it" (no content is sent to a provider their notice doesn't name).
-5. **Watch** `/admin/summary` (`monthUsed`, `reduced`), DeepInfra's usage dashboard, and the Worker's error-kind logs (`deepinfra error <kind>`, `deepinfra refused the API key`) for the first days.
+Two files, one Worker (`inkling-ai-beta`, same URL, same users):
+
+| File | Who answers |
+|---|---|
+| `beta-server/wrangler.jsonc` | Workers AI for everyone (today; the rollback) |
+| `beta-server/wrangler.deepinfra.jsonc` | DeepInfra for apps on data notice 4+; older apps keep Workers AI on the bridge |
+
+**No forced update.** Every published app (notice 3) sends no `x-inkling-notice` header. While `LEGACY_WORKERS_AI` is `"true"`, the server answers those apps with Workers AI exactly as today (Qwen 3.8 27B, Workers Free limits, their own ledger, `/admin/legacy/summary`), because their notice names only Cloudflare. Apps on notice 4 go to DeepInfra. So the switch can happen before or after the new release, and nobody is cut off. When old versions are gone, set `LEGACY_WORKERS_AI` to `"false"`: remaining old apps then see "Update Inkling".
+
+Steps:
+
+1. **Live test passes** on the separate test Worker: push this branch to `deploy/ai-server-next` (secret `DEEPINFRA_DEV_API_KEY`, account with credit). Its comparison report must be acceptable.
+2. **Production key**: repository secret `DEEPINFRA_API_KEY` (a separate key on a prepaid account, auto top-up off, at most one month's budget loaded).
+3. **Switch**: push any commit to `ops/switch-ai-deepinfra` (workflow *AI server - switch provider (production)*). It checks the key has credit, sets the `INFERENCE_API_KEY` secret, deploys `wrangler.deepinfra.jsonc`, then verifies the dollar limits, both paths' allowances and one short real answer on each path. Any failure rolls back to `wrangler.jsonc` automatically.
+4. **Release the app** with notice 4 (merge, then the usual release). Users agree to the new notice once; their AI then runs on DeepInfra.
+5. **Watch** `/admin/summary` (`monthUsed`, `paced`, `overshoot`, tokens and `providerReported` per model) and `/admin/legacy/summary`, plus DeepInfra's usage page.
+
+By hand instead of the workflow: `cd beta-server && npx wrangler secret put INFERENCE_API_KEY -c wrangler.deepinfra.jsonc && npx wrangler deploy -c wrangler.deepinfra.jsonc`.
+
+Note: the *Beta AI server* workflow (push to `deploy/beta-server`) deploys `wrangler.jsonc`, i.e. switches production back to Workers AI. Don't run it while on DeepInfra unless that's intended.
 
 ## Rollback
 
-- **Fast (one setting):** set `INFERENCE_PROVIDER` to `workers-ai` in `wrangler.jsonc` and `npx wrangler deploy`. Answers come from Workers AI again at once; the ledger restarts its daily counts in Neurons (dollar counts aren't misread) and keeps the month's dollar total for a later return. Apps with notice 3 or 4 both work (`MIN_NOTICE_VERSION` defaults to 0 on Workers AI). Keep the account on Workers Free for this to stay unbillable.
-- **Full:** redeploy `main` as it was before the merge (`git revert` the merge commit, then the normal *Beta AI server* workflow). The installed app keeps working (its notice names Workers AI as the backup).
-- **Emergency:** `npm run admin -- pause` (or *Actions → AI server emergency switch → pause*) stops all answers immediately; `wrangler secret delete INFERENCE_API_KEY` makes the Worker refuse to serve (fails closed).
+- **One step:** push any commit to `ops/switch-ai-workers-ai`, or `cd beta-server && npx wrangler deploy` (deploys `wrangler.jsonc`). Everyone is on Workers AI Free again at once; both app versions work. The ledger restarts its day in Neurons and keeps the month's dollar total.
+- **Emergency:** `npm run admin -- pause` stops all answers; `npx wrangler secret delete INFERENCE_API_KEY -c wrangler.deepinfra.jsonc` makes the DeepInfra path refuse to serve (fails closed, no charges).
 
 ## Sources
 

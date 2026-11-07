@@ -1,0 +1,162 @@
+name: AI server - switch provider (production)
+
+# Switches the PRODUCTION AI server ("inkling-ai-beta", same Worker, same URL, same users) between:
+#   deepinfra   wrangler.deepinfra.jsonc: apps on data notice 4+ answered by DeepInfra (Qwen 3.8 27B),
+#               $5/month and $0.25/day hard caps; older apps keep Workers AI (free) on the bridge.
+#   workers-ai  wrangler.jsonc: everything on Workers AI Free, exactly as before (the rollback).
+#
+# Start it ONLY with the operator's approval, by pushing any commit to one of these branches:
+#   ops/switch-ai-deepinfra     → DeepInfra
+#   ops/switch-ai-workers-ai    → back to Workers AI (rollback)
+# (or Actions → this workflow → Run workflow, once the file is on the default branch).
+#
+# After deploying it checks, without any model request: the provider, the dollar limits, that an app
+# on notice 4 gets the DeepInfra allowance and an older app the Workers AI one. Then ONE short real
+# answer on each path (well under a cent). If any check fails while switching to DeepInfra, it
+# deploys wrangler.jsonc again (automatic rollback) and fails.
+#
+# Repository secrets: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, INKLING_ADMIN_TOKEN (as for the
+# Beta AI server workflow) and, for deepinfra, DEEPINFRA_API_KEY (the PRODUCTION DeepInfra key).
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Who answers in production
+        type: choice
+        options: [deepinfra, workers-ai]
+        required: true
+  push:
+    branches: ['ops/switch-ai-deepinfra', 'ops/switch-ai-workers-ai']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-server-production
+  cancel-in-progress: false
+
+jobs:
+  switch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INKLING_ADMIN_TOKEN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+      DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
+      TARGET: ${{ inputs.provider || (github.ref_name == 'ops/switch-ai-deepinfra' && 'deepinfra') || 'workers-ai' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
+
+      - name: Required secrets
+        shell: bash
+        run: |
+          missing=()
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
+          [ ${#INKLING_ADMIN_TOKEN} -ge 32 ] || missing+=("INKLING_ADMIN_TOKEN (at least 32 characters)")
+          if [ "$TARGET" = deepinfra ] && [ -z "$(printf '%s' "$DEEPINFRA_API_KEY" | tr -d '\r\n ')" ]; then missing+=("DEEPINFRA_API_KEY (the production DeepInfra key)"); fi
+          if [ ${#missing[@]} -gt 0 ]; then echo "::error title=Missing secrets::Add these repository secrets: ${missing[*]}"; exit 1; fi
+          echo "::notice title=Target::$TARGET"
+
+      - name: Check the production DeepInfra key has credit
+        if: env.TARGET == 'deepinfra'
+        shell: bash
+        run: |
+          key=$(printf '%s' "$DEEPINFRA_API_KEY" | tr -d '\r\n')
+          code=$(curl -sS -o /tmp/k.json -w '%{http_code}' https://api.deepinfra.com/v1/openai/chat/completions -H "Authorization: Bearer $key" -H 'content-type: application/json' \
+            -d '{"model":"Qwen/Qwen3.8-27B","messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":3,"chat_template_kwargs":{"enable_thinking":false}}')
+          case "$code" in
+            200) echo "::notice title=DeepInfra key::works and has credit" ;;
+            401|403) echo "::error title=DeepInfra key::refused (HTTP $code): check the DEEPINFRA_API_KEY secret"; exit 1 ;;
+            402) echo "::error title=DeepInfra key::no credit (HTTP 402): add prepaid credit to the production DeepInfra account"; exit 1 ;;
+            *) echo "::error title=DeepInfra key::HTTP $code: $(head -c 300 /tmp/k.json)"; exit 1 ;;
+          esac
+
+      - name: Install
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm --prefix beta-server ci
+
+      - name: Typecheck and unit-test the server
+        run: |
+          npm --prefix beta-server run typecheck
+          npx vitest run tests/unit/provider.test.ts tests/unit/beta.test.ts
+
+      - name: Routing check on the real Worker, locally (older apps → Workers AI, notice 4 → DeepInfra)
+        run: node beta-server/scripts/bridge-check.mjs wrangler.deepinfra.jsonc
+
+      - name: Deploy
+        id: deploy
+        working-directory: beta-server
+        shell: bash
+        run: |
+          cfg=wrangler.jsonc
+          [ "$TARGET" = deepinfra ] && cfg=wrangler.deepinfra.jsonc
+          if [ "$TARGET" = deepinfra ]; then
+            # The key first, so the new version never runs without it (it would answer 503, not bill).
+            printf '%s' "$DEEPINFRA_API_KEY" | tr -d '\r\n' | npx wrangler secret put INFERENCE_API_KEY -c "$cfg" > /dev/null 2>&1 || { echo "::error title=INFERENCE_API_KEY::could not be set"; exit 1; }
+          fi
+          for attempt in 1 2 3; do
+            npx wrangler deploy -c "$cfg" > /tmp/deploy.log 2>&1 && break
+            [ $attempt = 3 ] && { cat /tmp/deploy.log; exit 1; }
+            sleep 20
+          done
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Deployed::$cfg to $url"
+
+      - name: Verify
+        id: verify
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
+          new="inst_$(openssl rand -hex 16)"; old="inst_$(openssl rand -hex 16)"
+          ok=0
+          for i in $(seq 1 30); do
+            s=$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN")
+            want=neurons; [ "$TARGET" = deepinfra ] && want=usd
+            [ "$(echo "$s" | jq -r .unit)" = "$want" ] && { ok=1; break; }
+            sleep 4
+          done
+          [ $ok = 1 ] || { echo "::error title=Verify::the server does not report unit $want: $s"; exit 1; }
+          if [ "$TARGET" = deepinfra ]; then
+            echo "$s" | jq -e '.monthLimit == 5000000 and .dailyConfigured == 250000' > /dev/null || { echo "::error title=Verify::dollar limits not as configured: $(echo "$s" | jq -c '{monthLimit, dailyConfigured, globalLimit}')"; exit 1; }
+            q4=$(curl -sS "$URL/v1/status" -H "x-inkling-install: $new" -H 'x-inkling-notice: 4' | jq -c .quota)
+            q3=$(curl -sS "$URL/v1/status" -H "x-inkling-install: $old" | jq -c .quota)
+            echo "$q4" | jq -e '.installLimit == 10000' > /dev/null || { echo "::error title=Verify::notice-4 app did not get the DeepInfra allowance: $q4"; exit 1; }
+            echo "$q3" | jq -e '.installLimit == 900' > /dev/null || { echo "::error title=Verify::older app did not get the Workers AI bridge: $q3"; exit 1; }
+            # One short real answer on each path.
+            ask() {
+              local h=(-H 'content-type: application/json' -H "x-inkling-install: $1")
+              [ -n "$2" ] && h+=(-H "x-inkling-notice: $2")
+              curl -sS -X POST "$URL/v1/tutor" "${h[@]}" -d '{"task":"chat","turns":[{"role":"user","parts":[{"text":"In one short sentence: what is 7 x 8?"}]}]}'
+            }
+            a4=$(ask "$new" 4); a3=$(ask "$old" "")
+            echo "$a4" | grep -q 'event: done' || { echo "::error title=Verify::DeepInfra answer failed: $(echo "$a4" | tail -c 300)"; exit 1; }
+            echo "$a3" | grep -q 'event: done' || { echo "::error title=Verify::older-app answer failed: $(echo "$a3" | tail -c 300)"; exit 1; }
+            echo "::notice title=Verify::DeepInfra answers notice-4 apps; older apps answered by Workers AI; limits \$5/month, \$0.25/day"
+          else
+            q=$(curl -sS "$URL/v1/status" -H "x-inkling-install: $old" | jq -c .quota)
+            echo "$q" | jq -e '.installLimit == 900' > /dev/null || { echo "::error title=Verify::Workers AI allowance not served: $q"; exit 1; }
+            echo "::notice title=Verify::Workers AI answers everyone (rollback state)"
+          fi
+
+      - name: Automatic rollback to Workers AI
+        if: failure() && env.TARGET == 'deepinfra' && steps.deploy.outcome == 'success'
+        working-directory: beta-server
+        shell: bash
+        run: |
+          npx wrangler deploy -c wrangler.jsonc > /tmp/rollback.log 2>&1 && echo "::warning title=Rolled back::production is on Workers AI again (wrangler.jsonc)" || { cat /tmp/rollback.log; echo "::error title=Rollback failed::deploy wrangler.jsonc by hand"; exit 1; }

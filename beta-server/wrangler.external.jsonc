@@ -54,6 +54,8 @@
     "UPSTREAM_IDLE_TIMEOUT_MS": "45000",
     // Only apps whose data notice names DeepInfra (CLOUD_CONSENT_VERSION 4).
     "MIN_NOTICE_VERSION": "4",
+    // Apps on older notices are answered by Workers AI (free) instead of being told to update.
+    "LEGACY_WORKERS_AI": "true",
     // The input estimate is reserved ×1.5 (DeepInfra may count image tokens differently); real cost is still what is charged.
     "INPUT_ESTIMATE_MARGIN": "1.5",
     "MAX_INPUT_TOKENS": "12000",

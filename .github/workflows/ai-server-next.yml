@@ -87,7 +87,11 @@ jobs:
           npm --prefix beta-server run typecheck
           npx vitest run tests/unit/provider.test.ts tests/unit/beta.test.ts
 
+      - name: Routing check on the real Worker, locally (older apps → Workers AI, notice 4 → DeepInfra)
+        run: node beta-server/scripts/bridge-check.mjs wrangler.deepinfra.jsonc
+
       - name: Direct DeepInfra probes
+        id: probes
         shell: bash
         run: |
           INFERENCE_API_KEY=$(printf '%s' "$DEEPINFRA_DEV_API_KEY" | tr -d '\r\n') node beta-server/scripts/deepinfra-probe.mjs test-results/deepinfra-probe.md
@@ -136,10 +140,17 @@ jobs:
         run: |
           ADMIN=$(printf '%s' "$INKLING_ADMIN_TOKEN" | tr -d '\r\n')
           curl -sS -X POST "$URL/admin/pause" -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{"paused":false}' >/dev/null
-          # An app with the old (Cloudflare-only) notice is refused before anything reaches DeepInfra.
-          code=$(curl -sS -o /tmp/old.json -w '%{http_code}' -X POST "$URL/v1/tutor" -H 'content-type: application/json' -H "x-inkling-install: inst_$(openssl rand -hex 16)" -d '{"task":"chat","turns":[{"role":"user","parts":[{"text":"hi"}]}]}')
-          [ "$code" = 400 ] && grep -q update_required /tmp/old.json || { echo "::error title=Notice gate::an app without notice 4 got $code: $(cat /tmp/old.json)"; exit 1; }
-          echo "::notice title=Notice gate::an app on notice 3 is refused (400 update_required)"
+          # An app on the old (Cloudflare-only) notice, as every published version: answered by the
+          # Workers AI bridge (Neurons, its own ledger), never by DeepInfra.
+          inst="inst_$(openssl rand -hex 16)"
+          code=$(curl -sS -o /tmp/old.json -w '%{http_code}' -X POST "$URL/v1/tutor" -H 'content-type: application/json' -H "x-inkling-install: $inst" -d '{"task":"chat","turns":[{"role":"user","parts":[{"text":"In one sentence: what is 2 + 2?"}]}]}')
+          [ "$code" = 200 ] || { echo "::error title=Older apps::an app without notice 4 got $code: $(head -c 400 /tmp/old.json)"; exit 1; }
+          grep -q '"neurons"' /tmp/old.json || grep -q 'event: done' /tmp/old.json || { echo "::error title=Older apps::no answer: $(head -c 400 /tmp/old.json)"; exit 1; }
+          legacy=$(curl -sS "$URL/admin/legacy/summary" -H "Authorization: Bearer $ADMIN" | jq -c '{unit, answers, models: (.models.today | keys)}')
+          echo "$legacy" | jq -e '.unit == "neurons" and .answers >= 1 and (.models | index("@cf/qwen/qwen3.8-27b"))' > /dev/null || { echo "::error title=Older apps::bridge ledger: $legacy"; exit 1; }
+          di=$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c '{unit, answers}')
+          echo "$di" | jq -e '.answers == 0' > /dev/null || { echo "::error title=Older apps::the old app's request reached the DeepInfra ledger: $di"; exit 1; }
+          echo "::notice title=Older apps::answered by Workers AI on the bridge ($legacy); nothing sent to DeepInfra"
           node scripts/abuse-check.mjs security "$URL" | tee test-results/security.txt
           echo "::notice title=Test AI server after security checks::$(curl -sS "$URL/admin/summary" -H "Authorization: Bearer $ADMIN" | jq -c '{unit, globalUsed, globalLimit, monthUsed, monthLimit, answers}')"
 
@@ -172,7 +183,8 @@ jobs:
           echo "::notice title=Privacy::usage report holds counts only (no scenario text found)"
 
       - name: Same scenarios on Workers AI (baseline)
-        if: (success() || failure()) && env.LIVE == 'true'
+        # Only once DeepInfra answered: no free Neurons spent on a comparison that can't happen.
+        if: (success() || failure()) && env.LIVE == 'true' && steps.probes.outcome == 'success'
         shell: bash
         env:
           INKLING_LIVE_LABEL: workers-ai
@@ -184,7 +196,7 @@ jobs:
           npm run test:live:cloud || echo "::warning title=Workers AI baseline::some checks failed (see the comparison)"
 
       - name: Side-by-side comparison
-        if: (success() || failure()) && env.LIVE == 'true'
+        if: (success() || failure()) && env.LIVE == 'true' && steps.probes.outcome == 'success'
         shell: bash
         run: |
           di=$(ls test-results/live-cloud-deepinfra-*.json 2>/dev/null | head -1)

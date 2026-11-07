@@ -23,7 +23,7 @@ We have no account system and no cloud storage, and we can't see your notebooks.
 
 The AI Tutor can use one of these services, chosen in Settings → AI Tutor:
 
-- **Inkling AI (cloud, the default in the published installers).** Inkling's server on Cloudflare, answered by Qwen 3.8 27B hosted by **DeepInfra** (DeepInfra Inc., United States). If DeepInfra is unavailable for a long time, the operator may switch the server back to **Cloudflare Workers AI**, which hosts the same model. The app's permission notice names both.
+- **Inkling AI (cloud, the default in the published installers).** Inkling's server on Cloudflare, answered by Qwen 3.8 27B hosted by **DeepInfra** (DeepInfra Inc., United States). If DeepInfra is unavailable for a long time, the operator may switch the server back to **Cloudflare Workers AI**, which hosts the same model. The app's permission notice names both. Versions of Inkling released before this notice keep being answered by Cloudflare Workers AI, the only provider their notice names, until they are updated.
 - **Ollama.** A program on your own computer. Nothing leaves your computer.
 - **Google Gemini, with your own key.** Only in development versions of Inkling; the published installers don't include it. Adults only, under Google's terms.
 
