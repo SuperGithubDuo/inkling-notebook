@@ -141,7 +141,10 @@ try {
   // 1–2. Install A and use it.
   let exe = await install(pkgA)
   step(`installed ${exe}`)
-  const smoke = spawnSync(process.execPath, [join(root, 'tests/e2e/packaged.e2e.mjs')], { stdio: 'inherit', env: { ...process.env, INKLING_PACKAGED_APP: exe } })
+  // Upgrading from the published release: A is an older version than this checkout.
+  const versionA = process.env.INKLING_UPGRADE_FROM_RELEASE === '1' ? /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+?)?)(?:-(?:x64|arm64))?\.(?:exe|dmg)$/.exec(pkgA)?.[1] : undefined
+  if (process.env.INKLING_UPGRADE_FROM_RELEASE === '1') assert.ok(versionA, `version of ${pkgA}`)
+  const smoke = spawnSync(process.execPath, [join(root, 'tests/e2e/packaged.e2e.mjs')], { stdio: 'inherit', env: { ...process.env, INKLING_PACKAGED_APP: exe, ...(versionA ? { INKLING_EXPECT_VERSION: versionA } : {}) } })
   assert.equal(smoke.status, 0, 'the packaged-app smoke test passed on the installed app')
   const state = JSON.parse(await readFile(join(shots, 'packaged-state.json'), 'utf8'))
   step(`the installed app works (first launch, handwriting, PDF import/export), data in ${state.userData}`)
