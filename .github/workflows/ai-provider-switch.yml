@@ -43,8 +43,8 @@ on:
 
 permissions:
   contents: read
-  # environment-check.mjs reads the production-ai environment's protection rules.
   deployments: read
+  actions: read
 
 concurrency:
   group: beta-server-production
