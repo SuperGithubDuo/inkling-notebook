@@ -96,9 +96,22 @@ export function AiSettings() {
 
 /** Today's allowance in words: roughly how many answers are left here. */
 export function quotaText(q: CloudQuota): string {
-  const left = Math.max(0, Math.min(q.installLimit - q.installUsed, q.networkLimit - q.networkUsed, q.globalLimit - q.globalUsed))
-  if (left <= 0 || q.approxAnswersLeft <= 0) return 'Today’s free AI answers are used up.'
-  return `About ${q.approxAnswersLeft} free answer${q.approxAnswersLeft === 1 ? '' : 's'} left today on this computer.`
+  const own = Math.max(0, Math.min(q.installLimit - q.installUsed, q.networkLimit - q.networkUsed))
+  const shared = Math.max(0, q.globalLimit - q.globalUsed)
+  const left = Math.min(own, shared)
+  if (left <= 0 || q.approxAnswersLeft <= 0) {
+    return shared < own ? 'Inkling’s shared free AI budget for today is used up for everyone.' : 'Today’s free AI answers on this computer are used up.'
+  }
+  const base = `About ${q.approxAnswersLeft} free answer${q.approxAnswersLeft === 1 ? '' : 's'} left today on this computer`
+  // Say plainly when the shared budget, not this computer's own allowance, is what limits the answers.
+  return shared < own ? `${base}, while Inkling’s shared daily budget lasts.` : `${base}.`
+}
+
+/** Why allowances are lower than usual today, in words; null when they aren't. */
+export function quotaReason(q: CloudQuota): string | null {
+  if (q.reduced) return 'Everyone’s daily allowance is smaller right now because Inkling’s shared AI budget is nearly used up.'
+  if (q.paced) return 'Today’s shared budget is a little smaller than usual so there is enough left for the rest of the month.'
+  return null
 }
 
 const resetTime = (iso: string): string => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -144,6 +157,11 @@ function CloudSettings({ status }: { status: AiStatus }) {
         {cloud.quota ? (
           <>
             <span className="font-medium text-ink">{quotaText(cloud.quota)}</span>
+            {quotaReason(cloud.quota) && (
+              <span className="block text-[12px] text-ink-2" data-testid="ai-cloud-quota-reason">
+                {quotaReason(cloud.quota)}
+              </span>
+            )}
             <Meter used={cloud.quota.installUsed} limit={cloud.quota.installLimit} />
             <span className="block text-[12px] text-ink-3">
               More every day at {resetTime(cloud.quota.resetAt)} (midnight UTC). Everyone together has used {Math.round((100 * cloud.quota.globalUsed) / Math.max(1, cloud.quota.globalLimit))}% of
@@ -154,7 +172,7 @@ function CloudSettings({ status }: { status: AiStatus }) {
           <span className="text-ink-3">Today’s allowance appears once Inkling has reached the AI server.</span>
         ) : (
           <span className="text-ink-3" data-testid="ai-cloud-quota-unconsented">
-            About 10 free answers a day on each computer. Inkling doesn’t contact its AI server, even to check this, until you allow it below.
+            A limited number of free answers each day on each computer, from a budget shared by everyone. Inkling doesn’t contact its AI server, even to check this, until you allow it below.
           </span>
         )}
       </div>

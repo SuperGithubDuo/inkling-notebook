@@ -30,7 +30,7 @@ import { aiRequestSchema, type AiRequest } from '../../src/shared/ai'
 import { taskSpec } from '../../src/main/ai/prompts'
 import { UPSTREAM_RETRY_MS, type Identity, type Ledger, type Quota, type RefusalCode } from './ledger'
 import type { AiBinding, ProviderId } from './provider'
-import { classifyUpstream, costFor, estimateInputTokens, parseUpstream, readSse, toMessages, type Rates, type Usage } from './upstream'
+import { classifyUpstream, costFor, reportedCost, estimateInputTokens, parseUpstream, readSse, toMessages, type Rates, type Usage } from './upstream'
 import { chooseModel, type TextModelConfig } from './route'
 
 export type { AiBinding } from './provider'
@@ -56,6 +56,11 @@ export interface ServerConfig {
    * worst case reserved before the call above what the provider will bill.
    */
   inputMargin?: number
+  /**
+   * External providers: how many attempts the adapter may make. A timed-out attempt may have been
+   * billed, so the worst case reserves input for every attempt (default 1).
+   */
+  upstreamAttempts?: number
   /** Reasoning effort sent to the model ('low' keeps hidden, billed reasoning short). Empty: not sent. */
   reasoningEffort: string
   /** Sends chat_template_kwargs.enable_thinking = false. */
@@ -141,16 +146,27 @@ const inAbout = (seconds?: number): string => {
 }
 
 /** What each refusal tells the person, and with which app error code. */
+/** Never a silent cut: when allowances are reduced near the budget, the refusal says so. */
+const reducedWhy = (quota: Quota | undefined): string =>
+  quota?.reduced ? ' (everyone’s allowance is smaller right now because Inkling’s shared AI budget is nearly used up)' : ''
+
 function refusal(code: RefusalCode, retryAfter: number | undefined, quota?: Quota): Response {
   const later = inAbout(retryAfter)
   const keepGoing = 'Your notebooks work as usual, and you can use the tutor on this computer (Ollama) meanwhile.'
   switch (code) {
     case 'install_quota':
-      return problem(429, 'daily_quota', `You’ve used today’s free AI answers on this computer. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
+      return problem(429, 'daily_quota', `You’ve used today’s free AI answers on this computer${reducedWhy(quota)}. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'network_quota':
-      return problem(429, 'daily_quota', `Today’s free AI answers for your internet connection (shared by everyone on it, such as a school or office) are used up. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
+      return problem(429, 'daily_quota', `Today’s free AI answers for your internet connection (shared by everyone on it, such as a school or office) are used up${reducedWhy(quota)}. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'global_quota':
-      return problem(429, 'daily_quota', `Inkling’s free AI answers for today are used up for everyone. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
+      // Paced: today's share was set lower to keep budget for the rest of the month; say so.
+      return problem(
+        429,
+        'daily_quota',
+        `Inkling’s free AI answers for today are used up for everyone${quota?.paced ? ', to keep enough for the rest of the month' : ''}. More are available ${later}. ${keepGoing}`,
+        retryAfter,
+        { scope: code, quota }
+      )
     case 'install_monthly_quota':
       return problem(429, 'daily_quota', `You’ve used this month’s free AI answers on this computer. More are available ${inDays(retryAfter)}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'global_monthly_quota':
@@ -246,15 +262,18 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
 
   // Reserve the worst case against the service's cap; the installation and network need room for a typical answer.
   // Near the cap a chat answer may be shortened to fit; a structured answer can't be.
+  // Retried attempts that timed out may each have been billed for their input: the worst case covers them,
+  // so the settled cost (retries + answer) can never exceed what was reserved against the caps.
+  const retryInputs = external ? Math.max(0, (config.upstreamAttempts ?? 1) - 1) * inputCost : 0
   let maxTokens = spec.maxOutputTokens
-  let reserved = Math.ceil(inputCost + maxTokens * outRate)
+  let reserved = Math.ceil(retryInputs + inputCost + maxTokens * outRate)
   const expected = Math.ceil(inputCost + Math.min(maxTokens, EXPECTED_OUTPUT_TOKENS[body.task]) * outRate)
   let res = await ledger.reserve(id, reserved, expected, fingerprint)
   if (!res.ok && body.task === 'chat' && res.code === 'global_quota' && res.quota) {
-    const fit = Math.floor((res.quota.globalLimit - res.quota.globalUsed - inputCost) / outRate)
+    const fit = Math.floor((res.quota.globalLimit - res.quota.globalUsed - inputCost - retryInputs) / outRate)
     if (fit >= MIN_CHAT_TOKENS) {
       maxTokens = Math.min(maxTokens, fit)
-      reserved = Math.ceil(inputCost + maxTokens * outRate)
+      reserved = Math.ceil(retryInputs + inputCost + maxTokens * outRate)
       res = await ledger.reserve(id, reserved, Math.min(expected, reserved), fingerprint)
     }
   }
@@ -367,9 +386,13 @@ async function tutor(request: Request, deps: Deps): Promise<Response> {
     const tokens = usage
       ? { input: usage.inputTokens, output: usage.outputTokens, cached: usage.cachedInputTokens ?? 0 }
       : { input: inputTokens, output: Math.ceil((text.length + reasoningChars) / 3), estimated: true }
-    await ledger.settle(reservationId, cost, { answered: !failed && !clientGone && !!text, tokens })
+    // The real cost is always what's charged. If the provider billed more than the worst case reserved
+    // (its token count above the estimate's margin), the excess is counted and reported, never hidden.
+    if (cost > reserved) console.warn('cost above reservation', Math.round(cost - reserved))
+    await ledger.settle(reservationId, cost, { answered: !failed && !clientGone && !!text, tokens, overshoot: Math.max(0, cost - reserved) })
     // Counts only (no content, no identity): which model, what kind of request, its cost (ledger unit), tokens, whether it failed.
-    await ledger.record({ model: choice.model, route: choice.route, task: body.task, image: hasImage, neurons: cost, tokens, error: failed && !text ? (failed === 'empty' ? 'empty' : 'stream') : undefined })
+    const providerReported = usage ? reportedCost(usage, choice.rates) : undefined
+    await ledger.record({ model: choice.model, route: choice.route, task: body.task, image: hasImage, neurons: cost, tokens, ...(providerReported !== undefined ? { providerReported } : {}), error: failed && !text ? (failed === 'empty' ? 'empty' : 'stream') : undefined })
     const quota = await ledger.quota(id)
     if (failed && !text) {
       await send('error', { code: 'server', message: 'The model stopped before answering. Try again in a moment.', quota })

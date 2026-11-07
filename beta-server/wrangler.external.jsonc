@@ -29,26 +29,26 @@
     "PRICE_INPUT_USD_PER_M": "0.20",
     "PRICE_OUTPUT_USD_PER_M": "2.50",
     "PRICE_CACHED_INPUT_USD_PER_M": "0.05",
-    // Hard caps on what the service may spend: any 24 hours, and each calendar month (UTC).
-    "GLOBAL_DAILY_USD": "1.00",
-    "GLOBAL_MONTHLY_USD": "20",
-    // Fair shares. A typical answer costs $0.0006 (measured) to $0.0008 (full-size images) at
-    // list price ($0.0015 for long conversations), so $0.02/day ≈ 13–34 answers a day per
-    // installation (today: ~10 on Workers AI); $0.30/month ≈ 200–500 a month. A network gets 10
-    // installations' worth ($0.20/day ≈ 130–340 answers), so a classroom behind one school IP
-    // isn't cut off; a reinstall loop on one connection still stops there.
-    "INSTALL_DAILY_USD": "0.02",
-    "INSTALL_MONTHLY_USD": "0.30",
-    "NETWORK_DAILY_USD": "0.20",
+    // Budget (6 Nov 2026 review): a $5 hard monthly cap, at most $0.25 in any 24 hours. Monthly
+    // pacing keeps each day's cap at or below (budget left this month / days left) x 1.5, so a busy
+    // start can't spend the last days' share: with nothing spent yet that is $0.24-0.25 a day.
+    "GLOBAL_DAILY_USD": "0.25",
+    "GLOBAL_MONTHLY_USD": "5",
+    "MONTHLY_PACING": "1.5",
+    // One installation's ceiling: $0.01/day at list price = ~17 measured answers, ~13 app-size,
+    // ~7 long-conversation; $0.15/month. This is a ceiling, not a promise: the app shows the
+    // smaller of this and what is left of today's shared budget.
+    "INSTALL_DAILY_USD": "0.01",
+    "INSTALL_MONTHLY_USD": "0.15",
+    // One connection (a school, an office, a reinstall loop): 5 installations' worth, a fifth of the day.
+    "NETWORK_DAILY_USD": "0.05",
     "TYPICAL_USD_PER_ANSWER": "0.0008",
-    // At 80% of the day's or month's budget, everyone's daily share halves.
-    "SOFT_LIMIT_FRACTION": "0.8",
-    "SOFT_LIMIT_FACTOR": "0.5",
+    // No reduced allowances near the cap (SOFT_LIMIT_* unset): pacing spreads the budget instead.
     "INSTALL_PER_MINUTE": "6",
     "NETWORK_PER_MINUTE": "20",
     "INSTALL_CONCURRENT": "1",
-    "NETWORK_CONCURRENT": "8",
-    "GLOBAL_CONCURRENT": "24",
+    "NETWORK_CONCURRENT": "4",
+    "GLOBAL_CONCURRENT": "8",
     "UPSTREAM_MAX_ATTEMPTS": "3",
     "UPSTREAM_TIMEOUT_MS": "45000",
     "UPSTREAM_IDLE_TIMEOUT_MS": "45000",

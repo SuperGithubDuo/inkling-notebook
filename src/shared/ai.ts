@@ -78,7 +78,7 @@ export const GEMINI_SENT: readonly SentItem[] = SENT_CONTENT
 export const CLOUD_WHEN_SENT = 'Nothing is sent — not even a check of today’s allowance — until you allow it. After that, something is sent only when you ask the tutor, and when Inkling checks how many free answers are left.'
 /** What the cloud AI does with what it receives, shown wherever it can be chosen. */
 export const CLOUD_DATA_NOTE =
-  'Requests go to Inkling’s AI server, which has them answered by DeepInfra (an AI hosting company in the United States) or, as a backup, by Cloudflare Workers AI. Both say they do not use requests to train models and do not store them after answering, and Inkling’s server never stores or logs their content. To share out the free allowance, the server counts usage per installation and per internet connection, in scrambled form: daily counts are deleted every day, and this installation’s monthly count at the end of each month.'
+  'Requests go to Inkling’s AI server, which has them answered by DeepInfra (an AI hosting company in the United States) or, as a backup, by Cloudflare Workers AI. Both say they do not use requests to train models and do not keep them after answering, apart from limited exceptions such as support cases and legal obligations; Inkling’s server never stores or logs their content. To share out the free allowance, the server counts usage per installation and per internet connection, in scrambled form: daily counts are deleted every day, and this installation’s monthly count at the end of each month.'
 /** Who the permission covers and what it is not: shown wherever cloud permission is asked. */
 export const CLOUD_PERMISSION_SCOPE =
   'This permission covers everyone who uses Inkling on this computer account. Inkling does not check ages, and clicking Allow does not verify a parent’s or guardian’s consent: if you are under 18, ask a parent or guardian before allowing. Notebooks work fully without the AI.'
@@ -304,6 +304,10 @@ export interface CloudQuota {
   approxAnswersLeft: number
   /** When the allowance resets (00:00 UTC, like Cloudflare's own). */
   resetAt: string
+  /** Everyone's daily allowance is reduced right now because the shared budget is nearly used. */
+  reduced?: boolean
+  /** Today's shared budget is set lower than usual to keep enough for the rest of the month. */
+  paced?: boolean
 }
 
 export interface CloudState {

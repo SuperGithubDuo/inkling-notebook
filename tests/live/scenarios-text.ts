@@ -10,6 +10,9 @@
  *   J  PDF text with a wrong worked example (circle area), then an exercise
  *   K  typed answer checks: an equivalent form is right, a wrong value is not
  *   L  handwriting, then three typed follow-ups (the app's own buildTurns)
+ *   M  a long tutoring session at the history limit (5 exchanges, a notebook note repeated),
+ *      then a question only the earliest exchange answers
+ *   N  a complex conceptual explanation (why the product rule holds), at full length
  */
 import { it } from 'vitest'
 import type { AiPart, AiRequest } from '../../src/shared/ai'
@@ -120,5 +123,38 @@ export function registerTextScenarios({ run, check, timeout = 900_000 }: Scenari
     check(c, 'answered the second follow-up', c.ok, c.error)
     check(c, 'second follow-up on the main model', onMain(c), c.model)
     check(c, 'substitutes: 4 − 10 + 6 = 0', /4-10\+6|=0/.test(flatMath(c.text)), flatMath(c.text).slice(0, 300))
+  })
+
+  it('M: a long session at the history limit still remembers its start', { timeout }, async () => {
+    const note = `<notes title="Unit 6: Chemistry">\nIdeal gas law: pV = nRT, R = 8.314 J/(mol·K). Use kelvin: T(K) = T(°C) + 273.15.\nMolar mass of N2 = 28.0 g/mol, of O2 = 32.0 g/mol.\nAvogadro's number: 6.022 × 10^23 per mole.\nAt STP (273.15 K, 100 kPa) one mole of gas takes 22.7 L.\n</notes>`
+    const history: ThreadEntry[] = []
+    const say = async (parts: AiPart[]) => {
+      const r = await run('M', { task: 'chat', turns: buildTurns(history, parts) })
+      history.push({ role: 'user', parts, ok: true }, { role: 'model', parts: [{ text: r.text || '(no answer)' }], ok: r.ok })
+      return r
+    }
+    const a = await say([{ text: note }, { text: 'My chemistry teacher said to always remember my lab partner is called Priya and our gas sample was 14.0 g of nitrogen. Using my notes, how many moles is that?' }])
+    check(a, 'answered the first question', a.ok, a.error)
+    check(a, '14.0 g N2 is 0.5 mol', /0\.5|1\/2|½/.test(flatMath(a.text)), a.text.slice(0, 200))
+    await say([{ text: note }, { text: 'Explain in detail why the ideal gas law needs kelvin rather than degrees Celsius.' }])
+    await say([{ text: 'What volume does 0.5 mol take at STP, using my notes?' }])
+    await say([{ text: 'Now heat it to 100 °C at the same pressure. What is the new volume? Show each step.' }])
+    const e = await say([{ text: 'Which assumptions of the ideal gas model might fail for real nitrogen at high pressure?' }])
+    check(e, 'answered at the history limit', e.ok, e.error)
+    check(e, 'mentions molecular volume or attractions', /volume of (the )?molecules|intermolecular|attract|van der waals|finite size/i.test(e.text), e.text.slice(0, 300))
+    const f = await say([{ text: 'Remind me: what was my lab partner’s name and how many grams was our sample?' }])
+    check(f, 'answered', f.ok, f.error)
+    check(f, 'still remembers the name from the first message', /priya/i.test(f.text), f.text.slice(0, 200))
+    check(f, 'still remembers 14.0 g', /14(\.0)? ?g/i.test(f.text), f.text.slice(0, 200))
+    check(f, 'long input stayed under the server cap', (f.inputTokens ?? 0) > 1000, String(f.inputTokens))
+  })
+
+  it('N: a complex conceptual explanation is complete, not cut short', { timeout }, async () => {
+    const r = await run('N', chatWith([{ text: 'I keep memorising the product rule but I don’t understand it. Explain WHY (fg)′ = f′g + fg′ is true: give the intuition with a picture in words (a rectangle whose sides grow), then a short proof from the limit definition, then one worked example, and finish with a common mistake students make.' }]))
+    check(r, 'answered', r.ok, r.error)
+    check(r, 'uses the rectangle/area intuition', /rectangle|area/i.test(r.text), r.text.slice(0, 200))
+    check(r, 'uses the limit definition', /lim|limit|h ?→ ?0|h->0|\\to 0/i.test(r.text), r.text.slice(0, 300))
+    check(r, 'names a common mistake (f′g′)', /f'g'|f′g′|f′\(x\)g′\(x\)|product of (the )?derivatives/i.test(r.text), r.text.slice(-600))
+    check(r, 'finished, not cut off at the output cap', (r.outputTokens ?? 0) < 900, String(r.outputTokens))
   })
 }

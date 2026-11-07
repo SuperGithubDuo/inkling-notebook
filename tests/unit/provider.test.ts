@@ -8,7 +8,7 @@
  * nothing here reaches the internet.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { costFor, parseUpstream } from '../../beta-server/src/upstream'
+import { costFor, parseUpstream, reportedCost } from '../../beta-server/src/upstream'
 import { PRESETS, externalProvider, guardStream, kindOfStatus, retryAfterSeconds, toProviderBody, UpstreamError } from '../../beta-server/src/provider'
 import { inference, limits as limitsFromEnv, NOTICE_NOT_YET_SHIPPED, providerOf, type Env } from '../../beta-server/src/config'
 import { Ledger, type LedgerLimits } from '../../beta-server/src/ledger'
@@ -129,11 +129,16 @@ describe('provider adapter', () => {
     expect(() => externalProvider({ id: 'deepinfra', apiKey: 'k', baseUrl: 'https://api.deepinfra.com/v1/openai' })).not.toThrow()
   })
 
-  it('reads cached tokens and a reported cost; the provider’s figures win over list prices', () => {
+  it('reads cached tokens and a reported cost; the higher of list price and the reported cost is charged', () => {
     const ev = parseUpstream({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1000, completion_tokens: 200, prompt_tokens_details: { cached_tokens: 600 }, cost: 0.00031 } })
     expect(ev.usage).toEqual({ inputTokens: 1000, outputTokens: 200, cachedInputTokens: 600, reportedCostUsd: 0.00031 })
-    // Reported cost (OpenRouter), with the credit-fee multiplier.
-    expect(costFor(ev.usage!, { ...USD_RATES, costMultiplier: 1.055 })).toBeCloseTo(310 * 1.055)
+    // List price here is 80 + 30 + 500 = 610 µ$; a lower reported (promotional) 310 µ$ doesn't lower the charge.
+    expect(costFor(ev.usage!, { ...USD_RATES, costMultiplier: 1.055 })).toBeCloseTo(610 * 1.055)
+    expect(reportedCost(ev.usage!, { ...USD_RATES, costMultiplier: 1.055 })).toBeCloseTo(310 * 1.055)
+    // A reported cost above list price (a price rise) is charged in full.
+    expect(costFor({ ...ev.usage!, reportedCostUsd: 0.001 }, USD_RATES)).toBeCloseTo(1000)
+    // DeepInfra's own field name.
+    expect(parseUpstream({ choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 2, estimated_cost: 0.0000043 } }).usage?.reportedCostUsd).toBe(0.0000043)
     // No reported cost (DeepInfra): its token counts at list price, cached input at the cached rate.
     const { reportedCostUsd: _, ...tokensOnly } = ev.usage!
     expect(costFor(tokensOnly, USD_RATES)).toBeCloseTo(400 * 0.2 + 600 * 0.05 + 200 * 2.5)
@@ -371,6 +376,148 @@ describe('AI server on an external provider', () => {
 })
 
 // ------------------------------------------------------------------ economics
+
+describe('the $5 budget: atomic caps, reconciled reservations, pacing, honest messages', () => {
+  const base: LedgerLimits = { unit: 'usd', globalDailyNeurons: 250_000, globalMonthly: 5_000_000, installDailyNeurons: 10_000, networkDailyNeurons: 50_000, installPerMinute: 1000, networkPerMinute: 1000, installConcurrent: 1000, networkConcurrent: 1000, globalConcurrent: 1000, reservationTtlMs: 600_000, typicalNeuronsPerAnswer: 800 }
+  const memory = () => {
+    const map = new Map<string, unknown>()
+    return { map, storage: { get: async (k: string) => structuredClone(map.get(k)) as any, put: async (k: string, v: unknown) => void map.set(k, structuredClone(v)), delete: async (k: string) => void map.delete(k), list: async (p: string) => [...map.keys()].filter((k) => k.startsWith(p)) } }
+  }
+  const who = (i: number) => ({ install: 'inst_' + String(i).padStart(32, '0'), network: `198.51.100.${i % 250}` })
+
+  it('200 simultaneous requests can never reserve past the daily or monthly hard cap', async () => {
+    const { storage } = memory()
+    const ledger = new Ledger(storage, { ...base, globalDailyNeurons: 30_000, globalMonthly: 40_000 })
+    // Each worst case is 1,000 µ$: at most 30 may be in flight under a $0.03 daily cap.
+    const results = await Promise.all(Array.from({ length: 200 }, (_, i) => ledger.reserve(who(i), 1_000, 800)))
+    const ok = results.filter((r) => r.ok)
+    expect(ok).toHaveLength(30)
+    expect(results.filter((r) => !r.ok && r.code === 'global_quota')).toHaveLength(170)
+    // Every one settles at its real (lower) cost: room comes back, and the month never passes its cap.
+    await Promise.all(ok.map((r) => ledger.settle((r as any).reservationId, 600)))
+    const s1 = await ledger.summary()
+    expect(s1.answering).toBe(0)
+    expect(s1.monthUsed).toBe(18_000)
+    const more = await Promise.all(Array.from({ length: 200 }, (_, i) => ledger.reserve(who(i + 300), 1_000, 800)))
+    const ok2 = more.filter((r) => r.ok)
+    await Promise.all(ok2.map((r) => ledger.settle((r as any).reservationId, 1_000)))
+    const s2 = await ledger.summary()
+    expect(s2.monthUsed).toBeLessThanOrEqual(30_000) // the daily cap (any 24 h) binds first here
+    expect(s2.monthUsed).toBeLessThanOrEqual(40_000)
+  })
+
+  it('reservations are reconciled: success charges the real cost, failure before the model charges nothing, a lost answer the worst case', async () => {
+    const { storage } = memory()
+    const ledger = new Ledger(storage, base)
+    const a = await ledger.reserve(who(1), 3_000, 800)
+    const b = await ledger.reserve(who(2), 3_000, 800)
+    const c = await ledger.reserve(who(3), 3_000, 800)
+    if (!a.ok || !b.ok || !c.ok) throw new Error('reserve')
+    expect((await ledger.summary()).globalUsed).toBe(9_000) // all three held against the cap while open
+    await ledger.settle(a.reservationId, 640) // answered: the provider's real cost
+    await ledger.settle(b.reservationId, undefined, { failedBeforeModel: true }) // refused before any work
+    await ledger.settle(c.reservationId, undefined) // stream lost, usage unknown: the full reservation
+    const s = await ledger.summary()
+    expect(s.answering).toBe(0)
+    expect(s.globalUsed).toBe(640 + 0 + 3_000)
+    expect(s.monthUsed).toBe(3_640)
+    // Settling twice (a retry of the bookkeeping) changes nothing.
+    await ledger.settle(a.reservationId, 640)
+    expect((await ledger.summary()).monthUsed).toBe(3_640)
+  })
+
+  it('an abandoned reservation is charged in full and released when it expires, never left holding the cap', async () => {
+    const { storage } = memory()
+    let t = Date.parse('2026-11-10T12:00:00Z')
+    const ledger = new Ledger(storage, base, () => t)
+    const a = await ledger.reserve(who(1), 3_000, 800)
+    if (!a.ok) throw new Error('reserve')
+    t += 11 * 60_000 // past the 10-minute lifetime
+    const s = await ledger.summary()
+    expect(s.answering).toBe(0)
+    expect(s.monthUsed).toBe(3_000)
+  })
+
+  it('a timed-out retry is inside the reservation: the settled cost never exceeds what was reserved', async () => {
+    await start({ adapter: { firstByteTimeoutMs: 150 }, server: { upstreamAttempts: 3 } })
+    fake!.fail({ hangMs: 600 })
+    fake!.model.reply({ text: 'ok', usage: { inputTokens: 300, outputTokens: 10 } })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const r = await post(chat('hi'))
+    expect(r.events.at(-1)!.event).toBe('done')
+    await server!.settled()
+    const sum = (await server!.admin('GET', '/admin/summary')).body
+    expect(sum.overshoot).toEqual({ count: 0, total: 0 })
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('cost above reservation'))).toBe(false)
+  })
+
+  it('a provider bill above the worst case is charged in full and reported, never hidden', async () => {
+    await start()
+    fake!.model.reply({ text: 'ok', usage: { inputTokens: 200_000, outputTokens: 10 } }) // far above any estimate
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    await post(chat('hi'))
+    await server!.settled()
+    const sum = (await server!.admin('GET', '/admin/summary')).body
+    expect(sum.monthUsed).toBe(200_000 * 0.2 + 10 * 2.5)
+    expect(sum.overshoot.count).toBe(1)
+    expect(sum.overshoot.total).toBeGreaterThan(0)
+  })
+
+  it('monthly pacing: a busy start lowers later days’ caps so the month is never spent early', async () => {
+    const { storage } = memory()
+    let t = Date.parse('2026-11-01T09:00:00Z') // 30 days in November
+    const ledger = new Ledger(storage, { ...base, monthlyPacing: 1.5 }, () => t)
+    // Day 1: (5,000,000 / 30) × 1.5 = 250,000 µ$ — the configured $0.25.
+    expect((await ledger.quota(who(1))).globalLimit).toBe(250_000)
+    expect((await ledger.quota(who(1))).paced).toBeUndefined()
+    // Spend $4.20 over the first days (simulated here as one large settled answer on 1 Nov).
+    const big = await ledger.reserve(who(1), 240_000, 1)
+    if (!big.ok) throw new Error('reserve')
+    await ledger.settle(big.reservationId, 4_200_000)
+    t = Date.parse('2026-11-21T09:00:00Z') // 10 days left: (800,000 / 10) × 1.5 = 120,000 µ$
+    const q = await ledger.quota(who(2))
+    expect(q.globalLimit).toBe(120_000)
+    expect(q.paced).toBe(true)
+    const s = await ledger.summary()
+    expect(s).toMatchObject({ paced: true, globalLimit: 120_000, dailyConfigured: 250_000 })
+    // A request that doesn't fit today's paced share waits for tomorrow's, with a message that says why.
+    const r = await ledger.reserve(who(2), 130_000, 1)
+    expect(r).toMatchObject({ ok: false, code: 'global_quota' })
+  })
+
+  it('without pacing or soft limits, each day’s cap is the configured one and nothing is silently reduced', async () => {
+    const { storage } = memory()
+    const ledger = new Ledger(storage, base)
+    const a = await ledger.reserve(who(1), 240_000, 1)
+    if (!a.ok) throw new Error('reserve')
+    await ledger.settle(a.reservationId, 240_000) // 96% of the day
+    const q = await ledger.quota(who(2))
+    expect(q.installLimit).toBe(10_000)
+    expect(q.reduced).toBeUndefined()
+  })
+
+  it('the refusal says when the shared budget, paced for the month, is what ran out', async () => {
+    await start({ server: { globalDailyNeurons: 250_000 }, limits: { globalMonthly: 300, monthlyPacing: 1.5 } })
+    const r = await post(chat('hi'))
+    expect(r.status).toBe(429)
+    expect(r.json.error.scope).toBe('global_quota')
+    expect(r.json.error.message).toMatch(/used up for everyone, to keep enough for the rest of the month/)
+    expect(fake!.completions()).toHaveLength(0)
+  })
+
+  it('when reduced allowances are switched on, the refusal says so', async () => {
+    await start({ server: { globalDailyNeurons: 10_000, installDailyNeurons: 3_000 }, limits: { softFraction: 0.5, softFactor: 0.5 } })
+    fake!.model.reply({ text: 'x', usage: { inputTokens: 5000, outputTokens: 1800 } }) // 5,500 µ$: past half the day
+    await post(chat('big'), { install: INSTALL_B, ip: '198.51.100.9' })
+    await server!.settled()
+    fake!.model.reply({ text: 'y', usage: { inputTokens: 1000, outputTokens: 300 } })
+    await post(chat('one'))
+    await server!.settled()
+    const r = await post(chat('two'))
+    expect(r.json.error.scope).toBe('install_quota')
+    expect(r.json.error.message).toMatch(/allowance is smaller right now because Inkling’s shared AI budget is nearly used up/)
+  })
+})
 
 describe('one model on an external provider, and token accounting', () => {
   const TEXT_MODEL = { model: '@cf/google/gemma-4-26b-a4b-it', rates: { inputPerM: 9091, outputPerM: 27273 }, tasks: ['practice', 'chat', 'check'] as const }
@@ -613,7 +760,9 @@ describe('Worker configuration', () => {
     const inf = inference(env)
     if (typeof inf === 'string') throw new Error(inf)
     expect(inf).toMatchObject({ provider: 'deepinfra', model: 'Qwen/Qwen3.8-27B', publicModel: 'qwen3.8-27b', minNotice: 4, inputMargin: 1.5, rates: { unit: 'usd', inputPerM: 200_000, outputPerM: 2_500_000, costMultiplier: 1 } })
-    expect(limitsFromEnv(env)).toMatchObject({ unit: 'usd', globalDailyNeurons: 5_000_000, globalMonthly: 100_000_000, installDailyNeurons: 100_000, networkDailyNeurons: 1_000_000, installMonthly: 500_000, softFraction: 0.8, softFactor: 0.5 })
+    expect(limitsFromEnv(env)).toMatchObject({ unit: 'usd', globalDailyNeurons: 5_000_000, globalMonthly: 100_000_000, installDailyNeurons: 100_000, networkDailyNeurons: 1_000_000, installMonthly: 500_000 })
+    // Reduced allowances are opt-in; monthly pacing is off unless set.
+    expect(limitsFromEnv(env)).toMatchObject({ softFraction: undefined, softFactor: undefined, monthlyPacing: undefined })
   })
 
   it('a daily cap above the monthly one is held to the monthly one', () => {

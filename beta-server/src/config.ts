@@ -65,6 +65,8 @@ export interface Env {
   /** Budget protection: at this share of the daily or monthly cap, daily allowances are scaled by SOFT_FACTOR. */
   SOFT_LIMIT_FRACTION?: string
   SOFT_LIMIT_FACTOR?: string
+  /** External providers: each day's global cap is at most (monthly budget left ÷ days left) × this. Unset: off. */
+  MONTHLY_PACING?: string
   UPSTREAM_MAX_ATTEMPTS?: string
   UPSTREAM_TIMEOUT_MS?: string
   UPSTREAM_IDLE_TIMEOUT_MS?: string
@@ -117,8 +119,11 @@ export function externalLimits(env: Env): LedgerLimits | string {
     globalConcurrent: num(env.GLOBAL_CONCURRENT, 12),
     reservationTtlMs: 10 * 60_000,
     typicalNeuronsPerAnswer: micro(pos(env.TYPICAL_USD_PER_ANSWER) ?? 0.0008),
-    softFraction: pos(env.SOFT_LIMIT_FRACTION) ?? 0.8,
-    softFactor: pos(env.SOFT_LIMIT_FACTOR) ?? 0.5
+    // Reduced allowances near the cap are opt-in (set both): monthly pacing spreads the budget instead,
+    // and when they are on the app is told (quota.reduced) and says so.
+    softFraction: pos(env.SOFT_LIMIT_FRACTION),
+    softFactor: pos(env.SOFT_LIMIT_FACTOR),
+    monthlyPacing: pos(env.MONTHLY_PACING)
   }
 }
 
@@ -142,7 +147,7 @@ export function limits(env: Env): LedgerLimits {
 }
 
 /** Who answers, and at what price, from the Worker's settings; a string explains a setting that is missing (serve nothing). */
-export function inference(env: Env): { ai: AiBinding; provider: ProviderId; model: string; publicModel: string; rates: ServerConfig['rates']; minNotice: number; inputMargin: number } | string {
+export function inference(env: Env): { ai: AiBinding; provider: ProviderId; model: string; publicModel: string; rates: ServerConfig['rates']; minNotice: number; inputMargin: number; upstreamAttempts?: number } | string {
   const provider = providerOf(env)
   if (provider === 'workers-ai') {
     // Refuse rather than risk billed usage on a Workers Paid account.
@@ -207,7 +212,9 @@ export function inference(env: Env): { ai: AiBinding; provider: ProviderId; mode
     // DeepInfra is named in the app's data notice from version 4. Any other host isn't named in a
     // shipped notice yet: it needs a new notice (and CLOUD_CONSENT_VERSION) before real users reach it.
     minNotice: num(env.MIN_NOTICE_VERSION, id === 'deepinfra' ? 4 : NOTICE_NOT_YET_SHIPPED),
-    inputMargin: num(env.INPUT_ESTIMATE_MARGIN, 1.5)
+    inputMargin: num(env.INPUT_ESTIMATE_MARGIN, 1.5),
+    // Each attempt the adapter may make (timed-out attempts may be billed): the worst case reserves input for each.
+    upstreamAttempts: Math.min(4, Math.max(1, num(env.UPSTREAM_MAX_ATTEMPTS, 3)))
   }
 }
 

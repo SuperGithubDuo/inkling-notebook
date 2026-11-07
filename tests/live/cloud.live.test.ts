@@ -83,7 +83,7 @@ const TEXT_MODEL = (() => {
 })()
 /** Which scenarios run: "all" (default), "core" (the original 13 answers), "text" (scenarios-text.ts) or "practice" (scenarios-practice.ts). */
 const SCENARIOS = (['core', 'text', 'practice'] as const).find((s) => s === env.INKLING_LIVE_SCENARIOS) ?? 'all'
-const SLUG = ((external ? `${external}-` : '') + MODEL.split('/').at(-1)! + (TEXT_MODEL ? `+${TEXT_MODEL.model.split('/').at(-1)}` : '') + (SCENARIOS === 'all' ? '' : `-${SCENARIOS}`)).replace(/[^A-Za-z0-9.+_-]/g, '_')
+const SLUG = ((env.INKLING_LIVE_LABEL ? `${env.INKLING_LIVE_LABEL}-` : '') + (external ? `${external}-` : '') + MODEL.split('/').at(-1)! + (TEXT_MODEL ? `+${TEXT_MODEL.model.split('/').at(-1)}` : '') + (SCENARIOS === 'all' ? '' : `-${SCENARIOS}`)).replace(/[^A-Za-z0-9.+_-]/g, '_')
 /** What the cost figures count: Neurons on Workers AI, µ$ on an external provider. */
 const unitLabel = external || env.INKLING_LIVE_UNIT === 'usd' ? 'µ$' : 'Neurons'
 if (!enabled) console.log('\n  Live cloud tests skipped: set INKLING_BETA_URL + INKLING_LIVE_CLOUD=1, or CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (see the comment at the top of this file).\n')

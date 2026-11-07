@@ -37,17 +37,26 @@ export interface Usage {
 export const neuronsFor = (u: Usage, r: Rates): number => (u.inputTokens * r.inputPerM + u.outputTokens * r.outputPerM) / 1e6
 
 /**
- * The real cost of an answer in the ledger's unit. The provider's own figures
- * win: its token counts (its tokenizer, its image accounting), its cached-token
- * count, and its reported dollar cost when it gives one. Prices are applied
- * only where the provider reports tokens but no cost.
+ * The cost of an answer in the ledger's unit. The provider's own token counts
+ * are used (its tokenizer, its image accounting, its cached-token count), priced
+ * at the configured list price. When the provider also reports a dollar cost
+ * (OpenRouter's usage.cost, DeepInfra's usage.estimated_cost), the HIGHER of the
+ * two is charged: a promotional price never makes the caps count less than list
+ * price, and a price rise above the configured one is still counted in full.
  */
 export function costFor(u: Usage, r: Rates): number {
   const mult = r.costMultiplier ?? 1
-  if (r.unit === 'usd' && typeof u.reportedCostUsd === 'number' && Number.isFinite(u.reportedCostUsd) && u.reportedCostUsd >= 0) return u.reportedCostUsd * 1e6 * mult
   const cached = Math.min(u.inputTokens, Math.max(0, u.cachedInputTokens ?? 0))
   const cachedRate = r.cachedInputPerM ?? r.inputPerM
-  return (((u.inputTokens - cached) * r.inputPerM + cached * cachedRate + u.outputTokens * r.outputPerM) / 1e6) * mult
+  const listed = (((u.inputTokens - cached) * r.inputPerM + cached * cachedRate + u.outputTokens * r.outputPerM) / 1e6) * mult
+  const reported = reportedCost(u, r)
+  return reported === undefined ? listed : Math.max(listed, reported)
+}
+
+/** The provider's own reported charge in the ledger's unit (µ$, fees included), when it gave one. */
+export function reportedCost(u: Usage, r: Rates): number | undefined {
+  if (r.unit !== 'usd' || typeof u.reportedCostUsd !== 'number' || !Number.isFinite(u.reportedCostUsd) || u.reportedCostUsd < 0) return undefined
+  return u.reportedCostUsd * 1e6 * (r.costMultiplier ?? 1)
 }
 
 type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }

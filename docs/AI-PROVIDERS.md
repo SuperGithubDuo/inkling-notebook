@@ -103,18 +103,32 @@ Production usage on 6 Nov 2026 (read-only `/admin/summary`): 0 answers in the pr
 
 For scale: Workers AI's free 10,000 Neurons/day are worth $0.11/day (~123 measured answers). These DeepInfra figures are **estimates from Workers AI token counts**; DeepInfra's tokenizer and image accounting may differ slightly, so measure with the live suite (mode 3) before relying on them.
 
-## Limits and budgets (recommended starting values)
+## Limits and budgets (recommended starting values, revised 6 Nov 2026)
 
-| Setting | Value | Means |
+A **$5 hard monthly budget** for everyone, at list price ($0.20 / $2.50 per million tokens):
+
+| Setting | Value | Meaning |
 |---|---|---|
-| `INSTALL_DAILY_USD` | $0.02 | ≈ 25–34 answers a day per installation (13 in long conversations; today ~10) |
-| `INSTALL_MONTHLY_USD` | $0.30 | ≈ 380–500 a month: daily use keeps its ceiling, a fresh install per day doesn't multiply a month |
-| `NETWORK_DAILY_USD` | $0.20 | 10 installations' worth per network, so a classroom on one school IP isn't cut off early; also `NETWORK_CONCURRENT` 8 |
-| `GLOBAL_DAILY_USD` | $1.00 (any 24 h) | ≈ 1,300–1,700 answers a day for everyone (≈ 12× today) |
-| `GLOBAL_MONTHLY_USD` | $20 | hard monthly cap; ~25,000–34,000 answers |
-| `SOFT_LIMIT_FRACTION` / `_FACTOR` | 0.8 / 0.5 | at 80% of the day's or month's budget, every daily share halves |
+| `GLOBAL_MONTHLY_USD` | $5 | hard monthly cap: ~3,300 (long conversations) to ~8,500 (measured) answers a month |
+| `GLOBAL_DAILY_USD` | $0.25 (any 24 h) | at most ~170–420 answers in any 24 hours |
+| `MONTHLY_PACING` | 1.5 | each UTC day's cap = min($0.25, budget left ÷ days left × 1.5); fixed for the day |
+| `INSTALL_DAILY_USD` | $0.01 | one computer's ceiling: ~17 measured, ~13 app-size, ~7 long-conversation answers |
+| `INSTALL_MONTHLY_USD` | $0.15 | ~190 app-size answers a month per computer |
+| `NETWORK_DAILY_USD` | $0.05 | one connection (a school, or a reinstall loop): 5 computers' worth, a fifth of a day |
+| `NETWORK_CONCURRENT` / `GLOBAL_CONCURRENT` | 4 / 8 | answers in progress at once |
+| `SOFT_LIMIT_*` | unset | no silent reductions; pacing spreads the budget instead |
 
-Growth rule of thumb: an active student averaging 5 answers a day costs about $0.10 a month at list price. A $20 month supports ~200 such students; $100 ~1,000; $600 ~6,000. Keep `GLOBAL_DAILY_USD` at about 1.5× the monthly cap ÷ 30, so one busy day can't spend a week's budget. Also set a spending limit or prepaid balance on the DeepInfra account, if it offers one, as a backstop outside Inkling's own ledger.
+An even month is $5 ÷ 30 ≈ $0.167 a day, about 210 app-size answers. The installation allowance is a **ceiling, not a promise**: the app shows the smaller of what this computer has left and what is left of the shared budget, and says when the shared budget is the limit.
+
+**How many people that serves** (app-size answers, $0.00078 each):
+
+| Typical use | Answers/day each | Daily active users an even day supports |
+|---|---|---|
+| Light (a couple of questions) | 2 | ~105 |
+| Regular homework session | 5 | ~42 |
+| Heavy (a full allowance) | 13 | ~16 |
+
+Outside Inkling: keep DeepInfra **prepaid with auto top-up off** and never load more than one month's budget, so the provider account itself cannot be charged beyond what is in it.
 
 ## How it works
 
@@ -143,7 +157,7 @@ Accounting: before the call, the request's worst case (estimated input + the tas
    # in wrangler.jsonc → vars, add the external block from wrangler.external.jsonc:
    #   INFERENCE_PROVIDER=deepinfra, UPSTREAM_MODEL, PRICE_*, GLOBAL_DAILY_USD, GLOBAL_MONTHLY_USD,
    #   INSTALL_DAILY_USD, INSTALL_MONTHLY_USD, NETWORK_DAILY_USD, TYPICAL_USD_PER_ANSWER,
-   #   SOFT_LIMIT_FRACTION, SOFT_LIMIT_FACTOR, UPSTREAM_*, MIN_NOTICE_VERSION=4, GLOBAL_CONCURRENT=24
+   #   MONTHLY_PACING, NETWORK_CONCURRENT=4, GLOBAL_CONCURRENT=8, UPSTREAM_*, MIN_NOTICE_VERSION=4
    npx wrangler deploy
    npm run admin -- summary                       # unit "usd", limits as set
    ```

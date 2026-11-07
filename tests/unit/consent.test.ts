@@ -293,4 +293,5 @@ describe('tutor history and the provider', () => {
 })
 
 /** sha256 (first 16 hex) of the cloud notice at CLOUD_CONSENT_VERSION 4 (DeepInfra, Workers AI as backup, monthly count). */
-const NOTICE_HASH_V4 = 'd8c8238bb5c436c2'
+// v4 is unreleased (main and every published app are on v3), so its wording could still be corrected without a v5.
+const NOTICE_HASH_V4 = '79703d6f2f73086b'
