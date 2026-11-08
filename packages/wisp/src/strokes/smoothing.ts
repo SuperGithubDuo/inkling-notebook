@@ -347,7 +347,7 @@ export function despike<T extends { x: number; y: number }>(pts: readonly T[], m
 export function refineNoiseMatched<T extends { x: number; y: number }>(
   samples: readonly T[],
   sigma: number,
-  opts: { maxLambda: number; minLambda?: number; strength?: number; spikeMin: number }
+  opts: { maxLambda: number; minLambda?: number; strength?: number; spikeMin: number; featureK?: number }
 ): NormPoint[] {
   const n = samples.length
   if (n < 3) return samples.map((p) => ({ x: p.x, y: p.y }))
@@ -360,7 +360,7 @@ export function refineNoiseMatched<T extends { x: number; y: number }>(
     const zy = whittaker(ys, lam)
     let s = 0
     for (let i = 0; i < n; i++) s += (zx[i]! - xs[i]!) ** 2 + (zy[i]! - ys[i]!) ** 2
-    return { r: Math.sqrt(s / (2 * n)), zx, zy }
+    return { r: Math.sqrt(s / (2 * n)), zx, zy, lam }
   }
   const lo0 = opts.minLambda ?? 0.05
   let best = rms(opts.maxLambda)
@@ -376,7 +376,26 @@ export function refineNoiseMatched<T extends { x: number; y: number }>(
     }
     if (best.r > target) best = rms(lo0)
   }
-  return best.zx.map((x, i) => ({ x, y: best.zy[i]! }))
+  const feat = opts.featureK ?? 0
+  if (!(feat > 0) || !(target > 0)) return best.zx.map((x, i) => ({ x, y: best.zy[i]! }))
+  // Feature preservation (v0.1.3). The λ above is right on AVERAGE (residual ≈
+  // noise), but on a fast stroke the residual concentrates on corners, loop
+  // tops and the two ends, which then get rounded off or pulled in. Points whose
+  // residual exceeds `featureK`·σ are real shape, not noise: give them more data
+  // weight (∝ residual², capped) and solve again — an iteratively reweighted
+  // smoother. Smooth stretches keep their λ; only the outliers of the fit change.
+  let zx = best.zx
+  let zy = best.zy
+  const lamUsed = best.lam
+  for (let it = 0; it < 2; it++) {
+    const w = xs.map((x, i) => {
+      const res = Math.hypot(zx[i]! - x, zy[i]! - ys[i]!) / (feat * target)
+      return res > 1 ? Math.min(25, res * res) : 1
+    })
+    zx = whittaker(xs, lamUsed, 2, w)
+    zy = whittaker(ys, lamUsed, 2, w)
+  }
+  return zx.map((x, i) => ({ x, y: zy[i]! }))
 }
 
 /**
@@ -387,18 +406,47 @@ export function refineNoiseMatched<T extends { x: number; y: number }>(
  */
 export class NoiseEstimator {
   private v: number
+  private rv: number
   private last: Array<{ x: number; y: number; t: number }> = []
+  private d2s: number[] = []
   samples = 0
 
   constructor(
     initial = 0.0025,
-    private readonly maxSpeed = 0.35
+    private readonly maxSpeed = 0.35,
+    private readonly window = 31,
+    /**
+     * Second differences underestimate noise that is correlated from frame to
+     * frame (MediaPipe's landmark wobble), so the robust estimate is scaled up;
+     * 1.5 balances finished-stroke jitter against flattening fast letters in
+     * replay (README, v0.1.3).
+     */
+    private readonly scale = 1.5
   ) {
     this.v = initial * initial
+    this.rv = initial * initial
   }
 
+  /**
+   * Live-filter noise level (v0.1.2 estimator, unchanged): mean of the
+   * second differences, clipped. Real motion leaks into it in fast writing,
+   * which makes the live stabilizer a little stronger then; that is kept
+   * because the live pen-down hooks grew without it in replay.
+   */
   get sigma(): number {
     return Math.sqrt(this.v)
+  }
+
+  /**
+   * Robust noise level for the pen-up refinement (v0.1.3): the MEDIAN of the
+   * last `window` second differences (white noise: d2/σ² ~ 6·χ²₂, median of
+   * χ²₂ = 1.386), so the accelerations of fast writing — turning at the top
+   * of an "l", closing an "o" — do not move it. With the mean estimate the
+   * level climbed to 4–5× the real noise within a few fast letters, and the
+   * refinement then flattened those letters into blobs.
+   */
+  get robustSigma(): number {
+    return Math.sqrt(this.rv)
   }
 
   add(p: { x: number; y: number }, t: number): void {
@@ -416,6 +464,13 @@ export class NoiseEstimator {
     const rate = this.samples < 60 ? 0.08 : 0.03
     this.v += rate * (est - this.v)
     this.samples++
+    this.d2s.push(d2)
+    if (this.d2s.length > this.window) this.d2s.shift()
+    if (this.d2s.length < 5) return
+    const sorted = this.d2s.slice().sort((x, y) => x - y)
+    const med = sorted[Math.floor(sorted.length / 2)]!
+    const rest = (med / (6 * 1.386)) * this.scale
+    this.rv += (this.samples < 60 ? 0.15 : 0.05) * (rest - this.rv)
   }
 
   /** Forget the last positions (tracking gap) but keep the noise level. */

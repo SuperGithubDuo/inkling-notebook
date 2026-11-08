@@ -6,6 +6,8 @@
  *   npm run replay -- --noise 1.5 --fps 20           noisier / slower camera
  *   npm run replay -- --compare smoothing=0.3,0.5,0.8
  *   npm run replay -- --html out.html                draw every scenario's strokes (and intended paths) to look at
+ *   npm run replay -- --compare pinchMetric=2d,3d,auto   which pinch measurement drives the pen
+ *   npm run replay -- --world-noise 2                 assume world landmarks twice as noisy (sensitivity test)
  *   npm run replay -- --json                         machine-readable results (used to compare versions)
  *   npm run replay -- my-trace.json [--compare …] [--html out.html]   a trace recorded in WISP
  *
@@ -14,7 +16,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { replay, score, truthStrokes, wobble, type ReplayConfig, type ReplayResult, type Score, type StrokeTruth } from '../src/replay/replay'
-import { SCENARIOS, setFps, setNoiseProfile, setNoiseScale, type NoiseProfile } from '../src/replay/scenarios'
+import { SCENARIOS, setFps, setNoiseProfile, setNoiseScale, setWorldNoise, type NoiseProfile } from '../src/replay/scenarios'
 import { parseTrace } from '../src/replay/trace'
 import { DEFAULT_SETTINGS } from '../src/core/settings'
 
@@ -32,6 +34,7 @@ const only = opt('--only')
 setNoiseScale(noise)
 setNoiseProfile(profile)
 setFps(fps)
+setWorldNoise(Number(opt('--world-noise') ?? 1))
 
 const PAGE_PX = 1600
 const px = (v: number, w = 6) => (v * PAGE_PX).toFixed(1).padStart(w)
@@ -146,6 +149,10 @@ if (file) {
       'excess',
       'missing',
       'lag',
+      'jit',
+      'ltail',
+      'down',
+      ' up',
       'ms/f'
     )
     for (const r of results) {
@@ -166,6 +173,10 @@ if (file) {
         px(m.excess),
         px(m.missing, 7),
         px(m.liveLag, 4),
+        px(m.liveJitter, 4),
+        px(m.liveTail, 5),
+        m.penDownDelay.toFixed(0).padStart(4),
+        m.penUpDelay.toFixed(0).padStart(4),
         m.msPerFrame.toFixed(3)
       )
     }

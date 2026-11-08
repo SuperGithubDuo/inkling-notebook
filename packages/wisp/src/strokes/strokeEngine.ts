@@ -84,6 +84,12 @@ export interface EngineOptions {
    */
   refine: boolean
   /**
+   * Feature preservation in the pen-up refinement (v0.1.3): fit points whose
+   * residual exceeds featureK × the noise are treated as real shape (corners,
+   * loop tops, stroke ends) and kept. 0 = off (v0.1.2 behaviour).
+   */
+  featureK: number
+  /**
    * Noise gate of the live filter: speeds up to `noiseGate` × the speed that
    * measured tracking noise alone produces don't loosen the One Euro filter.
    */
@@ -104,6 +110,7 @@ export const DEFAULT_ENGINE: EngineOptions = {
   seedSpread: 0.012,
   catchUpMax: 0.025,
   refine: true,
+  featureK: 2.5,
   noiseGate: 1
 }
 
@@ -331,8 +338,14 @@ export class StrokeEngine implements WispInputEvents {
     const { enabled } = this.filterConfig()
     if (!enabled) return
     // Noise level: the session estimate, or this stroke's own if we haven't learned enough yet.
-    const own = noiseFromSecondDiff(log) ?? 0
-    const sigma = this.noise.samples >= 30 ? this.noise.sigma : Math.max(this.noise.sigma, own)
+    // v0.1.3: a short, fast stroke's second differences measure its CURVATURE, not
+    // noise (a 7-sample "e" written in 0.2 s), and v0.1.2 then smoothed the letter
+    // into a blob. The stroke's own estimate is used only on strokes of 8+ samples and
+    // never more than 3× the session estimate (8 samples / 3×: best balance of
+    // pen-down hooks vs fast-letter shape in replay).
+    const own = log.length >= 8 ? (noiseFromSecondDiff(log) ?? 0) : 0
+    const base = this.noise.robustSigma
+    const sigma = this.noise.samples >= 30 ? base : Math.max(base, Math.min(own, 3 * base))
     // λ cap from the smoothing setting, scaled to the frame rate so it means
     // the same cutoff in Hz at 15 or 60 fps (λ ∝ samples⁴ per cycle).
     const dts = log.slice(1).map((r, i) => r.t - log[i]!.t).sort((a, b) => a - b)
@@ -340,7 +353,7 @@ export class StrokeEngine implements WispInputEvents {
     const fpsScale = (1000 / dt / 30) ** 4
     const sm = Math.min(1, Math.max(0, this.opts.smoothing))
     const maxLambda = Math.exp(Math.log(2) + (Math.log(60) - Math.log(2)) * sm) * fpsScale
-    const refined = refineNoiseMatched(log, sigma, { maxLambda, spikeMin: Math.max(0.006, 3 * sigma) })
+    const refined = refineNoiseMatched(log, sigma, { maxLambda, spikeMin: Math.max(0.006, 3 * sigma), featureK: this.opts.featureK })
     const sampler = new DistanceSampler(this.opts.minPointDistance)
     const points: StrokePoint[] = []
     refined.forEach((q, i) => {

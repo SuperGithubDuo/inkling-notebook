@@ -8,6 +8,7 @@
 import type { NormPoint } from '../strokes/types'
 import type { Landmark } from '../tracking/landmarks'
 import { packLandmarks, type LandmarkTrace } from './trace'
+import { CAMERA, FACING, FX, VIDEO_ASPECT, cameraHand, imageLandmarks, occlusionFactor, worldLandmarks, type Orientation } from './hand3d'
 
 /** Deterministic PRNG (mulberry32) so every run sees identical noise. */
 export function rng(seed: number): () => number {
@@ -57,6 +58,8 @@ export interface NoiseModel {
   fpsJitter?: number
   /** Probability per frame that the tracker misses the hand entirely. */
   dropoutProb?: number
+  /** Scale of world-landmark noise relative to the image-landmark noise it is derived from (default 1). */
+  worldScale?: number
 }
 
 /** The v0.1.1 model: steady 30 fps, Gaussian jitter only. */
@@ -105,49 +108,26 @@ export interface ScriptFrame {
   /** Which finger moves when the gap changes: 'index' (thumb still), 'thumb', or 'both'. */
   mover?: 'index' | 'thumb' | 'both'
   present?: boolean
+  /** Hand orientation (default: palm facing the camera). */
+  orientation?: Orientation
+  /** Distance of the pen point from the camera, metres (default 0.45). */
+  depth?: number
 }
 
-export const PALM = 0.11 // palm-triangle side, camera units (hand ~40–50 cm from a laptop camera)
+/** Typical palm size in the image at the default distance (width-normalized units). */
+export const PALM = 0.13
+
+/** Converts scenario coordinates (both axes in frame-WIDTH units, centred at 0.5) to normalized image coordinates. */
+export function scenarioToImage(p: NormPoint): NormPoint {
+  return { x: p.x, y: 0.5 + (p.y - 0.5) * VIDEO_ASPECT }
+}
 
 /**
- * Builds a 21-landmark hand whose thumb and index tips straddle `pen`.
- * The pinch axis points up-left (index above the thumb), as when holding a pen.
- * `anchor` is where the fingertips would meet when closed; the moving finger
- * travels along the axis, so with mover = 'index' the midpoint shifts as the
- * gap changes — exactly the real-world effect that causes start hooks.
+ * Noise-free MediaPipe-style image landmarks for a hand pinching at `pen`
+ * (scenario coordinates) with the given gap, palm facing the camera.
  */
-export function handAt(pen: NormPoint, gap: number, mover: 'index' | 'thumb' | 'both' = 'both'): Landmark[] {
-  const ax = -0.45
-  const ay = -0.89 // unit axis thumb → index (up, slightly left)
-  const half = (gap * PALM) / 2
-  // `pen` is the contact point when closed. Open fingers move away from it.
-  let ti: number, tt: number
-  if (mover === 'both') {
-    ti = half
-    tt = -half
-  } else if (mover === 'index') {
-    ti = 2 * half
-    tt = 0
-  } else {
-    ti = 0
-    tt = -2 * half
-  }
-  const index = { x: pen.x + ax * ti, y: pen.y + ay * ti, z: -0.02 }
-  const thumb = { x: pen.x + ax * tt, y: pen.y + ay * tt, z: -0.015 }
-  const wrist = { x: pen.x + 0.06, y: pen.y + 0.17, z: 0 }
-  const lm: Landmark[] = Array.from({ length: 21 }, (_, i) => ({ x: wrist.x - 0.01 * (i % 5), y: wrist.y - 0.012 * Math.floor(i / 4), z: 0 }))
-  lm[0] = wrist
-  lm[5] = { x: wrist.x - 0.05, y: wrist.y - 0.1, z: -0.01 } // index MCP
-  lm[17] = { x: wrist.x + 0.055, y: wrist.y - 0.085, z: -0.01 } // pinky MCP
-  // Scale the palm triangle to PALM so ratios are meaningful.
-  const sideNow = (Math.hypot(lm[5].x - wrist.x, lm[5].y - wrist.y) + Math.hypot(lm[17].x - wrist.x, lm[17].y - wrist.y) + Math.hypot(lm[5].x - lm[17].x, lm[5].y - lm[17].y)) / 3
-  const k = PALM / sideNow
-  for (const i of [5, 17]) {
-    lm[i] = { x: wrist.x + (lm[i]!.x - wrist.x) * k, y: wrist.y + (lm[i]!.y - wrist.y) * k, z: lm[i]!.z }
-  }
-  lm[4] = thumb
-  lm[8] = index
-  return lm
+export function handAt(pen: NormPoint, gap: number, mover: 'index' | 'thumb' | 'both' = 'both', orientation: Orientation = FACING, depth = 0.45): Landmark[] {
+  return imageLandmarks(cameraHand({ pen: scenarioToImage(pen), depth, gap, mover, orientation }))
 }
 
 export interface TruthFrame {
@@ -170,11 +150,19 @@ export interface SynthResult {
  * Turns a script into a noisy landmark trace at `fps`. videoAspect = 1 so
  * camera x/y units are equal (the processor handles aspect separately).
  */
+/**
+ * Turns a script into a noisy trace: image AND world landmarks from the 3D
+ * hand model (hand3d.ts) at `fps` (with timing jitter if the noise model has
+ * it). Image noise is given in frame-width units and applied equally in
+ * pixels on both axes; fingertip noise grows with occlusion (pinching, and
+ * orientations where the fingers point at the camera or the palm is edge-on).
+ */
 export function synthesize(script: ScriptFrame[], opts: { seed?: number; noise?: NoiseModel; fps?: number; t0?: number } = {}): SynthResult {
   const r = rng(opts.seed ?? 1)
   const n = opts.noise ?? DEFAULT_NOISE
   const dt = 1000 / (opts.fps ?? 30)
   const ar = (prev: number, rho: number, sd: number) => rho * prev + Math.sqrt(1 - rho ** 2) * sd * gauss(r)
+  const yScale = VIDEO_ASPECT // width units → height units
   let hx = 0, hy = 0, gw = 0
   const tw = [
     [0, 0],
@@ -192,7 +180,10 @@ export function synthesize(script: ScriptFrame[], opts: { seed?: number; noise?:
       w[0] = ar(w[0]!, n.tipWobbleRho, n.tipWobble)
       w[1] = ar(w[1]!, n.tipWobbleRho, n.tipWobble)
     }
-    const clean = handAt(s.pen, s.gap, s.mover ?? 'both')
+    const orientation = s.orientation ?? FACING
+    const depth = s.depth ?? 0.45
+    const cam = cameraHand({ pen: scenarioToImage(s.pen), depth, gap: s.gap, mover: s.mover ?? 'both', orientation })
+    const clean = imageLandmarks(cam)
     truth.push({
       t,
       pen: s.pen,
@@ -201,30 +192,49 @@ export function synthesize(script: ScriptFrame[], opts: { seed?: number; noise?:
       intendInk: s.intendInk
     })
     if (s.present === false || r() < (n.dropoutProb ?? 0)) {
-      frames.push({ t, c: 0, lm: null })
+      frames.push({ t: Math.round(t * 10) / 10, c: 0, lm: null, w: null })
       return
     }
-    const occl = s.gap < 0.35 ? (n.occlusionBoost ?? 1) : 1
-    // Pinch axis (index − thumb direction) for the apparent-gap drift.
-    const axL = Math.hypot(clean[8]!.x - clean[4]!.x, clean[8]!.y - clean[4]!.y)
+    // Fingertip noise grows while pinched (thumb covers the index tip) and with
+    // orientations that hide the tips; it also scales with apparent hand size.
+    const scale = 0.45 / depth
+    const occl = (s.gap < 0.35 ? (n.occlusionBoost ?? 1) : 1) * occlusionFactor(orientation)
+    const axL = Math.hypot(clean[8]!.x - clean[4]!.x, (clean[8]!.y - clean[4]!.y) / yScale)
     const ax = axL > 1e-9 ? (clean[8]!.x - clean[4]!.x) / axL : -0.45
-    const ay = axL > 1e-9 ? (clean[8]!.y - clean[4]!.y) / axL : -0.89
+    const ay = axL > 1e-9 ? (clean[8]!.y - clean[4]!.y) / yScale / axL : -0.89
     const glitchTip = r() < (n.glitchProb ?? 0) ? (r() < 0.5 ? 4 : 8) : -1
     const ga = 2 * Math.PI * r()
-    const lm = clean.map((p, j) => {
+    const noise2 = clean.map((_, j) => {
       const tip = j === 4 ? tw[0]! : j === 8 ? tw[1]! : null
       const white = tip ? n.tipWhite * occl : n.tipWhite * 0.6
       const sign = j === 8 ? 0.5 : j === 4 ? -0.5 : 0
       const g = j === glitchTip ? (n.glitchSize ?? 0) : 0
-      return {
-        x: p.x + hx + (tip ? tip[0]! * occl : 0) + white * gauss(r) + sign * gw * ax + g * Math.cos(ga),
-        y: p.y + hy + (tip ? tip[1]! * occl : 0) + white * gauss(r) + sign * gw * ay + g * Math.sin(ga),
-        z: p.z + n.zWhite * (tip ? occl : 1) * gauss(r)
-      }
+      const dx = hx + (tip ? tip[0]! * occl : 0) + white * gauss(r) + sign * gw * scale * ax + g * Math.cos(ga)
+      const dy = hy + (tip ? tip[1]! * occl : 0) + white * gauss(r) + sign * gw * scale * ay + g * Math.sin(ga)
+      return { dx, dy, dz: n.zWhite * (tip ? occl : 1) * gauss(r), tip: tip !== null, white }
     })
-    frames.push({ t: Math.round(t * 10) / 10, c: 0.97, lm: packLandmarks(lm) })
+    const lm = clean.map((p, j) => {
+      const e = noise2[j]!
+      return { x: p.x + e.dx, y: p.y + e.dy * yScale, z: p.z + e.dz }
+    })
+    // World landmarks come from the same network pass as the image landmarks,
+    // so we assume their errors are the SAME errors expressed in metres (minus
+    // the whole-hand shift, which world landmarks don't have), plus independent
+    // depth noise. When the fingers point at the camera the 3D estimate is
+    // assumed to degrade only as √ of the image occlusion factor, because the
+    // network infers depth from the whole hand shape. Both are assumptions
+    // (see README); n.worldScale scales the result to test sensitivity.
+    const mPerUnit = (depth * CAMERA.width) / FX
+    const ws = n.worldScale ?? 1
+    const orientFix = Math.sqrt(occlusionFactor(orientation)) / occlusionFactor(orientation)
+    const world = worldLandmarks(cam).map((p, j) => {
+      const e = noise2[j]!
+      const k = mPerUnit * ws * (e.tip ? orientFix : 1)
+      return { x: p.x + (e.dx - hx) * k, y: p.y + (e.dy - hy) * k, z: p.z + e.white * 1.5 * k * gauss(r) }
+    })
+    frames.push({ t: Math.round(t * 10) / 10, c: 0.97, lm: packLandmarks(lm), w: packLandmarks(world) })
   })
-  return { trace: { format: 'wisp.landmarks', version: 1, videoAspect: 1, frames }, truth }
+  return { trace: { format: 'wisp.landmarks', version: 3, videoAspect: VIDEO_ASPECT, frames }, truth }
 }
 
 // ── Script builders ────────────────────────────────────────────────────────
@@ -276,6 +286,13 @@ export interface GestureTiming {
   carryOn: boolean
   /** Frames of stillness before the first stroke. */
   lead: number
+  /**
+   * Opening profile (v0.1.3): 'linear' (v0.1–v0.1.2 scenarios), or 'ease-in' —
+   * the fingers start separating slowly and then speed up, as in a relaxed,
+   * real lift. With a small `open`, this is the "fingers just begin to
+   * separate" lift that v0.1.2 reacted to late on real webcams.
+   */
+  openEase?: 'linear' | 'ease-in'
 }
 
 export const DEFAULT_TIMING: GestureTiming = { open: 0.75, closed: 0.16, closeFrames: 3, openFrames: 3, mover: 'index', carryOn: true, lead: 8 }
@@ -310,7 +327,9 @@ export function writeStrokes(strokes: StrokeSpec[], timing: Partial<GestureTimin
     pos = end
     for (let i = 1; i <= g.openFrames; i++) {
       if (g.carryOn) pos = { x: pos.x + vx, y: pos.y + vy }
-      out.push({ pen: pos, gap: g.closed + (g.open - g.closed) * (i / g.openFrames), intendInk: false, mover: g.mover })
+      const k = i / g.openFrames
+      const e = g.openEase === 'ease-in' ? k * k : k
+      out.push({ pen: pos, gap: g.closed + (g.open - g.closed) * e, intendInk: false, mover: g.mover })
     }
     for (let i = 0; i < 4; i++) out.push({ pen: pos, gap: g.open, intendInk: false, mover: g.mover })
   }

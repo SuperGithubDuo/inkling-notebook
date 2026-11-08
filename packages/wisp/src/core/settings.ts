@@ -2,6 +2,8 @@
 import type { WritingRegion } from '../strokes/coordinates'
 
 export type PenPoint = 'midpoint' | 'index'
+/** Which pinch distance lifts and lowers the pen (v0.1.3); see input/handFrameProcessor.ts. */
+export type PinchMetric = 'auto' | '3d' | '2d'
 
 export interface WispSettings {
   /** Selfie-style preview and movement (move right → cursor right). */
@@ -23,6 +25,8 @@ export interface WispSettings {
   showDiagnostics: boolean
   /** Which point writes: between thumb and index tips (default), or the index fingertip. */
   penPoint: PenPoint
+  /** Pinch measurement: 'auto' blends 2D and 3D by hand orientation (default). */
+  pinchMetric: PinchMetric
   /** Calibrated writing area in view space; null = automatic. */
   region: WritingRegion | null
 }
@@ -39,6 +43,7 @@ export const DEFAULT_SETTINGS: WispSettings = {
   showLandmarks: true,
   showDiagnostics: false,
   penPoint: 'midpoint',
+  pinchMetric: 'auto',
   region: null
 }
 
@@ -77,6 +82,7 @@ export function sanitizeSettings(raw: unknown): WispSettings {
     showLandmarks: bool(r.showLandmarks, d.showLandmarks),
     showDiagnostics: bool(r.showDiagnostics, d.showDiagnostics),
     penPoint: r.penPoint === 'index' ? 'index' : 'midpoint',
+    pinchMetric: r.pinchMetric === '2d' || r.pinchMetric === '3d' ? r.pinchMetric : 'auto',
     region
   }
 }

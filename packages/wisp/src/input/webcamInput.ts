@@ -46,6 +46,16 @@ export interface WebcamDiagnostics {
   pinchBaseline: number | null
   /** Measured noise (std) of the pinch ratio; release thresholds scale up with it. */
   pinchNoise: number
+  /** Share of the 3D (world-landmark) pinch ratio in the measurement driving the pen, 0–1. */
+  weight3D: number | null
+  /** How well this hand orientation can be tracked (from world landmarks). */
+  quality: 'good' | 'reduced' | 'poor' | null
+  /** Mean interval between processed camera frames (ms). */
+  frameIntervalMs: number
+  /** Age of the frame when processing finished: capture → pen update (ms; needs requestVideoFrameCallback). */
+  frameAgeMs: number | null
+  /** Frames the browser delivered that were never processed (inference too slow). */
+  droppedFrames: number
   frames: number
 }
 
@@ -64,15 +74,22 @@ interface WebcamEvents {
   calibration: CalibrationStep
 }
 
+interface FrameMeta {
+  mediaTime: number
+  presentedFrames?: number
+  /** When the camera captured the frame (performance.now clock), if the browser reports it. */
+  captureTime?: number
+}
+
 type FrameVideo = HTMLVideoElement & {
-  requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number
+  requestVideoFrameCallback?: (cb: (now: number, meta: FrameMeta) => void) => number
   cancelVideoFrameCallback?: (h: number) => void
 }
 
 export class WebcamInput {
   readonly events = new Emitter<WebcamEvents>()
   readonly processor: HandFrameProcessor
-  readonly diagnostics: WebcamDiagnostics = { fps: 0, inferenceMs: 0, handDetected: false, gesture: 'no-hand', pinchRatio: null, pinchBaseline: null, pinchNoise: 0, frames: 0 }
+  readonly diagnostics: WebcamDiagnostics = { fps: 0, inferenceMs: 0, handDetected: false, gesture: 'no-hand', pinchRatio: null, pinchBaseline: null, pinchNoise: 0, weight3D: null, quality: null, frameIntervalMs: 0, frameAgeMs: null, droppedFrames: 0, frames: 0 }
   /** Landmark-only trace recorder for the replay harness (never video). */
   readonly recorder = new TraceRecorder()
   readonly overlay: WebcamOverlay = { landmarks: null, viewPoint: null, region: null, mirror: true }
@@ -87,6 +104,8 @@ export class WebcamInput {
   private generation = 0
   private abort: AbortController | null = null
   private frameTimes: number[] = []
+  private lastPresented = -1
+  private lastFrameT = 0
   private calib: { corners: NormPoint[]; resolve: (r: WritingRegion | null) => void } | null = null
   private disposed = false
 
@@ -241,9 +260,13 @@ export class WebcamInput {
     const v = this.video as FrameVideo
     if (typeof v.requestVideoFrameCallback === 'function') {
       this.loopKind = 'rvfc'
-      const tick = (): void => {
+      const tick = (_now: number, meta: FrameMeta): void => {
         if (this.loopKind !== 'rvfc') return
-        this.onFrame()
+        if (meta.presentedFrames !== undefined) {
+          if (this.lastPresented >= 0 && meta.presentedFrames > this.lastPresented + 1) this.diagnostics.droppedFrames += meta.presentedFrames - this.lastPresented - 1
+          this.lastPresented = meta.presentedFrames
+        }
+        this.onFrame(meta.captureTime)
         this.loopHandle = v.requestVideoFrameCallback!(tick)
       }
       this.loopHandle = v.requestVideoFrameCallback(tick)
@@ -270,29 +293,45 @@ export class WebcamInput {
     this.loopHandle = null
     this.loopKind = null
     this.lastVideoTime = -1
+    this.lastPresented = -1
   }
 
-  private onFrame(): void {
+  /**
+   * One camera frame. `captureTime` (from requestVideoFrameCallback, when the
+   * browser provides it) is when the camera took the picture; using it as the
+   * sample time keeps stroke timing faithful to the hand's motion even when
+   * processing is delayed by a variable amount (v0.1.3). Otherwise: now.
+   */
+  private onFrame(captureTime?: number): void {
     const tracker = this.tracker
     const cam = this.camera
     if (!tracker || !cam || this.video.readyState < 2) return
-    const t = performance.now()
+    const now = performance.now()
+    const t = captureTime !== undefined && captureTime > 0 && captureTime <= now && now - captureTime < 500 && captureTime > this.lastFrameT ? captureTime : Math.max(now, this.lastFrameT + 0.1)
     let result
     try {
       result = tracker.detect(this.video, t)
     } catch (err) {
       // A single failed inference (e.g. GPU context hiccup) counts as "no hand".
       console.warn('[wisp] inference failed', err)
-      result = { landmarks: null, confidence: 0, handedness: null, inferenceMs: 0 }
+      result = { landmarks: null, world: null, confidence: 0, handedness: null, inferenceMs: 0 }
     }
     const videoAspect = (this.video.videoWidth || cam.width) / (this.video.videoHeight || cam.height)
-    const out = this.processor.process({ t, landmarks: result.landmarks, confidence: result.confidence, videoAspect })
+    const out = this.processor.process({ t, landmarks: result.landmarks, world: result.world, confidence: result.confidence, videoAspect })
+    const done = performance.now()
 
     // Diagnostics (cheap, read by the UI on its own timer).
+    const interval = this.lastFrameT > 0 ? t - this.lastFrameT : 0
+    this.lastFrameT = t
     this.frameTimes.push(t)
     while (this.frameTimes.length && t - this.frameTimes[0]! > 1000) this.frameTimes.shift()
     const d = this.diagnostics
     d.fps = this.frameTimes.length
+    if (interval > 0 && interval < 1000) d.frameIntervalMs = d.frameIntervalMs === 0 ? interval : d.frameIntervalMs * 0.9 + interval * 0.1
+    const age = captureTime !== undefined && t === captureTime ? done - captureTime : null
+    d.frameAgeMs = age === null ? null : d.frameAgeMs === null ? age : d.frameAgeMs * 0.9 + age * 0.1
+    d.weight3D = result.landmarks ? this.processor.weight3D : null
+    d.quality = out.pose?.quality ?? null
     d.inferenceMs = d.frames === 0 ? result.inferenceMs : d.inferenceMs * 0.9 + result.inferenceMs * 0.1
     d.handDetected = result.landmarks !== null
     d.gesture = out.gesture
@@ -304,6 +343,13 @@ export class WebcamInput {
       const g = this.processor.gestures
       const c = this.lastCursor
       this.recorder.add(t, result.landmarks, result.confidence, videoAspect, {
+        r2: out.ratio2D,
+        r3: out.ratio3D,
+        n: out.pose ? out.pose.normal : null,
+        q: out.pose?.quality,
+        dt: interval,
+        inf: result.inferenceMs,
+        age: age ?? undefined,
         mid: out.pagePoint ? [out.pagePoint.x, out.pagePoint.y] : null,
         cur: c ? [c.x, c.y] : null,
         down: c?.down ? 1 : 0,
@@ -312,7 +358,7 @@ export class WebcamInput {
         b: g.writingBaseline,
         v: g.openingVelocity,
         s: out.gesture
-      })
+      }, result.world)
     }
     this.overlay.landmarks = result.landmarks
     this.overlay.viewPoint = out.viewPoint

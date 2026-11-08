@@ -1,6 +1,6 @@
 {
   "name": "@inkling/wisp",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "WISP (Writing Interface via Spatial Perception): webcam air-handwriting prototype for Inkling Notebook",
   "private": true,
   "type": "module",

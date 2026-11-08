@@ -23,7 +23,7 @@ function TraceButton({ ctl, on, settings }: { ctl: WispController; on: boolean; 
   }, [rec, cam])
   if (!cam) return null
   const stop = () => {
-    const trace = cam.recorder.stop(undefined, { ...settings, version: '0.1.2' })
+    const trace = cam.recorder.stop(undefined, { ...settings, version: '0.1.3' })
     setRec(false)
     if (trace.frames.length === 0) return
     const blob = new Blob([JSON.stringify(trace)], { type: 'application/json' })
@@ -159,6 +159,14 @@ export function CameraPanel(p: Props) {
     return () => clearInterval(id)
   }, [showDiagnostics, p.ctl])
 
+  // Orientation hint (v0.1.3): polled twice a second while the camera is on.
+  const [quality, setQuality] = useState<WebcamDiagnostics['quality']>(null)
+  useEffect(() => {
+    if (!on) return void setQuality(null)
+    const id = setInterval(() => setQuality(p.ctl.webcamInput?.diagnostics.quality ?? null), 500)
+    return () => clearInterval(id)
+  }, [on, p.ctl])
+
   useEffect(() => {
     const cam = p.ctl.webcamInput
     if (!cam) return
@@ -212,6 +220,11 @@ export function CameraPanel(p: Props) {
           )}
         </div>
         {!showPreview && on && <p className="muted small">Preview hidden · tracking is still running.</p>}
+        {on && quality === 'poor' && (
+          <p className="muted small" role="status">
+            Your fingers point almost straight at the camera, so the gap between them is hard to see. Pen-down and pen-up are less reliable — tilt your hand a little.
+          </p>
+        )}
 
         {p.status.camera === 'error' && p.status.error && (
           <div className="alert" role="alert">
@@ -286,6 +299,16 @@ export function CameraPanel(p: Props) {
             <dd>{on && diag?.pinchBaseline != null ? diag.pinchBaseline.toFixed(2) : '—'}</dd>
             <dt>Pinch noise</dt>
             <dd>{on && diag && diag.frames ? diag.pinchNoise.toFixed(3) : '—'}</dd>
+            <dt>Frame interval</dt>
+            <dd>{on && diag && diag.frameIntervalMs ? `${diag.frameIntervalMs.toFixed(1)} ms` : '—'}</dd>
+            <dt>Capture → pen update</dt>
+            <dd>{on && diag?.frameAgeMs != null ? `${diag.frameAgeMs.toFixed(1)} ms` : '—'}</dd>
+            <dt>Skipped camera frames</dt>
+            <dd>{on && diag ? diag.droppedFrames : '—'}</dd>
+            <dt>Hand orientation</dt>
+            <dd>{on && diag?.quality ? diag.quality : '—'}</dd>
+            <dt>3D share of pinch</dt>
+            <dd>{on && diag?.weight3D != null ? `${Math.round(diag.weight3D * 100)} %` : '—'}</dd>
             <dt>Delegate</dt>
             <dd>{p.status.delegate ?? '—'}</dd>
             <dt>Strokes / points</dt>

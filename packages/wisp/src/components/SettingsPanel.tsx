@@ -107,6 +107,19 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
           <option value="index">Index fingertip</option>
         </select>
       </label>
+      <label className="field">
+        <span className="field-head">
+          <span>Pinch measurement</span>
+        </span>
+        <select
+          value={s.pinchMetric}
+          onChange={(e) => onChange({ pinchMetric: e.target.value === '2d' ? '2d' : e.target.value === '3d' ? '3d' : 'auto' })}
+        >
+          <option value="auto">Automatic (3D when the hand is turned)</option>
+          <option value="3d">Always 3D hand shape</option>
+          <option value="2d">Camera image only (v0.1.2)</option>
+        </select>
+      </label>
 
       <h3>Camera</h3>
       <Toggle label="Mirror camera" checked={s.mirror} onChange={(v) => onChange({ mirror: v })} />
@@ -125,7 +138,8 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
               refine: DEFAULT_SETTINGS.refine,
               pinchSensitivity: DEFAULT_SETTINGS.pinchSensitivity,
               releaseSensitivity: DEFAULT_SETTINGS.releaseSensitivity,
-              penPoint: DEFAULT_SETTINGS.penPoint
+              penPoint: DEFAULT_SETTINGS.penPoint,
+              pinchMetric: DEFAULT_SETTINGS.pinchMetric
             })
           }
         >

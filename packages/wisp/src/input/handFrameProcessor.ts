@@ -12,7 +12,7 @@ import type { PenPoint } from '../core/settings'
 import { applySensitivity, cameraToPage, defaultRegion, type WritingRegion } from '../strokes/coordinates'
 import type { StrokeEngine } from '../strokes/strokeEngine'
 import type { NormPoint } from '../strokes/types'
-import { DEFAULT_DEPTH_WEIGHT, LM, pinchRatio, validLandmarks, type Landmark } from '../tracking/landmarks'
+import { DEFAULT_DEPTH_WEIGHT, LM, handPose, pinchRatio, pinchRatio3D, validLandmarks, type HandPose, type Landmark } from '../tracking/landmarks'
 
 export interface ProcessorConfig {
   mirror: boolean
@@ -22,6 +22,18 @@ export interface ProcessorConfig {
   /** 0.5–2: how small/slow a finger opening lifts the pen. */
   releaseSensitivity: number
   penPoint: PenPoint
+  /**
+   * Which pinch distance drives pen-down / pen-up (v0.1.3):
+   *  'auto' (default) – orientation-weighted blend: the 2D ratio while the
+   *                    fingers lie across the image (where the camera sees the
+   *                    gap directly), shifting to the 3D ratio as the fingers
+   *                    tip toward the camera or the palm turns edge-on (where
+   *                    the 2D ratio is foreshortened). See blendWeight3D.
+   *  '3d'            – always the world-landmark ratio (normalized by the 3D palm size).
+   *  '2d'            – image landmarks only (v0.1–v0.1.2 behaviour).
+   * Frames without usable world landmarks always use 2D.
+   */
+  pinchMetric?: 'auto' | '3d' | '2d'
   /** Weight of landmark depth (z) in the pinch distance; default DEFAULT_DEPTH_WEIGHT. */
   depthWeight?: number
   /** Calibrated region (view space) or null for the automatic default. */
@@ -33,6 +45,8 @@ export interface ProcessorConfig {
 export interface FrameInput {
   t: number
   landmarks: Landmark[] | null
+  /** MediaPipe world landmarks (metres, hand-centred, camera-aligned axes), if available. */
+  world?: Landmark[] | null
   confidence: number
   videoAspect: number
 }
@@ -41,8 +55,13 @@ export interface FrameOutput {
   gesture: GestureState
   /** Smoothed pinch ratio (as used by the gesture logic). */
   pinchRatio: number | null
-  /** Unsmoothed pinch ratio this frame. */
+  /** Unsmoothed pinch ratio this frame (the one the gesture logic used). */
   rawRatio: number | null
+  /** Both measurements, for diagnostics and traces. */
+  ratio2D: number | null
+  ratio3D: number | null
+  /** Hand orientation and tracking quality from world landmarks (null without them). */
+  pose: HandPose | null
   /** View-space pen point (for calibration and overlays), null if no hand. */
   viewPoint: NormPoint | null
   /** Raw page-space pen point (before smoothing), null if no hand. */
@@ -76,8 +95,22 @@ export function effectiveRegion(cfg: ProcessorConfig, videoAspect: number): Writ
   return applySensitivity(base, cfg.writingSensitivity)
 }
 
+/**
+ * How much to trust the 3D pinch ratio, 0–1, from the hand orientation.
+ * 0 while the fingers lie across the image and the palm faces the camera;
+ * rises to 1 as the fingers point toward the camera (along 0.4 → 0.8) or the
+ * palm turns edge-on (edgeOn 0.6 → 0.95). Smooth, so the ratio never jumps.
+ */
+export function blendWeight3D(pose: HandPose | null): number {
+  if (!pose) return 0
+  const ramp = (v: number, a: number, b: number) => Math.min(1, Math.max(0, (v - a) / (b - a)))
+  return Math.max(ramp(pose.along, 0.4, 0.8), ramp(pose.edgeOn, 0.6, 0.95))
+}
+
 export class HandFrameProcessor {
   readonly gestures: GestureStateMachine
+  /** Weight given to the 3D pinch ratio on the last frame (diagnostics). */
+  weight3D = 0
   /** When false, gestures are tracked but nothing reaches the engine (used during calibration). */
   forward = true
 
@@ -100,10 +133,19 @@ export class HandFrameProcessor {
 
   process(f: FrameInput): FrameOutput {
     let ratio: number | null = null
+    let ratio2D: number | null = null
+    let ratio3D: number | null = null
+    let pose: HandPose | null = null
     let viewPoint: NormPoint | null = null
     let hand = null
     if (validLandmarks(f.landmarks)) {
-      ratio = pinchRatio(f.landmarks, f.videoAspect, this.cfg.depthWeight ?? DEFAULT_DEPTH_WEIGHT)
+      ratio2D = pinchRatio(f.landmarks, f.videoAspect, this.cfg.depthWeight ?? DEFAULT_DEPTH_WEIGHT)
+      ratio3D = pinchRatio3D(f.world)
+      pose = handPose(f.world)
+      const metric = this.cfg.pinchMetric ?? 'auto'
+      const w3 = ratio3D === null || ratio2D === null || metric === '2d' ? 0 : metric === '3d' ? 1 : blendWeight3D(pose)
+      this.weight3D = w3
+      ratio = ratio2D === null ? ratio3D : w3 === 0 ? ratio2D : w3 * ratio3D! + (1 - w3) * ratio2D
       const cam = penPointOf(f.landmarks, this.cfg.penPoint)
       viewPoint = { x: this.cfg.mirror ? 1 - cam.x : cam.x, y: cam.y }
       const page = cameraToPage(cam, { mirror: this.cfg.mirror, region: effectiveRegion(this.cfg, f.videoAspect) })
@@ -111,7 +153,7 @@ export class HandFrameProcessor {
     }
     const actions = this.gestures.update({ t: f.t, hand })
     if (this.forward) this.apply(actions, f.t)
-    return { gesture: this.gestures.state, pinchRatio: this.gestures.ratio ?? ratio, rawRatio: ratio, viewPoint, pagePoint: hand ? { x: hand.x, y: hand.y } : null, actions }
+    return { gesture: this.gestures.state, pinchRatio: this.gestures.ratio ?? ratio, rawRatio: ratio, ratio2D, ratio3D, pose, viewPoint, pagePoint: hand ? { x: hand.x, y: hand.y } : null, actions }
   }
 
   /** Ends any active stroke (camera stopped, mode switched). */

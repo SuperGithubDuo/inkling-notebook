@@ -31,6 +31,8 @@ export class TrackerError extends Error {
 export interface HandResult {
   /** 21 landmarks in camera space, or null when no hand was found. */
   landmarks: Landmark[] | null
+  /** World landmarks (metres, origin at the hand centre, camera-aligned axes), or null. */
+  world: Landmark[] | null
   /** Handedness score of the detected hand, 0–1. */
   confidence: number
   handedness: string | null
@@ -151,17 +153,21 @@ export class HandTracker {
 
   /** Runs inference on the current video frame. Timestamps must increase. */
   detect(video: HTMLVideoElement, tMs: number): HandResult {
-    if (this.closed) return { landmarks: null, confidence: 0, handedness: null, inferenceMs: 0 }
+    if (this.closed) return { landmarks: null, world: null, confidence: 0, handedness: null, inferenceMs: 0 }
     const ts = Math.max(tMs, this.lastTs + 0.001)
     this.lastTs = ts
     const t0 = performance.now()
     const res = this.landmarker.detectForVideo(video, ts)
     const inferenceMs = performance.now() - t0
     const lm = res.landmarks[0]
-    if (!lm || lm.length < 21) return { landmarks: null, confidence: 0, handedness: null, inferenceMs }
+    if (!lm || lm.length < 21) return { landmarks: null, world: null, confidence: 0, handedness: null, inferenceMs }
     const cat = res.handedness?.[0]?.[0]
     return {
       landmarks: lm.map((p) => ({ x: p.x, y: p.y, z: p.z ?? 0 })),
+      world: (() => {
+        const w = res.worldLandmarks?.[0]
+        return w && w.length >= 21 ? w.map((p) => ({ x: p.x, y: p.y, z: p.z ?? 0 })) : null
+      })(),
       confidence: cat?.score ?? 1,
       handedness: cat?.categoryName ?? null,
       inferenceMs

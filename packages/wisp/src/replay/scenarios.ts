@@ -3,6 +3,7 @@
  * Coordinates are camera space (videoAspect 1); the default writing region
  * maps roughly x 0.18–0.82, y 0.3–0.7 to the page.
  */
+import { FACING, type Orientation } from './hand3d'
 import { DEFAULT_NOISE, WEBCAM_NOISE, arc, line, polyline, synthesize as synth0, writeStrokes, type GestureTiming, type NoiseModel, type ScriptFrame, type StrokeSpec, type SynthResult } from './synth'
 
 /** Noise multiplier for all scenarios (1 = the profile as defined). Set by `npm run replay -- --noise 2.5`. */
@@ -11,6 +12,11 @@ let noiseScale = 1
 export type NoiseProfile = 'webcam' | 'model'
 let profile: NoiseProfile = 'webcam'
 let fps = 30
+let worldScale = 1
+/** World-landmark noise relative to the image noise it is derived from (`--world-noise 2`). */
+export function setWorldNoise(k: number): void {
+  worldScale = Number.isFinite(k) && k >= 0 ? k : 1
+}
 export function setNoiseScale(k: number): void {
   noiseScale = Number.isFinite(k) && k >= 0 ? k : 1
 }
@@ -30,7 +36,8 @@ function scaled(): NoiseModel {
     handWobble: n.handWobble * noiseScale,
     zWhite: n.zWhite * noiseScale,
     gapWobble: (n.gapWobble ?? 0) * noiseScale,
-    glitchSize: (n.glitchSize ?? 0) * Math.min(noiseScale, 2)
+    glitchSize: (n.glitchSize ?? 0) * Math.min(noiseScale, 2),
+    worldScale
   }
 }
 const synthesize: typeof synth0 = (script, opts = {}) => synth0(script, { noise: scaled(), fps, ...opts })
@@ -39,7 +46,19 @@ const W = (strokes: StrokeSpec[], t: Partial<GestureTiming> = {}): ScriptFrame[]
 export interface Scenario {
   id: string
   title: string
+  /** 'writing' | 'gesture' | 'orientation' | 'speed' — for grouping in reports. */
+  group?: string
   build(seed: number): SynthResult
+}
+
+/** Applies a hand orientation and distance to every frame of a script. */
+function posed(script: ScriptFrame[], orientation: Orientation, depth = 0.45): ScriptFrame[] {
+  return script.map((f) => ({ ...f, orientation, depth }))
+}
+
+/** Same strokes, written `k` times faster (pinch/release timing unchanged). */
+function faster(strokes: StrokeSpec[], k: number): StrokeSpec[] {
+  return strokes.map((s) => ({ ...s, duration: s.duration / k, approach: (s.approach ?? 0.3) / k }))
 }
 
 const at = (x: number, y: number) => ({ x, y })
@@ -150,31 +169,53 @@ function shortStrokes(n: number, spacing: number, len: number, duration: number,
   })
 }
 
+const ORIENT = {
+  r45: { pitch: 0, yaw: 45, roll: 0 },
+  toward: { pitch: 70, yaw: 0, roll: 0 },
+  sideways: { pitch: 0, yaw: 80, roll: 0 },
+  tiltUp: { pitch: -35, yaw: 0, roll: 0 },
+  tiltDown: { pitch: 35, yaw: 0, roll: 0 },
+  rolled: { pitch: 15, yaw: 25, roll: 30 }
+} satisfies Record<string, Orientation>
+
+/** A relaxed, partial lift: the fingers open to 0.42 palm widths over 6 frames, slowly at first. */
+const GENTLE: Partial<GestureTiming> = { open: 0.42, openFrames: 6, openEase: 'ease-in' }
+
 export const SCENARIOS: Scenario[] = [
+  // ── Writing ────────────────────────────────────────────────────────────
   {
     id: 'A-slow-line',
     title: 'Slow horizontal line',
+    group: 'writing',
     build: (seed) => synthesize(W([{ path: line(at(0.3, 0.5), at(0.65, 0.5)), duration: 3 }], T({ carryOn: false })), { seed })
+  },
+  {
+    id: 'A3-fast-line',
+    title: 'Fast horizontal line',
+    group: 'writing',
+    build: (seed) => synthesize(W([{ path: line(at(0.3, 0.5), at(0.65, 0.5)), duration: 0.45 }]), { seed })
   },
   {
     id: 'A2-slow-vertical',
     title: 'Slow vertical line',
-    build: (seed) => synthesize(W([{ path: line(at(0.45, 0.36), at(0.45, 0.64)), duration: 2.5 }], T({ carryOn: false })), { seed })
+    group: 'writing',
+    build: (seed) => synthesize(W([{ path: line(at(0.45, 0.38), at(0.45, 0.62)), duration: 2.5 }], T({ carryOn: false })), { seed })
   },
   {
     id: 'G-circle',
     title: 'Circle',
+    group: 'writing',
     build: (seed) => synthesize(W([{ path: arc(at(0.45, 0.5), 0.05, 0.05, -Math.PI / 2, 1.5 * Math.PI), duration: 1.6 }]), { seed })
   },
   {
     id: 'H-small-loops',
     title: 'Small loops (cursive e/l)',
+    group: 'writing',
     build: (seed) =>
       synthesize(
         W([
           {
             path: (u) => {
-              // Four small loops along a baseline, drawn as one stroke.
               const k = u * 4
               const i = Math.min(3, Math.floor(k))
               const f = k - i
@@ -191,46 +232,134 @@ export const SCENARIOS: Scenario[] = [
   {
     id: 'B-hello',
     title: '"Hello" letters',
+    group: 'writing',
     build: (seed) => synthesize(W(helloStrokes()), { seed })
   },
   {
     id: 'C-math',
     title: 'x² + 3x − 5 = 0',
+    group: 'writing',
     build: (seed) => synthesize(W(mathStrokes()), { seed })
   },
   {
     id: 'F-repeated',
     title: 'Repeated short strokes',
+    group: 'writing',
     build: (seed) => synthesize(W(shortStrokes(6, 0.05, 0.06, 0.25, 0.2, true).map((s, i) => ({ ...s, path: line(at(0.3 + i * 0.05, 0.47), at(0.33 + i * 0.05, 0.53)) })), T({ openFrames: 3 })), { seed })
   },
   {
     id: 'F2-fast-ticks',
     title: 'Fast vertical ticks (tight)',
+    group: 'writing',
     build: (seed) => synthesize(W(shortStrokes(8, 0.025, 0.03, 0.15, 0.12, true), T({ openFrames: 2, closeFrames: 2 })), { seed })
   },
   {
     id: 'F3-dashes',
     title: 'Horizontal dashes',
+    group: 'writing',
     build: (seed) => synthesize(W(shortStrokes(6, 0.045, 0.025, 0.18, 0.15, false), T({ openFrames: 2 })), { seed })
   },
+  // ── Gentle lifts (v0.1.3): the fingers only begin to separate ──────────
+  // The v0.1–v0.1.2 scripts open the pinch fully in 3 frames, which any
+  // threshold catches at once. Real lifts reported in v0.1.2 webcam testing
+  // were small and relaxed: open to ~0.4 palm widths, slowly at first.
+  {
+    id: 'P1-gentle-lift-line',
+    title: 'Gentle lift: slow line',
+    group: 'gesture',
+    build: (seed) => synthesize(W([{ path: line(at(0.3, 0.5), at(0.65, 0.5)), duration: 2 }], GENTLE), { seed })
+  },
+  {
+    id: 'P2-gentle-lift-hello',
+    title: 'Gentle lift: "Hello"',
+    group: 'gesture',
+    build: (seed) => synthesize(W(helloStrokes(), GENTLE), { seed })
+  },
+  {
+    id: 'P3-gentle-lift-short',
+    title: 'Gentle lift: short strokes',
+    group: 'gesture',
+    build: (seed) => synthesize(W(shortStrokes(6, 0.05, 0.06, 0.3, 0.25, true).map((s, i) => ({ ...s, path: line(at(0.3 + i * 0.05, 0.47), at(0.33 + i * 0.05, 0.53)) })), GENTLE), { seed })
+  },
+  {
+    id: 'P4-gentle-lift-toward',
+    title: 'Gentle lift, fingers toward camera',
+    group: 'orientation',
+    build: (seed) => synthesize(posed(W(helloStrokes(), GENTLE), ORIENT.toward), { seed })
+  },
+  // ── Writing speed ─────────────────────────────────────────────────────
+  {
+    id: 'S2-hello-2x',
+    title: '"Hello" at 2× speed',
+    group: 'speed',
+    build: (seed) => synthesize(W(faster(helloStrokes(), 2), T({ closeFrames: 2, openFrames: 2 })), { seed })
+  },
+  {
+    id: 'S3-hello-3x',
+    title: '"Hello" at 3× speed (brisk)',
+    group: 'speed',
+    build: (seed) => synthesize(W(faster(helloStrokes(), 3), T({ closeFrames: 2, openFrames: 2 })), { seed })
+  },
+  {
+    id: 'S4-math-2x',
+    title: 'Equation at 2× speed, quick lifts',
+    group: 'speed',
+    build: (seed) => synthesize(W(faster(mathStrokes(), 2), T({ closeFrames: 2, openFrames: 1 })), { seed })
+  },
+  // ── Gestures ──────────────────────────────────────────────────────────
   {
     id: 'D-rapid-release',
     title: 'Rapid pinch and release',
+    group: 'gesture',
     build: (seed) => synthesize(W([{ path: line(at(0.4, 0.5), at(0.48, 0.5)), duration: 0.35 }], T({ openFrames: 1, closeFrames: 1, carryOn: true })), { seed })
   },
   {
     id: 'D2-slow-release',
     title: 'Slow pinch and slow release',
+    group: 'gesture',
     build: (seed) => synthesize(W([{ path: line(at(0.4, 0.5), at(0.48, 0.5)), duration: 0.6 }], T({ closeFrames: 6, openFrames: 10, carryOn: true })), { seed })
+  },
+  {
+    id: 'D3-repeated-pinch',
+    title: 'Repeated pinch and release (dots)',
+    group: 'gesture',
+    build: (seed) => synthesize(W(shortStrokes(6, 0.04, 0.012, 0.12, 0.25, false), T({ closeFrames: 2, openFrames: 2 })), { seed })
   },
   {
     id: 'E-reposition',
     title: 'Repositioning, no pinch',
+    group: 'gesture',
     build: (seed) => synthesize(repositionScript(6), { seed })
   },
   {
     id: 'L-tracking-loss',
     title: 'Tracking loss mid-stroke',
+    group: 'gesture',
     build: (seed) => synthesize(lossScript(), { seed })
+  },
+  // ── Orientation and distance ──────────────────────────────────────────
+  ...(
+    [
+      ['O1-facing', 'Palm facing camera', FACING, 0.45],
+      ['O2-rot45', 'Hand rotated 45°', ORIENT.r45, 0.45],
+      ['O3-toward', 'Fingers toward camera', ORIENT.toward, 0.45],
+      ['O4-sideways', 'Hand sideways', ORIENT.sideways, 0.45],
+      ['O5-tilt-up', 'Hand tilted up', ORIENT.tiltUp, 0.45],
+      ['O6-tilt-down', 'Hand tilted down', ORIENT.tiltDown, 0.45],
+      ['O7-rolled', 'Mixed rotation', ORIENT.rolled, 0.45],
+      ['O8-near', 'Close to camera (30 cm)', FACING, 0.3],
+      ['O9-far', 'Far from camera (70 cm)', FACING, 0.7]
+    ] as Array<[string, string, Orientation, number]>
+  ).map(([id, title, o, depth]) => ({
+    id,
+    title: `${title}: "Hello"`,
+    group: 'orientation',
+    build: (seed: number) => synthesize(posed(W(helloStrokes()), o, depth), { seed })
+  })),
+  {
+    id: 'O10-reposition-toward',
+    title: 'Fingers toward camera, repositioning',
+    group: 'orientation',
+    build: (seed) => synthesize(posed(repositionScript(5), ORIENT.toward), { seed })
   }
 ]

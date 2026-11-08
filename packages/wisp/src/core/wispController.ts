@@ -68,6 +68,7 @@ export class WispController {
       pinchSensitivity: this.settings.pinchSensitivity,
       releaseSensitivity: this.settings.releaseSensitivity,
       penPoint: this.settings.penPoint,
+      pinchMetric: this.settings.pinchMetric,
       region: this.settings.region,
       pageAspect: this.store.document.canvas.width / this.store.document.canvas.height
     })
@@ -106,6 +107,7 @@ export class WispController {
       pinchSensitivity: s.pinchSensitivity,
       releaseSensitivity: s.releaseSensitivity,
       penPoint: s.penPoint,
+      pinchMetric: s.pinchMetric,
       region: s.region
     })
   }

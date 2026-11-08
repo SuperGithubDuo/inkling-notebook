@@ -37,6 +37,13 @@ export interface PinchThresholds {
 }
 
 /**
+ * v0.1.3: openVelocity 1.4 [1.7] and releaseAbs 0.38 [0.42]; the others are
+ * unchanged because lowering them broke continuous strokes in replay (see
+ * README "v0.1.3"). The bigger pen-up changes are elsewhere: live ink pauses
+ * at half of any release threshold (gestureState `suspectFraction`), and in
+ * rotated hands the 3D pinch ratio removes foreshortening, which made the
+ * 2D opening look up to ~2× smaller than it was.
+ *
  * v0.1.2 defaults (v0.1.1 in brackets):
  *  - pen-down is slightly MORE deliberate: enter 0.27 [0.30], and the pinch
  *    must close by rearmDrop 0.12 [0.10] from a recent open peak;
@@ -47,9 +54,9 @@ export const DEFAULT_PINCH: PinchThresholds = {
   enter: 0.27,
   rearmDrop: 0.12,
   releaseRise: 0.07,
-  openVelocity: 1.7,
+  openVelocity: 1.4,
   releaseMinRise: 0.05,
-  releaseAbs: 0.42
+  releaseAbs: 0.38
 }
 
 const clampSens = (s: number): number => (Number.isFinite(s) ? Math.min(2, Math.max(0.5, s)) : 1)

@@ -35,6 +35,8 @@ export interface ReplayResult {
   config: ProcessorConfig
   /** Mean pipeline time per frame (ms), excluding hand tracking. */
   msPerFrame: number
+  /** For each finished stroke, the frame time at which the pen-up decision was made. */
+  endDecisions: number[]
 }
 
 export function replay(trace: LandmarkTrace, cfg: ReplayConfig = {}): ReplayResult {
@@ -43,14 +45,23 @@ export function replay(trace: LandmarkTrace, cfg: ReplayConfig = {}): ReplayResu
   const proc = new HandFrameProcessor(engine, config, cfg.gesture)
   const strokes: Stroke[] = []
   const cursor: ReplayResult['cursor'] = []
-  engine.onStrokeEnd((e) => strokes.push({ ...e.stroke, points: e.stroke.points.slice() }))
+  const endDecisions: number[] = []
+  let now = 0
+  engine.onStrokeEnd((e) => {
+    strokes.push({ ...e.stroke, points: e.stroke.points.slice() })
+    endDecisions.push(now)
+  })
   engine.onCursor((c) => cursor.push({ t: c.t, x: c.x, y: c.y, down: c.down }))
-  const frames = trace.frames.map((f) => ({ t: f.t, landmarks: unpackLandmarks(f.lm), confidence: f.c }))
+  const frames = trace.frames.map((f) => ({ t: f.t, landmarks: unpackLandmarks(f.lm), world: unpackLandmarks(f.w ?? null), confidence: f.c }))
   const t0 = performance.now()
-  for (const f of frames) proc.process({ ...f, videoAspect: trace.videoAspect })
-  proc.reset((trace.frames.at(-1)?.t ?? 0) + 1)
+  for (const f of frames) {
+    now = f.t
+    proc.process({ ...f, videoAspect: trace.videoAspect })
+  }
+  now = (trace.frames.at(-1)?.t ?? 0) + 1
+  proc.reset(now)
   const msPerFrame = frames.length ? (performance.now() - t0) / frames.length : 0
-  return { strokes, cursor, config, msPerFrame }
+  return { strokes, cursor, config, msPerFrame, endDecisions }
 }
 
 // ── Metrics ────────────────────────────────────────────────────────────────
@@ -154,6 +165,18 @@ export interface Score {
   liveLag: number
   /** Largest gap between consecutive points of a stroke (page units; continuity). */
   maxGap: number
+  /** Pen-down delay: first ink time − intended start time (ms, mean). */
+  penDownDelay: number
+  /** Pen-up delay: when the pen-up was decided − when the fingers began to open (ms, mean). */
+  penUpDelay: number
+  /** Live cursor jitter while writing: wobble of the live (pre-refinement) ink (page units). */
+  liveJitter: number
+  /**
+   * Live tail: length of live ink drawn after the fingers began to open
+   * (page units, summed over strokes). This is what the writer SEES at the
+   * end of a stroke before pen-up trimming removes it from the final stroke.
+   */
+  liveTail: number
   /** Total stored points. */
   points: number
   msPerFrame: number
@@ -258,9 +281,23 @@ export function score(result: ReplayResult, truth: StrokeTruth[]): Score {
     tail += pathLength(pts.slice(i1))
   }
   let startErr = 0, endErr = 0, nEnds = 0, broken = 0, lost = 0
+  let downDelay = 0, upDelay = 0, nDelay = 0
   truth.forEach((t, i) => {
     const m = matched[i]!
     if (m.length === 0) return void lost++
+    if (t.times && t.times.length > 0) {
+      const first = m[0]!
+      const last = m[m.length - 1]!
+      const idx = result.strokes.indexOf(last)
+      const decided = result.endDecisions[idx]
+      // The fingers begin to open one frame after the last intended ink frame.
+      const frame = t.times.length > 1 ? (t.times.at(-1)! - t.times[0]!) / (t.times.length - 1) : 33
+      if (decided !== undefined) {
+        downDelay += first.startedAt - t.times[0]!
+        upDelay += decided - (t.times.at(-1)! + frame)
+        nDelay++
+      }
+    }
     if (m.length > 1) broken++
     const first = m[0]!.points[0]!
     const last = m[m.length - 1]!.points.at(-1)!
@@ -282,6 +319,30 @@ export function score(result: ReplayResult, truth: StrokeTruth[]): Score {
       }
     })
   }
+  // Live tail: live ink between the intended end of each stroke and the next intended start.
+  let liveTail = 0
+  const spans = truth.filter((t) => t.times && t.times.length > 0).map((t) => [t.times![0]!, t.times!.at(-1)!] as [number, number])
+  let prevC: { x: number; y: number; t: number; down: boolean } | null = null
+  for (const q of result.cursor) {
+    if (prevC && prevC.down && q.down) {
+      const inGap = spans.some(([, e], i) => q.t > e + 1 && q.t < (spans[i + 1]?.[0] ?? Infinity))
+      if (inGap) liveTail += Math.hypot(q.x - prevC.x, q.y - prevC.y)
+    }
+    prevC = q
+  }
+  // Live jitter: wobble of the live cursor while the pen is down.
+  let lj = 0, nLj = 0
+  let seg: NormPoint[] = []
+  for (const q of [...result.cursor, { x: 0, y: 0, t: 0, down: false }]) {
+    if (q.down) seg.push(q)
+    else if (seg.length) {
+      if (seg.length > 6) {
+        lj += wobble(seg)
+        nLj++
+      }
+      seg = []
+    }
+  }
   return {
     strokes: result.strokes.length,
     expected: truth.length,
@@ -298,6 +359,10 @@ export function score(result: ReplayResult, truth: StrokeTruth[]): Score {
     missing,
     liveLag: nLag ? lag / nLag : 0,
     maxGap,
+    penDownDelay: nDelay ? downDelay / nDelay : 0,
+    penUpDelay: nDelay ? upDelay / nDelay : 0,
+    liveJitter: nLj ? lj / nLj : 0,
+    liveTail,
     points,
     msPerFrame: result.msPerFrame
   }

@@ -2,7 +2,7 @@
 
 WISP lets you write in the air with your finger, using an ordinary laptop webcam. Pinch your thumb and index finger together to put the pen down, move, and open your fingers to lift it. Strokes are captured as structured vector data, ready to become an input mode inside Inkling Notebook.
 
-This is **v0.1.2**: a standalone, independently runnable prototype that lives inside the Inkling repository but has no dependency on Inkling's app code, and Inkling has none on it.
+This is **v0.1.3**: a standalone, independently runnable prototype that lives inside the Inkling repository but has no dependency on Inkling's app code, and Inkling has none on it.
 
 ## Goals
 
@@ -10,19 +10,19 @@ This is **v0.1.2**: a standalone, independently runnable prototype that lives in
 - Reliable stroke capture first: smooth, low-latency ink with clean stroke boundaries. Handwriting recognition comes later.
 - Everything runs locally in the browser. No backend, account, paid API or cloud inference. Camera frames are never recorded, stored or uploaded.
 
-## What works (v0.1.2)
+## What works (v0.1.3)
 
 | Area | Implemented |
 |---|---|
 | Tracking | Webcam permission and preview, MediaPipe Tasks Vision Hand Landmarker (21 landmarks, one hand), GPU delegate with CPU fallback, one inference per new video frame, mirroring, landmark overlay, tracker status (loading / ready / unavailable) |
 | Pen point | Virtual pen between the thumb and index fingertips (default), or the index fingertip |
-| Gestures | Asymmetric pinch detection: deliberate pen-down (a real closing motion that has settled), fast pen-up (relative to your own pinch, velocity-aware, noise-adaptive), release-onset trimming by a hinge fit, re-arm protection against flicker, no writing when a hand enters already pinched or fingers merely drift close, tolerance of one-frame tracking gaps |
+| Gestures | Orientation-aware pinch measurement (2D image ratio blended with a 3D ratio from MediaPipe world landmarks as the hand turns), tracking-quality indicator, early pen-up feedback (live ink pauses at the first sign of opening), glitch-resistant release; asymmetric pinch detection: deliberate pen-down (a real closing motion that has settled), fast pen-up (relative to your own pinch, velocity-aware, noise-adaptive), release-onset trimming by a hinge fit, re-arm protection against flicker, no writing when a hand enters already pinched or fingers merely drift close, tolerance of one-frame tracking gaps |
 | Ink | One continuous noise-gated One Euro filter for cursor and live ink, noise-scaled stabilizer, noise-matched zero-lag refinement of each finished stroke (glitch removal + Whittaker smoother), pen-down seeding, spike rejection and stroke splitting on confirmed jumps, distance-based resampling, raw positions kept beside smoothed ones, perfect-freehand rendering (same ink library as Inkling) |
 | Mapping | Page-normalized coordinates, automatic writing region that keeps circles round, writing sensitivity, optional two-pinch calibration, letterboxed page that keeps geometry on resize |
 | Editing | Pen colour and thickness, undo/redo, clear (undoable), JSON export/import with validation, PNG export |
 | Mouse mode | Mouse drives the same engine as the webcam (left button = pinch) for development and testing without a camera |
-| UI | Toolbar, camera panel with status, settings, onboarding, status pill, optional developer diagnostics (tracking FPS, inference time, gesture state, pinch ratio/baseline/noise, trimmed points) and a trace recorder (landmarks + per-frame measurements + pen events + strokes, never video) |
-| Evaluation | Replay harness (`npm run replay`): 13 synthetic scenarios with ground truth under two noise profiles, recorded traces from your own webcam, side-by-side setting comparisons, and an HTML page that draws the strokes |
+| UI | Toolbar, camera panel with status, settings, onboarding, status pill, optional developer diagnostics (tracking FPS, inference time, frame interval, capture→pen-update latency, skipped frames, hand orientation quality, 3D share of the pinch, gesture state, pinch ratio/baseline/noise, trimmed points) and a trace recorder (landmarks + per-frame measurements + pen events + strokes, never video) |
+| Evaluation | Replay harness (`npm run replay`): 32 synthetic scenarios from a projected 3D hand model (writing, speed, gestures, gentle lifts, 9 hand orientations and distances) with ground truth under two noise profiles, pen-down/pen-up delay, live tail and live jitter metrics, recorded traces from your own webcam, side-by-side setting comparisons, and an HTML page that draws the strokes |
 | Integration surface | Typed `onStrokeStart / onStrokeUpdate / onStrokeEnd / onTrackingLost / onGestureChange / onCursor`, each returning an unsubscribe function; a pure WISP → Inkling `createStroke` adapter sketch (not wired in) |
 
 ## Setup
@@ -108,6 +108,60 @@ Key boundaries:
 - **One engine for every input.** Webcam and mouse both call `StrokeEngine.input(sample, down)`. There is no second drawing path.
 - **Inference is separate from rendering and React.** The tracking loop runs on `requestVideoFrameCallback` (one inference per new camera frame; `requestAnimationFrame` + `currentTime` check as fallback). Strokes reach the canvas through engine events; the canvas redraws on the next animation frame only when something changed. React only hears low-frequency events (gesture state, stroke start/end) and polls diagnostics 4×/s.
 - **Editing is separate from rendering.** `DocumentStore` holds the document and an operation history; the renderer just draws whatever document it's given.
+
+## v0.1.3: hand orientation, pen-up feedback, fast writing
+
+**Everything below is measured on synthetic traces from a modelled hand and modelled noise. None of it is a real-webcam measurement.** The screenshot and traces mentioned in the v0.1.3 brief were not received; real traces are the next step.
+
+### What the investigation found
+
+- **MediaPipe world landmarks** (`worldLandmarks`) are metres in a frame centred on the hand, with camera-aligned axes ("smaller z = closer to the camera"). They give the hand's *shape and orientation*, not its position, so the pen position must still come from the image landmarks. They are a network estimate of 3D shape, not a measurement.
+- **Orientation breaks the 2D pinch ratio.** With a projected 3D hand (`src/replay/hand3d.ts`), the same closed/open pinch reads 0.17 / 0.83 with the palm facing the camera but 0.12 / 0.51 with the fingers pointing at it: the opening looks ~40 % smaller, so pen-up needs a much bigger real opening. The 3D ratio (tip distance ÷ 3D palm size) is 0.16 / 0.75 in every orientation.
+- **The v0.1.2 synthetic lifts were unrealistically sharp** (fully open in 3 frames, which any threshold catches at once). New *gentle lift* scenarios open only to 0.42 palm widths, slowly at first. On these v0.1.2 decides pen-up ~120–130 ms after the fingers start to open and draws live ink the whole time — consistent with the "pen-up not sensitive enough" report.
+- **Lowering the pen-up thresholds broke strokes.** Every reduction tried (rise 0.05–0.065, speed 1.2–1.5/s, noise cap 2.0–2.2, time-confirmed partial openings) added 1–9 broken strokes per run across the scenarios because noise and grip wobble look exactly like small openings. Tightening pen-down to 0.24–0.26 lost whole strokes (1.8 → 3.5–4.5 per run). Those values were not adopted.
+- **Fast writing was being flattened** by the pen-up refinement: the noise estimate averaged second differences, and the turns of fast letters leaked in, so it climbed to 4–5× the real noise and a 7-sample "e" was smoothed into a blob.
+
+### What changed
+
+| Area | v0.1.2 | v0.1.3 |
+|---|---|---|
+| Pinch measurement | 2D image ratio | **`auto`**: 2D while the fingers lie across the image; blends to the 3D world-landmark ratio as they tip toward the camera (along 0.4→0.8) or the palm turns edge-on (0.6→0.95). Setting *Pinch measurement*: automatic / always 3D / camera image only. Frames without world landmarks use 2D. |
+| Tracking quality | — | `good` / `reduced` / `poor` from the hand-local frame (wrist, index, middle, pinky MCP); a hint appears when the fingers point at the camera |
+| Live ink at pen-up | drawn until the pen-up decision | **paused at half of any release threshold**; drawn later if the fingers settle back, dropped if the pen lifts. Decisions are identical (tested). |
+| One-frame glitch | the unsmoothed check could end a stroke on one frame | a moderate unsmoothed jump must be confirmed by the next frame (a jump over 2× still lifts at once) |
+| Release onset trim | linear hinge | linear **or quadratic** hinge (slow-starting openings) |
+| Opening speed / backstop | 1.7 /s, 0.42 | **1.4 /s, 0.38** |
+| Pen-down threshold, other release thresholds, noise cap | 0.27 · 0.07 · 0.05 · 2.5× | unchanged (see above) |
+| Refinement noise level | mean of second differences | **median** (robust to fast-letter accelerations), ×1.5 for correlated noise; a stroke's own estimate only from 8+ samples and ≤ 3× the session level. The live filter keeps the v0.1.2 estimate. |
+| Timestamps | `performance.now()` when processing | camera **capture time** from `requestVideoFrameCallback` when the browser reports it |
+| Diagnostics | FPS, inference | + frame interval, capture → pen-update latency, skipped camera frames, orientation quality, 3D share |
+| Trace format | v2 | **v3**: world landmarks (`w`) and per-frame 2D/3D ratio, palm normal, quality, frame interval, inference time, latency (v1/v2 traces still replay, with the 2D ratio) |
+
+Not changed, with reasons: the pen point stays the thumb–index midpoint (in the model it is the contact point in every orientation). Hand-local or "virtual plane" writing coordinates were not adopted: world landmarks carry no position, so a hand-local frame cannot place the pen on the page, and the existing two-pinch calibration already defines the writing plane in the image. A Web Worker was not added: the pipeline after inference takes ~0.01–0.03 ms per frame; whether inference itself blocks the main thread on your laptop is now visible in the diagnostics (inference ms, capture → pen-update, skipped frames) and should decide it.
+
+### v0.1.2 vs v0.1.3 on identical synthetic traces
+
+`npm run replay -- --json`, 5 seeds per scenario, webcam-like noise, totals per run (px on the 1600-px page; * = mean per scenario). v0.1.2's code was run on the same new traces.
+
+| Metric | Writing (10) | Speed (3) | Gestures (5) | Gentle lifts (4) | Orientations (10) |
+|---|---|---|---|---|---|
+| Broken strokes | 2.2 → 2.0 | 0 → 0 | 0.8 → 0.8 | 2.0 → **1.2** | 5.8 → **4.0** |
+| Accidental strokes | 0 → 0 | 0 → 0 | 0 → 0 | 5.8 → **1.4** | 6.2 → **0.4** |
+| Lost strokes | 0.2 → 0.2 | 0.6 → 0.6 | 0.6 → 0.6 | 2.8 → **0.8** | 1.4 → **0.4** |
+| Live tail (ink seen after the fingers open) | 242 → **1** | 11 → **0** | 49 → **19** | 2796 → **1296** | 900 → **127** |
+| Final tails | 676 → 665 | 389 → 358 | 263 → 242 | 817 → *956* | 2063 → *2415* |
+| Start hooks | 493 → *507* | 415 → *510* | 124 → 121 | 511 → *580* | 941 → *1049* |
+| Missed ink | 4775 → 4871 | 2949 → 2857 | 706 → 717 | 3337 → 3198 | 9799 → 9055 |
+| Pen-down delay (ms)* | 12 → 12 | 24 → 24 | 7 → 6 | 0 → −10 | 31 → **13** |
+| Pen-up decision delay (ms)* | 6 → *14* | 0 → *4* | 22 → *27* | 73 → *133* | 14 → *20* |
+| Live lag / jitter* | 20 / 0.3 → same | 30 / 0.5 → same | | | |
+
+On the gentle noise model, fast "Hello" (3×) misses 86 → 31 px of ink per stroke; small loops and the equation are unchanged.
+
+**Costs, stated plainly:**
+- The *decision* to lift is not faster; it is 1 frame later on facing hands (glitch confirmation) and later on the orientation/gentle-lift sets where the 3D ratio (assumed noisier) is used. What is faster is the *visible* stop: live ink pauses at half the threshold.
+- Final tails and start hooks are larger with the fingers toward the camera (3D measurement), in exchange for far fewer broken, accidental and lost strokes.
+- The 3D benefit depends on how noisy real world landmarks are, which only real traces can tell. With world-landmark noise assumed **2×** the model's (`--world-noise 2`), "fingers toward the camera" loses 3.2 strokes per run (v0.1.2's 2D: 1.0); at **0.5×** it loses 0.4. If real traces show this, set *Pinch measurement* to *Camera image only*.
 
 ## How gesture detection works
 
@@ -272,6 +326,8 @@ The page has a fixed logical size (default 1600 × 1000). Pen width is stored in
 
 ## Stroke data format
 
+Unchanged in v0.1.3 (`wisp.strokes` version 1); files from v0.1–v0.1.2 import as before. Page coordinates are unchanged too: world landmarks are used only to measure the pinch and the hand's orientation, never for the pen position.
+
 ```jsonc
 {
   "format": "wisp.strokes",
@@ -320,7 +376,7 @@ Nothing in Inkling has been changed for this yet.
 
 ## Testing
 
-`npm test` runs 157 unit tests. They cover:
+`npm test` runs 197 unit tests (v0.1.3 adds 21: 3D ratio invariance and fallbacks, orientation quality and blending, live-ink pause and identical decisions, glitch confirmation, quadratic onset, robust noise level, fast-loop refinement, orientation scenarios, trace v3, settings). They cover:
 - **Gestures:** pinch thresholds and asymmetry; deliberate pen-down (drifting fingers don't start ink); pen-up cases (rapid, slow, small and fast openings, noisy measurements, re-pinch); hinge-fit trimming (quick release trims nothing, slow release trims the ramp); tracking gaps before and during writing.
 - **Smoothing:** the Whittaker solver against a dense reference; glitch removal; noise estimation; noise-matched refinement (straightens noisy ticks without shortening them, keeps loops round); the noise-gated filter.
 - **Ink and data:** the midpoint and mirroring; the continuous filter and seeding; pinch depth weight; trace v2 recording and parsing; serialization round-trips and invalid input; settings migration; undo/redo; the Inkling adapter.
@@ -340,7 +396,13 @@ The file contains:
 
 Never video. Replay it with: `npm run replay -- wisp-trace-….json --compare releaseSensitivity=0.8,1,1.2 --html compare.html`. Every run sees exactly the same hand motion, and the HTML page draws the strokes for each setting side by side. Any setting can be compared, including `depthWeight` and `noiseGate`.
 
-**Needs testing with a real webcam and hand:**
+**Needs testing with a real webcam and hand (v0.1.3):**
+- Every orientation in the brief (palm facing, 45°, fingers toward the camera, sideways, tilted up/down, near/far): record one trace each, then `npm run replay -- trace.json --compare pinchMetric=2d,auto,3d --html compare.html`
+- How noisy MediaPipe's world landmarks really are (the 3D-vs-2D trade-off depends on it)
+- Whether live ink pausing at the first opening feels like an immediate pen-up
+- Capture → pen-update latency and skipped frames on your laptop (decides whether a Web Worker is worth it)
+
+**Still open from v0.1.2:**
 - Whether pen-down at 0.27 feels deliberate without missing strokes, and whether pen-up lifts early enough without breaking strokes mid-letter
 - Short strokes, superscripts and loops in "Hello World" and x² + 3x − 5 = 0
 - The small settle at pen-up when the refinement replaces the live stroke
@@ -357,7 +419,10 @@ Never video. Replay it with: `npm run replay -- wisp-trace-….json --compare re
 - **Conservative first second.** In the first second of writing, before your pinch noise is measured, pen-up needs a slightly larger opening.
 - **Noisy tracking.** Under very noisy tracking, a long stroke can occasionally split in two; lower *Pen-up sensitivity* if this happens.
 - **Live vs final ink.** The live stroke and the final stroke can differ by a few pixels at pen-up.
-- **Main-thread tracking.** Inference runs on the main thread.
+- **Main-thread tracking.** Inference runs on the main thread; the diagnostics now show whether that costs frames.
+- **3D pinch is modelled, not verified.** World-landmark noise in the replay model is an assumption (`--world-noise`).
+- **Pen-up decision.** Lifting a little (fingers just separating) still takes ~4 frames to decide on a facing hand; live ink stops sooner, but the decision does not.
+- **Very short fast dashes** lose about a third of their length (≈ one frame of motion at each end).
 - One hand only; uniform stroke width; timestamps are relative within a file; the calibrated area is stored in view space; no eraser yet.
 
 

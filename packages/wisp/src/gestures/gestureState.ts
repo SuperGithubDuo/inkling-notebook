@@ -101,6 +101,27 @@ export interface GestureConfig {
    */
   noiseK: number
   initialNoise: number
+  /**
+   * Early release (v0.1.3). A frame whose opening reaches `suspectFraction`
+   * of any release threshold is a "release suspect": live ink pauses at once
+   * (the frame is held back, not drawn). If the opening is still there after
+   * `suspectMs`, or reaches a full threshold sooner, the pen lifts; if the
+   * fingers settle back, the held frames are drawn and writing continues.
+   * Noise protection comes from the short confirmation time instead of from
+   * high thresholds.
+   */
+  suspectFraction: number
+  suspectMs: number
+  /**
+   * Confirm a suspected release after `suspectMs` only if the raw ratio rose
+   * on every held frame (a real opening is monotonic; noise and grip wobble
+   * are not). false = a suspect only pauses ink; the full thresholds decide.
+   */
+  suspectMonotonic: boolean
+  /** Require a second frame to confirm a moderate unsmoothed jump (glitch protection). */
+  confirmRawJump: boolean
+  /** Ramp shapes tried by the release-onset fit: 1 = linear (v0.1.2), 2 = quadratic ease-in. */
+  onsetShapes: number[]
 }
 
 export const DEFAULT_GESTURE: GestureConfig = {
@@ -117,7 +138,12 @@ export const DEFAULT_GESTURE: GestureConfig = {
   maxNoiseFactor: 2.5,
   baselineFollow: 0.05,
   noiseK: 4,
-  initialNoise: 0.035
+  initialNoise: 0.035,
+  suspectFraction: 0.5,
+  suspectMs: 60,
+  suspectMonotonic: false,
+  confirmRawJump: true,
+  onsetShapes: [1, 2]
 }
 
 interface Pending {
@@ -151,6 +177,11 @@ export class GestureStateMachine {
   private noiseVar: number
   private prevRaw: number | null = null
   private noiseSamples = 0
+  /** Frames held back while a release is suspected (v0.1.3). */
+  private held: GestureSample[] = []
+  /** Raw ratios of the held frames (monotonic-opening check). */
+  private heldRaw: number[] = []
+  private heldRise: number[] = []
 
   constructor(cfg: Partial<GestureConfig> = {}) {
     this.cfg = { ...DEFAULT_GESTURE, ...cfg }
@@ -283,8 +314,23 @@ export class GestureStateMachine {
         const rawNeed = Math.min(th.releaseRise * 1.5 * this.cfg.maxNoiseFactor, Math.max(th.releaseRise * 1.5, K * Math.hypot(sigmaR, sigmaB)))
         const vNeed = Math.min(th.openVelocity * this.cfg.maxNoiseFactor, Math.max(th.openVelocity, (K * sigmaS * Math.SQRT2) / 0.067))
         const rawRise = (this.signal.raw ?? r) - this.baseline
-        const release = r > th.releaseAbs || rise > riseNeed || rawRise > rawNeed || (v > vNeed && rise > th.releaseMinRise * k)
+        const minRise = th.releaseMinRise * k
+        const f = this.cfg.suspectFraction
+        const suspect = rise > riseNeed * f || rawRise > rawNeed * f || (v > vNeed * f && rise > minRise * f)
+        const rawNow = this.signal.raw ?? r
+        const heldFor = this.held.length ? frame.t - this.held[0]!.t : 0
+        const opening = suspect && this.cfg.suspectMonotonic && heldFor >= this.cfg.suspectMs && this.heldRaw.every((x, i, a) => (i === 0 ? true : x >= a[i - 1]!)) && rawNow >= (this.heldRaw.at(-1) ?? -Infinity)
+        // Single-frame landmark glitches (common on real webcams, ~0.15 ratio for one
+        // frame) used to trip the unsmoothed check on their own. v0.1.3: a raw jump
+        // releases at once only if it is very large; otherwise the frame is held
+        // (ink pauses immediately) and the next frame must confirm the opening.
+        const prevRawRise = this.heldRaw.length ? this.heldRaw.at(-1)! - this.baseline : -Infinity
+        const rawRelease = rawRise > rawNeed && (!this.cfg.confirmRawJump || rawRise > 2 * rawNeed || prevRawRise > rawNeed * this.cfg.suspectFraction)
+        const release = r > th.releaseAbs || rise > riseNeed || rawRelease || (v > vNeed && rise > minRise) || opening
         if (release) {
+          this.held = []
+          this.heldRaw = []
+          this.heldRise = []
           out.push({ type: 'end', reason: 'released', trimAfter: this.onsetTime(frame.t, this.signal.raw ?? r) })
           this.go('hover', out)
           this.sawOpen = true
@@ -294,14 +340,27 @@ export class GestureStateMachine {
           out.push({ type: 'sample', sample })
           break
         }
+        if (suspect) {
+          // Possibly opening: hold this frame back (no live ink) until it is confirmed or cleared.
+          this.held.push({ ...sample, down: true })
+          this.heldRaw.push(rawNow)
+          this.heldRise.push(rise)
+          // Keep learning the noise and following the grip exactly as for drawn frames:
+          // holding back ink must not change any later decision (skipping these frames
+          // biased the noise low and froze the baseline under slow grip drift).
+          this.followBaseline(rawNow, rise < minRise)
+          this.learnNoise()
+          this.pushHistory(frame.t, r)
+          break
+        }
+        // Not opening after all: draw what was held back, then continue.
+        for (const h of this.held.splice(0)) out.push({ type: 'sample', sample: h })
+        this.heldRaw = []
+        this.heldRise = []
         // Follow the writer's grip while it is steady (not while opening), and learn the noise.
         // Baseline: running mean of the raw ratio while steady (exact mean at first, then
         // an EMA with weight baselineFollow so it can follow a slowly relaxing grip).
-        if (rise < th.releaseMinRise * k) {
-          this.baselineN++
-          const raw = this.signal.raw ?? r
-          this.baseline += Math.max(1 / this.baselineN, this.cfg.baselineFollow) * (raw - this.baseline)
-        }
+        this.followBaseline(this.signal.raw ?? r, rise < minRise)
         this.learnNoise()
         this.pushHistory(frame.t, r)
         out.push({ type: 'sample', sample: { ...sample, down: true } })
@@ -311,10 +370,27 @@ export class GestureStateMachine {
     return out
   }
 
+  /**
+   * Baseline: running mean of the raw ratio while the grip is steady (exact
+   * mean at first, then an EMA with weight baselineFollow so it can follow a
+   * slowly relaxing grip). Frames whose smoothed ratio is already rising are skipped.
+   */
+  private followBaseline(raw: number, steady: boolean): void {
+    if (!steady) return
+    this.baselineN++
+    this.baseline += Math.max(1 / this.baselineN, this.cfg.baselineFollow) * (raw - this.baseline)
+  }
+
   /** Forces the pen up (e.g. webcam switched off). */
   reset(): GestureAction[] {
     const out: GestureAction[] = []
-    if (this.isWriting) out.push({ type: 'end', reason: 'lost' })
+    if (this.isWriting) {
+      for (const h of this.held.splice(0)) out.push({ type: 'sample', sample: h })
+      out.push({ type: 'end', reason: 'lost' })
+    }
+    this.held = []
+    this.heldRaw = []
+    this.heldRise = []
     this.pending = []
     this.history = []
     this.signal.reset()
@@ -405,21 +481,25 @@ export class GestureStateMachine {
     const b = this.baseline
     let bestK = h.length - 1
     let bestErr = Infinity
-    for (let k = 0; k < h.length; k++) {
-      // Frames 0..k flat at b; frames k+1..end on a line through (t_k, b), slope fitted.
-      let err = 0
-      for (let i = 0; i <= k; i++) err += (pts[i]!.y - b) ** 2
-      let num = 0
-      let den = 0
-      for (let i = k + 1; i < pts.length; i++) {
-        const dt = pts[i]!.t - pts[k]!.t
-        num += dt * (pts[i]!.y - b)
-        den += dt * dt
+    // Two ramp shapes: linear (a steady opening) and quadratic (an opening that
+    // starts slowly, as relaxed lifts do — v0.1.3). The best fit of either wins.
+    for (const pow of this.cfg.onsetShapes) {
+      for (let k = 0; k < h.length; k++) {
+        // Frames 0..k flat at b; frames k+1..end on a ramp b + a·(t − t_k)^pow, a fitted.
+        let err = 0
+        for (let i = 0; i <= k; i++) err += (pts[i]!.y - b) ** 2
+        let num = 0
+        let den = 0
+        for (let i = k + 1; i < pts.length; i++) {
+          const g = (pts[i]!.t - pts[k]!.t) ** pow
+          num += g * (pts[i]!.y - b)
+          den += g * g
+        }
+        const a = den > 0 ? Math.max(0, num / den) : 0
+        for (let i = k + 1; i < pts.length; i++) err += (pts[i]!.y - b - a * (pts[i]!.t - pts[k]!.t) ** pow) ** 2
+        // Prefer the latest k on ties: never trim more than the data demands.
+        if (err < bestErr - 1e-12 || (Math.abs(err - bestErr) <= 1e-12 && k > bestK)) (bestErr = err), (bestK = k)
       }
-      const slope = den > 0 ? Math.max(0, num / den) : 0
-      for (let i = k + 1; i < pts.length; i++) err += (pts[i]!.y - b - slope * (pts[i]!.t - pts[k]!.t)) ** 2
-      // Prefer the latest k on ties: never trim more than the data demands.
-      if (err <= bestErr + 1e-12) (bestErr = err), (bestK = k)
     }
     return h[bestK]!.t
   }
@@ -441,6 +521,7 @@ export class GestureStateMachine {
         return
       case 'lost':
         if (gone) {
+          for (const h of this.held.splice(0)) out.push({ type: 'sample', sample: h })
           out.push({ type: 'end', reason: 'lost' })
           this.toNoHand(out)
         }

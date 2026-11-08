@@ -85,3 +85,79 @@ export function validLandmarks(lm: readonly Landmark[] | undefined | null): lm i
   }
   return true
 }
+
+// ── 3D (world landmarks), v0.1.3 ──────────────────────────────────────────
+//
+// MediaPipe's world landmarks are metres in a frame whose ORIGIN is the
+// hand's approximate geometric centre and whose axes are aligned with the
+// camera (x right, y down, z away from the camera; "smaller z = closer").
+// They therefore carry the hand's SHAPE and ORIENTATION but not its position
+// in the room: the pen position must still come from the image landmarks.
+// The 3D shape is a model estimate, not a measurement; it is most useful
+// exactly where the 2D projection fails (fingers pointing at the camera,
+// palm edge-on), because there the thumb and index tips overlap in the image.
+
+const d3 = (a: Landmark, b: Landmark): number => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z)
+
+/** Mean side of the wrist / index-MCP / pinky-MCP triangle, in metres. */
+export function palmSize3D(w: readonly Landmark[]): number {
+  const a = w[LM.WRIST], i = w[LM.INDEX_MCP], p = w[LM.PINKY_MCP]
+  if (!a || !i || !p) return 0
+  return (d3(a, i) + d3(a, p) + d3(i, p)) / 3
+}
+
+/**
+ * Thumb–index tip distance ÷ 3D palm size. Unlike the 2D ratio it does not
+ * shrink when the fingers point toward the camera or the hand is turned
+ * sideways (foreshortening). Null when the world landmarks are unusable
+ * (missing, or a palm outside 3–20 cm, which no real hand has).
+ */
+export function pinchRatio3D(w: readonly Landmark[] | null | undefined): number | null {
+  if (!w || w.length < 21) return null
+  for (const p of w) if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) return null
+  const palm = palmSize3D(w)
+  if (!(palm > 0.03 && palm < 0.2)) return null
+  const r = d3(w[LM.THUMB_TIP]!, w[LM.INDEX_TIP]!) / palm
+  return Number.isFinite(r) ? r : null
+}
+
+export type TrackingQuality = 'good' | 'reduced' | 'poor'
+
+export interface HandPose {
+  /** Unit palm normal (camera axes), pointing out of the palm. */
+  normal: [number, number, number]
+  /** Unit direction wrist → middle-finger MCP (camera axes). */
+  finger: [number, number, number]
+  /** 0 = fingers across the image, 1 = fingers pointing straight along the camera axis. */
+  along: number
+  /** 0 = palm (or back of hand) faces the camera, 1 = palm seen edge-on. */
+  edgeOn: number
+  quality: TrackingQuality
+}
+
+/**
+ * Hand orientation from world landmarks, using the hand-local frame
+ * (wrist, index MCP, middle MCP, pinky MCP). Quality is about how well a
+ * single camera can see the thumb–index gap in this orientation:
+ *   good     – the fingers lie roughly across the image;
+ *   reduced  – fingers tipped toward the camera (> ~45°) or palm near edge-on;
+ *   poor     – fingers almost along the camera axis (> ~65°): the tips overlap
+ *              in the image and both 2D and 3D estimates are guesses.
+ */
+export function handPose(w: readonly Landmark[] | null | undefined): HandPose | null {
+  if (!w || w.length < 21) return null
+  const W = w[LM.WRIST]!, I = w[LM.INDEX_MCP]!, M = w[LM.MIDDLE_MCP]!, P = w[LM.PINKY_MCP]!
+  const f = [M.x - W.x, M.y - W.y, M.z - W.z]
+  const a = [I.x - P.x, I.y - P.y, I.z - P.z] // across the knuckles
+  const fl = Math.hypot(f[0]!, f[1]!, f[2]!)
+  if (!(fl > 1e-4)) return null
+  const finger: [number, number, number] = [f[0]! / fl, f[1]! / fl, f[2]! / fl]
+  const n = [f[1]! * a[2]! - f[2]! * a[1]!, f[2]! * a[0]! - f[0]! * a[2]!, f[0]! * a[1]! - f[1]! * a[0]!]
+  const nl = Math.hypot(n[0]!, n[1]!, n[2]!)
+  if (!(nl > 1e-6)) return null
+  const normal: [number, number, number] = [n[0]! / nl, n[1]! / nl, n[2]! / nl]
+  const along = Math.abs(finger[2])
+  const edgeOn = 1 - Math.abs(normal[2])
+  const quality: TrackingQuality = along > 0.9 ? 'poor' : along > 0.7 || edgeOn > 0.9 ? 'reduced' : 'good'
+  return { normal, finger, along, edgeOn, quality }
+}
