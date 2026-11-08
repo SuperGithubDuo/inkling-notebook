@@ -4,9 +4,11 @@ import {
   OneEuroFilter,
   OutlierGate,
   PointFilter,
+  Stabilizer,
   densify,
   ema,
-  oneEuroForStrength
+  oneEuroForStrength,
+  refineZeroPhase
 } from '../src/strokes/smoothing'
 
 /** Deterministic pseudo-random noise. */
@@ -119,5 +121,65 @@ describe('resampling and interpolation', () => {
 
   it('ema is available for comparison', () => {
     expect(ema([{ x: 0, y: 0 }, { x: 1, y: 1 }], 0.5)[1]).toEqual({ x: 0.5, y: 0.5 })
+  })
+})
+
+describe('stabilizer', () => {
+  it('holds still against jitter smaller than its radius', () => {
+    const s = new Stabilizer(0.003)
+    s.apply({ x: 0.5, y: 0.5 })
+    let p = { x: 0.5, y: 0.5 }
+    for (const d of [0.001, -0.0012, 0.0008, -0.0009, 0.001]) p = s.apply({ x: 0.5 + d, y: 0.5 })
+    expect(Math.abs(p.x - 0.5)).toBeLessThan(0.0006)
+  })
+
+  it('follows real movement larger than its radius (small details still register)', () => {
+    const s = new Stabilizer(0.003)
+    s.apply({ x: 0.5, y: 0.5 })
+    let p = { x: 0, y: 0 }
+    for (let i = 1; i <= 10; i++) p = s.apply({ x: 0.5 + i * 0.002, y: 0.5 })
+    // Moved 0.02; lags by at most the radius.
+    expect(p.x).toBeGreaterThan(0.52 - 0.003)
+  })
+
+  it('radius 0 passes points through', () => {
+    const s = new Stabilizer(0)
+    expect(s.apply({ x: 0.1, y: 0.2 })).toEqual({ x: 0.1, y: 0.2 })
+    expect(s.apply({ x: 0.3, y: 0.4 })).toEqual({ x: 0.3, y: 0.4 })
+  })
+})
+
+describe('zero-phase refinement', () => {
+  const params = oneEuroForStrength(0.6).params
+
+  it('keeps both endpoints of a straight stroke (no lag, no shrink)', () => {
+    const pts = Array.from({ length: 20 }, (_, i) => ({ x: 0.2 + i * 0.01, y: 0.5, t: i * 33 }))
+    const r = refineZeroPhase(pts, params)
+    // Within 1.5 px (on a 1600-px page) of the true ends.
+    expect(Math.abs(r[0]!.x - 0.2)).toBeLessThan(0.0015)
+    expect(Math.abs(r.at(-1)!.x - 0.39)).toBeLessThan(0.0015)
+  })
+
+  it('reduces jitter on a noisy line', () => {
+    const rnd = noise(3)
+    const pts = Array.from({ length: 60 }, (_, i) => ({ x: 0.2 + i * 0.003, y: 0.5 + rnd() * 0.006, t: i * 33 }))
+    const r = refineZeroPhase(pts, params)
+    const dev = (a: { y: number }[]) => Math.sqrt(a.reduce((s, p) => s + (p.y - 0.5) ** 2, 0) / a.length)
+    expect(dev(r)).toBeLessThan(dev(pts) * 0.6)
+  })
+
+  it('returns short strokes unchanged', () => {
+    const pts = [{ x: 0.1, y: 0.1, t: 0 }, { x: 0.2, y: 0.2, t: 33 }]
+    expect(refineZeroPhase(pts, params)).toEqual([{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }])
+  })
+})
+
+describe('One Euro defaults (v0.1.1)', () => {
+  it('default strength opens up with speed more than v0.1 did (beta 0.04 vs 0.012)', () => {
+    const p = oneEuroForStrength(0.5).params
+    expect(p.beta).toBeCloseTo(0.04, 3)
+    expect(p.minCutoff).toBeGreaterThan(0.9)
+    expect(p.minCutoff).toBeLessThan(1.3)
+    expect(p.dCutoff).toBeLessThan(1)
   })
 })

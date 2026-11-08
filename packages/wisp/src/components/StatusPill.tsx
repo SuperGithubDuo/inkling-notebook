@@ -37,7 +37,6 @@ export function StatusPill({ mode, status, gesture, writing }: Props) {
         text = 'Pinch detected…'
         break
       case 'writing':
-      case 'release-pending':
         tone = 'writing'
         text = 'Writing · release the pinch to lift the pen'
         break

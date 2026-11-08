@@ -1,58 +1,131 @@
 /**
- * Pinch classification with hysteresis.
+ * Pinch signal processing.
  *
- * The input is the scale-invariant pinch ratio (thumb–index distance ÷ palm
- * size, see tracking/landmarks.ts). Two thresholds avoid flicker: the pinch
- * closes below `enter` and only opens again above `exit` (exit > enter), so
- * noise around a single threshold can't toggle the pen.
+ * Input: the scale-invariant pinch ratio (thumb–index distance ÷ palm size,
+ * see tracking/landmarks.ts). Output, per frame:
+ *   value     – the ratio after light smoothing (EMA). Removes single-frame
+ *               noise; adds well under a frame of delay.
+ *   velocity  – opening speed in ratio units per second, measured over two
+ *               frames (a two-frame span halves the noise of a one-frame
+ *               difference while still reacting within ~70 ms).
+ *
+ * Thresholds are ASYMMETRIC (v0.1.1):
+ *   - Starting a stroke is conservative: the ratio must fall below `enter`
+ *     and the closing motion must have settled (see gestureState.ts).
+ *   - Ending a stroke is fast and RELATIVE to the writer's own pinch: the pen
+ *     lifts when the ratio rises `releaseRise` above the baseline measured
+ *     while writing, or opens quickly (`openVelocity`) by at least
+ *     `releaseMinRise`. A fixed absolute ceiling (`releaseAbs`) is a backstop.
+ *   v0.1 used a single absolute release at 0.45 — for someone whose fingers
+ *   rest at ratio ≈ 0.15 when pinched, that meant opening 0.30 palm-widths
+ *   before the pen lifted, which is the "open too far" problem.
  */
 
 export interface PinchThresholds {
-  /** Ratio below which an open hand counts as pinched. */
+  /** Ratio below which an open hand can start a pinch. */
   enter: number
-  /** Ratio above which a pinched hand counts as released. */
-  exit: number
+  /** After a release, the ratio must fall this far below its open peak to pinch again (anti-flicker). */
+  rearmDrop: number
+  /** Lift the pen when the ratio rises this much above the writing baseline. */
+  releaseRise: number
+  /** Lift the pen when opening faster than this (ratio/s) … */
+  openVelocity: number
+  /** … and the ratio has already risen at least this much. */
+  releaseMinRise: number
+  /** Absolute backstop: always lift above this ratio. */
+  releaseAbs: number
 }
 
-export const DEFAULT_PINCH: PinchThresholds = { enter: 0.3, exit: 0.45 }
+export const DEFAULT_PINCH: PinchThresholds = {
+  enter: 0.3,
+  rearmDrop: 0.1,
+  releaseRise: 0.08,
+  openVelocity: 2.0,
+  releaseMinRise: 0.06,
+  releaseAbs: 0.42
+}
+
+const clampSens = (s: number): number => (Number.isFinite(s) ? Math.min(2, Math.max(0.5, s)) : 1)
 
 /**
- * Pinch sensitivity: 1 = defaults; >1 makes pinching easier (larger ratios
- * count), <1 requires tighter pinches. The hysteresis gap scales with it.
+ * pinchSensitivity  (start)  >1: looser pinches start a stroke (enter scales up).
+ * releaseSensitivity (lift)  >1: the pen lifts after a smaller / slower opening.
  */
-export function pinchThresholds(sensitivity: number, base: PinchThresholds = DEFAULT_PINCH): PinchThresholds {
-  const s = Number.isFinite(sensitivity) ? Math.min(2, Math.max(0.5, sensitivity)) : 1
-  return { enter: base.enter * s, exit: base.exit * s }
+export function pinchThresholds(pinchSensitivity = 1, releaseSensitivity = 1, base: PinchThresholds = DEFAULT_PINCH): PinchThresholds {
+  const p = clampSens(pinchSensitivity)
+  const r = clampSens(releaseSensitivity)
+  const enter = base.enter * p
+  return {
+    enter,
+    rearmDrop: base.rearmDrop,
+    releaseRise: base.releaseRise / r,
+    openVelocity: base.openVelocity / r,
+    releaseMinRise: base.releaseMinRise / r,
+    // Backstop follows the start threshold and always stays above it.
+    releaseAbs: Math.max(enter + 0.08, base.releaseAbs * p)
+  }
 }
 
-export class PinchDetector {
-  private pinched = false
+export class PinchSignal {
+  private v: number | null = null
+  private hist: Array<{ t: number; v: number; raw: number }> = []
 
-  constructor(private thresholds: PinchThresholds = DEFAULT_PINCH) {
-    if (!(thresholds.exit > thresholds.enter)) throw new Error('exit threshold must be larger than enter threshold')
+  constructor(private readonly alpha = 0.6) {}
+
+  /** Feeds a raw ratio; returns the smoothed value, or null if none yet. */
+  update(t: number, ratio: number | null): number | null {
+    if (ratio === null || !Number.isFinite(ratio)) return this.v
+    this.v = this.v === null ? ratio : this.alpha * ratio + (1 - this.alpha) * this.v
+    this.hist.push({ t, v: this.v, raw: ratio })
+    if (this.hist.length > 3) this.hist.shift()
+    return this.v
   }
 
-  setThresholds(t: PinchThresholds): void {
-    if (!(t.exit > t.enter)) throw new Error('exit threshold must be larger than enter threshold')
-    this.thresholds = t
+  get value(): number | null {
+    return this.v
   }
 
-  get state(): boolean {
-    return this.pinched
+  /** Latest unsmoothed ratio. */
+  get raw(): number | null {
+    return this.hist.at(-1)?.raw ?? null
   }
 
-  /** Feeds one ratio; returns the (hysteresis) pinch state. Invalid input keeps the current state. */
-  update(ratio: number | null): boolean {
-    if (ratio === null || !Number.isFinite(ratio)) return this.pinched
-    if (this.pinched) {
-      if (ratio > this.thresholds.exit) this.pinched = false
-    } else if (ratio < this.thresholds.enter) {
-      this.pinched = true
-    }
-    return this.pinched
+  /** Smoothed ratio units per second over the last two frames (positive = opening). Used for release. */
+  get velocity(): number {
+    return this.slope('v')
+  }
+
+  /**
+   * Unsmoothed two-frame slope. Used to decide when a closing pinch has
+   * settled: the smoothed value lags by about a frame and would make the
+   * fingers look like they are still closing after they've stopped.
+   */
+  get rawVelocity(): number {
+    return this.slope('raw')
+  }
+
+  private slope(k: 'v' | 'raw'): number {
+    const h = this.hist
+    if (h.length < 2) return 0
+    const a = h[0]!
+    const b = h[h.length - 1]!
+    const dt = (b.t - a.t) / 1000
+    return dt > 0 ? (b[k] - a[k]) / dt : 0
+  }
+
+  /** Restarts the smoothed value at `v` (e.g. once a pinch has settled), so it carries no closing transition. */
+  reseed(t: number, v: number): void {
+    this.v = v
+    this.hist = [{ t, v, raw: v }]
+  }
+
+  /** Smoothed-value noise implied by a raw-ratio noise σ (EMA variance reduction). */
+  smoothedNoise(rawSigma: number): number {
+    return rawSigma * Math.sqrt(this.alpha / (2 - this.alpha))
   }
 
   reset(): void {
-    this.pinched = false
+    this.v = null
+    this.hist = []
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@inkling/wisp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "WISP (Writing Interface via Spatial Perception): webcam air-handwriting prototype for Inkling Notebook",
   "private": true,
   "type": "module",
@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "replay": "tsx scripts/replay.ts",
     "fetch-model": "node scripts/fetch-model.mjs",
     "copy-wasm": "node scripts/copy-wasm.mjs",
     "predev": "node scripts/copy-wasm.mjs",
@@ -34,6 +35,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",
     "happy-dom": "^21.0.4",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"

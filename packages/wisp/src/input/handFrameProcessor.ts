@@ -6,7 +6,7 @@
  * Pure with respect to the browser: no camera, no MediaPipe, no DOM. That is
  * what lets the webcam path be tested with synthetic landmarks.
  */
-import { GestureStateMachine, type GestureAction, type GestureState } from '../gestures/gestureState'
+import { GestureStateMachine, type GestureAction, type GestureConfig, type GestureState } from '../gestures/gestureState'
 import { pinchThresholds } from '../gestures/pinchDetector'
 import type { PenPoint } from '../core/settings'
 import { applySensitivity, cameraToPage, defaultRegion, type WritingRegion } from '../strokes/coordinates'
@@ -17,7 +17,10 @@ import { LM, pinchRatio, validLandmarks, type Landmark } from '../tracking/landm
 export interface ProcessorConfig {
   mirror: boolean
   writingSensitivity: number
+  /** 0.5–2: how easily a pinch starts a stroke. */
   pinchSensitivity: number
+  /** 0.5–2: how small/slow a finger opening lifts the pen. */
+  releaseSensitivity: number
   penPoint: PenPoint
   /** Calibrated region (view space) or null for the automatic default. */
   region: WritingRegion | null
@@ -34,12 +37,27 @@ export interface FrameInput {
 
 export interface FrameOutput {
   gesture: GestureState
+  /** Smoothed pinch ratio (as used by the gesture logic). */
   pinchRatio: number | null
   /** View-space pen point (for calibration and overlays), null if no hand. */
   viewPoint: NormPoint | null
   actions: GestureAction[]
 }
 
+/**
+ * The virtual pen tip in camera space.
+ *
+ * 'midpoint' (default since v0.1.1): halfway between the thumb tip and the
+ * index tip — the contact point where a pen would be held. While pinched the
+ * two tips touch, so this IS the pen point; it is also steadier than either
+ * tip alone because their independent jitter partly averages out.
+ *
+ * We filter this midpoint (one filter, in the stroke engine), rather than
+ * filtering each tip separately and averaging. The two are nearly the same
+ * for a linear filter, but One Euro adapts to speed: as the fingers close,
+ * each tip moves fast toward the other while the midpoint barely moves, so
+ * per-tip filters would loosen exactly when we want them tight.
+ */
 export function penPointOf(lm: readonly Landmark[], mode: PenPoint): NormPoint {
   const i = lm[LM.INDEX_TIP]!
   if (mode === 'index') return { x: i.x, y: i.y }
@@ -59,14 +77,15 @@ export class HandFrameProcessor {
 
   constructor(
     private readonly engine: StrokeEngine,
-    private cfg: ProcessorConfig
+    private cfg: ProcessorConfig,
+    gesture: Partial<GestureConfig> = {}
   ) {
-    this.gestures = new GestureStateMachine({ thresholds: pinchThresholds(cfg.pinchSensitivity) })
+    this.gestures = new GestureStateMachine({ ...gesture, thresholds: pinchThresholds(cfg.pinchSensitivity, cfg.releaseSensitivity, gesture.thresholds) })
   }
 
   configure(cfg: Partial<ProcessorConfig>): void {
     this.cfg = { ...this.cfg, ...cfg }
-    this.gestures.configure({ thresholds: pinchThresholds(this.cfg.pinchSensitivity) })
+    this.gestures.configure({ thresholds: pinchThresholds(this.cfg.pinchSensitivity, this.cfg.releaseSensitivity) })
   }
 
   get config(): ProcessorConfig {
@@ -86,7 +105,7 @@ export class HandFrameProcessor {
     }
     const actions = this.gestures.update({ t: f.t, hand })
     if (this.forward) this.apply(actions, f.t)
-    return { gesture: this.gestures.state, pinchRatio: ratio, viewPoint, actions }
+    return { gesture: this.gestures.state, pinchRatio: this.gestures.ratio ?? ratio, viewPoint, actions }
   }
 
   /** Ends any active stroke (camera stopped, mode switched). */
@@ -101,10 +120,9 @@ export class HandFrameProcessor {
         case 'sample':
           this.engine.input({ x: a.sample.x, y: a.sample.y, t: a.sample.t, confidence: a.sample.confidence, source: 'webcam' }, a.sample.down)
           break
-        case 'end': {
-          this.engine.end(a.reason)
+        case 'end':
+          this.engine.end(a.reason, a.trimAfter)
           break
-        }
         case 'state':
           this.engine.events.emit('gestureChange', { from: a.from, to: a.to, t })
           break

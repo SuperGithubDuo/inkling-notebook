@@ -1,13 +1,15 @@
 # WISP roadmap
 
-## v0.1: reliable stroke capture (this release)
+## v0.1: reliable stroke capture
 Standalone prototype: webcam hand tracking, pinch-to-write, One Euro smoothing with outlier rejection, vector stroke model with JSON import/export, undo/redo, mouse simulation, unit tests.
+
+## v0.1.1: handwriting quality (this release)
+Pen point moved to the thumb–index midpoint; asymmetric, noise-adaptive pinch release with tail trimming; continuous One Euro filter retuned (beta 0.04, dCutoff 0.7 Hz) with pen-down seeding, a jitter stabilizer and zero-lag refinement at pen-up; landmark replay harness and trace recorder. Tuned on modelled noise; awaiting real-webcam testing.
 
 ## v0.2: measure and harden
 - **Real-hardware evaluation.** Record anonymised landmark traces (landmarks only, never video, with consent) on 5–10 laptops and tune pinch thresholds, debounce and smoothing defaults from data. Use the `raw` vs smoothed points already stored to compute jitter and lag.
 - **Tracking in a Web Worker** (MediaPipe supports workers via `ImageBitmap`/`OffscreenCanvas`) so slow inference never blocks the UI.
-- **Replay harness.** Feed recorded landmark traces through `HandFrameProcessor` in tests to catch regressions in feel, not just logic.
-- **Pinch-start compensation.** Correct the fingertip movement caused by the pinch itself (e.g. anchor to the position just before the pinch closed), and evaluate the thumb–index midpoint pen tip.
+- **Real traces in the regression suite.** The replay harness exists (v0.1.1); add a small library of recorded traces from real webcams to the tests and retune defaults on them.
 - **Browser coverage**: Firefox and Safari passes, a CPU-only performance profile.
 - Gesture-based erasing (e.g. an open palm sweep) if testing shows it's reliable enough.
 

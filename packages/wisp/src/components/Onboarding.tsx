@@ -50,9 +50,9 @@ const art = {
 
 const STEPS = [
   { art: art.frame, title: 'Show your hand', text: 'Sit about an arm’s length from the camera and hold one hand up inside the dashed area.' },
-  { art: art.point, title: 'Point to move', text: 'Your index fingertip moves the cursor on the page.' },
+  { art: art.point, title: 'Your fingers are the pen', text: 'The cursor sits between your thumb and index fingertips, where you’d hold a pen.' },
   { art: art.pinch, title: 'Pinch to write', text: 'Touch thumb and index together and move: the pen draws.' },
-  { art: art.release, title: 'Release to lift', text: 'Open your fingers to lift the pen between letters and words.' }
+  { art: art.release, title: 'Release to lift', text: 'Open your fingers a little to lift the pen between letters and words.' }
 ]
 
 export function Onboarding(props: { onWebcam(): void; onMouse(): void; onClose(): void }) {

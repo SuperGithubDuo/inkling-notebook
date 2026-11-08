@@ -56,7 +56,7 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
       />
       <Slider
         label="Stroke smoothing"
-        hint="Higher: steadier lines, slightly more lag. 0 turns it off."
+        hint="Higher: steadier lines but slower to follow quick details. 0 turns it off."
         value={s.smoothing}
         min={0}
         max={1}
@@ -65,7 +65,21 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
         onChange={(v) => onChange({ smoothing: v })}
       />
       <Slider
-        label="Pinch sensitivity"
+        label="Jitter stabilizer"
+        hint="Ignores tiny tremors while you write. Too high makes small letters look rounded."
+        value={s.stabilizer}
+        min={0}
+        max={1}
+        step={0.05}
+        format={pct}
+        onChange={(v) => onChange({ stabilizer: v })}
+      />
+      <Toggle label="Refine each stroke when the pen lifts" checked={s.refine} onChange={(v) => onChange({ refine: v })} />
+      <p className="hint-text">Re-smooths the finished stroke without lag, so curves and stroke ends land where your finger went.</p>
+
+      <h3>Pinch</h3>
+      <Slider
+        label="Pen-down sensitivity"
         hint="Higher: a looser pinch puts the pen down."
         value={s.pinchSensitivity}
         min={0.5}
@@ -74,13 +88,23 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
         format={times}
         onChange={(v) => onChange({ pinchSensitivity: v })}
       />
+      <Slider
+        label="Pen-up sensitivity"
+        hint="Higher: the pen lifts after a smaller or slower finger opening. Lower it if strokes break while writing."
+        value={s.releaseSensitivity}
+        min={0.5}
+        max={2}
+        step={0.05}
+        format={times}
+        onChange={(v) => onChange({ releaseSensitivity: v })}
+      />
       <label className="field">
         <span className="field-head">
           <span>Pen tip</span>
         </span>
-        <select value={s.penPoint} onChange={(e) => onChange({ penPoint: e.target.value === 'pinch' ? 'pinch' : 'index' })}>
+        <select value={s.penPoint} onChange={(e) => onChange({ penPoint: e.target.value === 'index' ? 'index' : 'midpoint' })}>
+          <option value="midpoint">Between thumb and index (like holding a pen)</option>
           <option value="index">Index fingertip</option>
-          <option value="pinch">Between thumb and index (experimental)</option>
         </select>
       </label>
 
@@ -97,7 +121,10 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
             onChange({
               writingSensitivity: DEFAULT_SETTINGS.writingSensitivity,
               smoothing: DEFAULT_SETTINGS.smoothing,
+              stabilizer: DEFAULT_SETTINGS.stabilizer,
+              refine: DEFAULT_SETTINGS.refine,
               pinchSensitivity: DEFAULT_SETTINGS.pinchSensitivity,
+              releaseSensitivity: DEFAULT_SETTINGS.releaseSensitivity,
               penPoint: DEFAULT_SETTINGS.penPoint
             })
           }

@@ -5,6 +5,51 @@ import type { WispSettings } from '../core/settings'
 import type { CalibrationStep, WebcamDiagnostics, WebcamStatus } from '../input/webcamInput'
 import { HAND_CONNECTIONS, LM } from '../tracking/landmarks'
 
+/**
+ * Records a landmark trace (21 hand points per frame, no images) for the
+ * replay harness: `npm run replay -- wisp-trace-….json`.
+ */
+function TraceButton({ ctl, on }: { ctl: WispController; on: boolean }) {
+  const [rec, setRec] = useState(false)
+  const [frames, setFrames] = useState(0)
+  const cam = ctl.webcamInput
+  useEffect(() => {
+    if (!rec) return
+    const id = setInterval(() => {
+      setFrames(cam?.recorder.length ?? 0)
+      if (cam && !cam.recorder.recording) setRec(false)
+    }, 250)
+    return () => clearInterval(id)
+  }, [rec, cam])
+  if (!cam) return null
+  const stop = () => {
+    const trace = cam.recorder.stop()
+    setRec(false)
+    if (trace.frames.length === 0) return
+    const blob = new Blob([JSON.stringify(trace)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `wisp-trace-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  return (
+    <div className="trace">
+      {rec ? (
+        <button className="btn ghost sm" onClick={stop}>
+          <span className="rec-dot" /> Stop &amp; save trace ({frames} frames)
+        </button>
+      ) : (
+        <button className="btn ghost sm" disabled={!on} onClick={() => (cam.recorder.start(), setFrames(0), setRec(true))}>
+          Record landmark trace
+        </button>
+      )}
+      <p className="muted small">Saves hand-landmark positions only (no video) so writing can be replayed and compared offline.</p>
+    </div>
+  )
+}
+
 interface Props {
   videoRef: RefObject<HTMLVideoElement | null>
   ctl: WispController
@@ -78,15 +123,25 @@ export function CameraPanel(p: Props) {
         ctx.arc(x, y, 2.4 * dpr, 0, Math.PI * 2)
         ctx.fill()
       }
-      const writing = cam.diagnostics.gesture === 'writing' || cam.diagnostics.gesture === 'release-pending'
-      for (const [i, color] of [[LM.INDEX_TIP, writing ? '#2f6be4' : '#ffffff'], [LM.THUMB_TIP, '#ffffff']] as const) {
+      const writing = cam.diagnostics.gesture === 'writing'
+      // The virtual pen point (view space, already mirrored).
+      if (o.viewPoint) {
+        ctx.beginPath()
+        ctx.arc(o.viewPoint.x * w, o.viewPoint.y * h, 5 * dpr, 0, Math.PI * 2)
+        ctx.fillStyle = writing ? '#2f6be4' : 'rgba(47,107,228,0.25)'
+        ctx.fill()
+        ctx.lineWidth = 2 * dpr
+        ctx.strokeStyle = '#ffffff'
+        ctx.stroke()
+      }
+      for (const i of [LM.INDEX_TIP, LM.THUMB_TIP]) {
         const [x, y] = px(i)
         ctx.beginPath()
-        ctx.arc(x, y, 6 * dpr, 0, Math.PI * 2)
-        ctx.fillStyle = color
+        ctx.arc(x, y, 4 * dpr, 0, Math.PI * 2)
+        ctx.fillStyle = '#ffffff'
         ctx.fill()
         ctx.strokeStyle = '#2f6be4'
-        ctx.lineWidth = 2 * dpr
+        ctx.lineWidth = 1.5 * dpr
         ctx.stroke()
       }
     }
@@ -205,9 +260,9 @@ export function CameraPanel(p: Props) {
         <h2>How to write</h2>
         <ol>
           <li>Keep your hand inside the dashed area.</li>
-          <li>Point with your index finger to move the cursor.</li>
+          <li>The pen is the point between your thumb and index fingertips.</li>
           <li>Pinch thumb + index to put the pen down.</li>
-          <li>Open your fingers to lift the pen.</li>
+          <li>Open your fingers slightly to lift the pen.</li>
         </ol>
       </section>
 
@@ -227,6 +282,10 @@ export function CameraPanel(p: Props) {
             <dd>{on && diag ? diag.gesture : '—'}</dd>
             <dt>Pinch ratio</dt>
             <dd>{on && diag?.pinchRatio != null ? diag.pinchRatio.toFixed(2) : '—'}</dd>
+            <dt>Pinch baseline</dt>
+            <dd>{on && diag?.pinchBaseline != null ? diag.pinchBaseline.toFixed(2) : '—'}</dd>
+            <dt>Pinch noise</dt>
+            <dd>{on && diag && diag.frames ? diag.pinchNoise.toFixed(3) : '—'}</dd>
             <dt>Delegate</dt>
             <dd>{p.status.delegate ?? '—'}</dd>
             <dt>Strokes / points</dt>
@@ -235,7 +294,10 @@ export function CameraPanel(p: Props) {
             </dd>
             <dt>Rejected spikes</dt>
             <dd>{p.ctl.engine.stats.rejected}</dd>
+            <dt>Release-trimmed points</dt>
+            <dd>{p.ctl.engine.stats.trimmed}</dd>
           </dl>
+          <TraceButton ctl={p.ctl} on={on} />
         </section>
       )}
     </aside>

@@ -1,7 +1,7 @@
 /** User-adjustable WISP settings. Persisted to localStorage (settings only, never camera data). */
 import type { WritingRegion } from '../strokes/coordinates'
 
-export type PenPoint = 'index' | 'pinch'
+export type PenPoint = 'midpoint' | 'index'
 
 export interface WispSettings {
   /** Selfie-style preview and movement (move right → cursor right). */
@@ -10,12 +10,18 @@ export interface WispSettings {
   writingSensitivity: number
   /** 0–1. One Euro smoothing strength. */
   smoothing: number
-  /** 0.5–2. Higher = looser pinches count. */
+  /** 0–1. Stabilizer (lazy-pen radius) for webcam input. */
+  stabilizer: number
+  /** Zero-lag re-smoothing of each webcam stroke at pen-up. */
+  refine: boolean
+  /** 0.5–2. Higher = looser pinches start a stroke. */
   pinchSensitivity: number
+  /** 0.5–2. Higher = a smaller or slower finger opening lifts the pen. */
+  releaseSensitivity: number
   showPreview: boolean
   showLandmarks: boolean
   showDiagnostics: boolean
-  /** Which point writes: the index fingertip, or the midpoint of the thumb and index tips. */
+  /** Which point writes: between thumb and index tips (default), or the index fingertip. */
   penPoint: PenPoint
   /** Calibrated writing area in view space; null = automatic. */
   region: WritingRegion | null
@@ -25,15 +31,25 @@ export const DEFAULT_SETTINGS: WispSettings = {
   mirror: true,
   writingSensitivity: 1,
   smoothing: 0.5,
+  stabilizer: 0.4,
+  refine: true,
   pinchSensitivity: 1,
+  releaseSensitivity: 1,
   showPreview: true,
   showLandmarks: true,
   showDiagnostics: false,
-  penPoint: 'index',
+  penPoint: 'midpoint',
   region: null
 }
 
-const KEY = 'wisp.settings.v1'
+/**
+ * v2 (WISP 0.1.1): smoothing values mean something different, the pen
+ * point default moved to the midpoint, and release detection changed. Old
+ * v1 tuning values are not carried over (they were tuned against the old
+ * behaviour); display preferences and the calibrated region are kept.
+ */
+const KEY = 'wisp.settings.v2'
+const LEGACY_KEY = 'wisp.settings.v1'
 
 const num = (v: unknown, lo: number, hi: number, d: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d
@@ -53,19 +69,38 @@ export function sanitizeSettings(raw: unknown): WispSettings {
     mirror: bool(r.mirror, d.mirror),
     writingSensitivity: num(r.writingSensitivity, 0.5, 2, d.writingSensitivity),
     smoothing: num(r.smoothing, 0, 1, d.smoothing),
+    stabilizer: num(r.stabilizer, 0, 1, d.stabilizer),
+    refine: bool(r.refine, d.refine),
     pinchSensitivity: num(r.pinchSensitivity, 0.5, 2, d.pinchSensitivity),
+    releaseSensitivity: num(r.releaseSensitivity, 0.5, 2, d.releaseSensitivity),
     showPreview: bool(r.showPreview, d.showPreview),
     showLandmarks: bool(r.showLandmarks, d.showLandmarks),
     showDiagnostics: bool(r.showDiagnostics, d.showDiagnostics),
-    penPoint: r.penPoint === 'pinch' ? 'pinch' : 'index',
+    penPoint: r.penPoint === 'index' ? 'index' : 'midpoint',
     region
+  }
+}
+
+/** Keeps display preferences and calibration from v1 settings; tuning values reset to v0.1.1 defaults. */
+export function migrateV1(raw: unknown): WispSettings {
+  const old = sanitizeSettings(raw)
+  return {
+    ...DEFAULT_SETTINGS,
+    mirror: old.mirror,
+    writingSensitivity: old.writingSensitivity,
+    showPreview: old.showPreview,
+    showLandmarks: old.showLandmarks,
+    showDiagnostics: old.showDiagnostics,
+    region: old.region
   }
 }
 
 export function loadSettings(): WispSettings {
   try {
     const s = localStorage.getItem(KEY)
-    return sanitizeSettings(s ? JSON.parse(s) : null)
+    if (s) return sanitizeSettings(JSON.parse(s))
+    const legacy = localStorage.getItem(LEGACY_KEY)
+    return legacy ? migrateV1(JSON.parse(legacy)) : { ...DEFAULT_SETTINGS }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }

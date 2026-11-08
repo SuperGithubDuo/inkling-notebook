@@ -22,6 +22,7 @@ import { HandTracker, TrackerError } from '../tracking/handTracker'
 import type { Landmark } from '../tracking/landmarks'
 import { HandFrameProcessor, effectiveRegion, type ProcessorConfig } from './handFrameProcessor'
 import type { GestureState } from '../gestures/gestureState'
+import { TraceRecorder } from '../replay/trace'
 
 export type CameraState = 'off' | 'starting' | 'on' | 'error'
 export type TrackerState = 'idle' | 'loading' | 'ready' | 'error'
@@ -39,7 +40,12 @@ export interface WebcamDiagnostics {
   inferenceMs: number
   handDetected: boolean
   gesture: GestureState
+  /** Smoothed pinch ratio. */
   pinchRatio: number | null
+  /** Pinched ratio while writing (release is measured relative to this). */
+  pinchBaseline: number | null
+  /** Measured noise (std) of the pinch ratio; release thresholds scale up with it. */
+  pinchNoise: number
   frames: number
 }
 
@@ -66,7 +72,9 @@ type FrameVideo = HTMLVideoElement & {
 export class WebcamInput {
   readonly events = new Emitter<WebcamEvents>()
   readonly processor: HandFrameProcessor
-  readonly diagnostics: WebcamDiagnostics = { fps: 0, inferenceMs: 0, handDetected: false, gesture: 'no-hand', pinchRatio: null, frames: 0 }
+  readonly diagnostics: WebcamDiagnostics = { fps: 0, inferenceMs: 0, handDetected: false, gesture: 'no-hand', pinchRatio: null, pinchBaseline: null, pinchNoise: 0, frames: 0 }
+  /** Landmark-only trace recorder for the replay harness (never video). */
+  readonly recorder = new TraceRecorder()
   readonly overlay: WebcamOverlay = { landmarks: null, viewPoint: null, region: null, mirror: true }
 
   private _status: WebcamStatus = { camera: 'off', tracker: 'idle', error: null, delegate: null, modelSource: null }
@@ -274,7 +282,10 @@ export class WebcamInput {
     d.handDetected = result.landmarks !== null
     d.gesture = out.gesture
     d.pinchRatio = out.pinchRatio
+    d.pinchBaseline = this.processor.gestures.writingBaseline
+    d.pinchNoise = this.processor.gestures.ratioNoise
     d.frames++
+    this.recorder.add(t, result.landmarks, result.confidence, videoAspect)
     this.overlay.landmarks = result.landmarks
     this.overlay.viewPoint = out.viewPoint
     this.overlay.region = effectiveRegion(this.processor.config, videoAspect)

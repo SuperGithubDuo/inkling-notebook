@@ -33,7 +33,7 @@ export class WispController {
   constructor(settings: WispSettings, pen: PenStyle) {
     this.settings = settings
     this.store = new DocumentStore(createDocument())
-    this.engine = new StrokeEngine({ smoothing: settings.smoothing, style: pen })
+    this.engine = new StrokeEngine({ smoothing: settings.smoothing, stabilizer: settings.stabilizer, refine: settings.refine, style: pen })
   }
 
   get mode(): InputMode {
@@ -66,6 +66,7 @@ export class WispController {
       mirror: this.settings.mirror,
       writingSensitivity: this.settings.writingSensitivity,
       pinchSensitivity: this.settings.pinchSensitivity,
+      releaseSensitivity: this.settings.releaseSensitivity,
       penPoint: this.settings.penPoint,
       region: this.settings.region,
       pageAspect: this.store.document.canvas.width / this.store.document.canvas.height
@@ -97,10 +98,13 @@ export class WispController {
   applySettings(s: WispSettings): void {
     this.settings = s
     this.engine.setSmoothing(s.smoothing)
+    this.engine.setStabilizer(s.stabilizer)
+    this.engine.setRefine(s.refine)
     this.webcam?.configure({
       mirror: s.mirror,
       writingSensitivity: s.writingSensitivity,
       pinchSensitivity: s.pinchSensitivity,
+      releaseSensitivity: s.releaseSensitivity,
       penPoint: s.penPoint,
       region: s.region
     })
