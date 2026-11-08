@@ -36,12 +36,19 @@ export interface PinchThresholds {
   releaseAbs: number
 }
 
+/**
+ * v0.1.2 defaults (v0.1.1 in brackets):
+ *  - pen-down is slightly MORE deliberate: enter 0.27 [0.30], and the pinch
+ *    must close by rearmDrop 0.12 [0.10] from a recent open peak;
+ *  - pen-up is slightly MORE sensitive: releaseRise 0.07 [0.08], openVelocity
+ *    1.7/s [2.0], releaseMinRise 0.05 [0.06]; backstop releaseAbs unchanged.
+ */
 export const DEFAULT_PINCH: PinchThresholds = {
-  enter: 0.3,
-  rearmDrop: 0.1,
-  releaseRise: 0.08,
-  openVelocity: 2.0,
-  releaseMinRise: 0.06,
+  enter: 0.27,
+  rearmDrop: 0.12,
+  releaseRise: 0.07,
+  openVelocity: 1.7,
+  releaseMinRise: 0.05,
   releaseAbs: 0.42
 }
 

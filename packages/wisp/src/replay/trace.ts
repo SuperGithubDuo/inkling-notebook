@@ -4,30 +4,66 @@
  * different settings lets us compare smoothing and gesture behaviour on
  * identical input.
  *
- * Format `wisp.landmarks` v1:
- *   { format, version, videoAspect, frames: [{ t, c, lm }] }
- *   t  – ms (performance.now clock of the recording)
- *   c  – tracking confidence 0–1
- *   lm – 63 numbers (21 × x, y, z, camera space) or null when no hand
+ * Format `wisp.landmarks` (v1, extended in v2 by WISP 0.1.2):
+ *   { format, version, videoAspect, note?, settings?, frames, events?, strokes? }
+ *   frames[]: { t, c, lm, d? }
+ *     t  – ms (performance.now clock of the recording)
+ *     c  – tracking confidence 0–1
+ *     lm – 63 numbers (21 × x, y, z, camera space) or null when no hand.
+ *          Includes the raw thumb tip (4) and index tip (8).
+ *     d  – v2 diagnostics of what WISP computed for this frame (page space):
+ *          mid  raw pen point (thumb–index midpoint, mapped)
+ *          cur  filtered pen point (the cursor / live ink position)
+ *          down pen state (1 = ink)
+ *          r    raw pinch ratio,  rs smoothed,  b writing baseline,
+ *          v    opening velocity (ratio/s),  s gesture state
+ *   events[]:  { t, type: 'pen-down' | 'pen-up', reason? }
+ *   strokes[]: the finished strokes, as in the stroke export (raw + processed points)
+ * Replay uses only t, c, lm and videoAspect, so v1 and v2 traces both replay.
  */
 import type { Landmark } from '../tracking/landmarks'
+import type { Stroke } from '../strokes/types'
 
 export const TRACE_FORMAT = 'wisp.landmarks' as const
+
+export interface FrameDiagnostics {
+  mid?: [number, number] | null
+  cur?: [number, number] | null
+  down?: 0 | 1
+  r?: number | null
+  rs?: number | null
+  b?: number | null
+  v?: number
+  s?: string
+}
 
 export interface TraceFrame {
   t: number
   c: number
   lm: number[] | null
+  d?: FrameDiagnostics
+}
+
+export interface TraceEvent {
+  t: number
+  type: 'pen-down' | 'pen-up'
+  reason?: string
 }
 
 export interface LandmarkTrace {
   format: typeof TRACE_FORMAT
-  version: 1
+  version: 1 | 2
   videoAspect: number
   /** Optional free-text label, e.g. "Hello World, defaults". */
   note?: string
+  /** WISP settings when the trace was recorded. */
+  settings?: Record<string, unknown>
   frames: TraceFrame[]
+  events?: TraceEvent[]
+  strokes?: Stroke[]
 }
+
+const r4 = (v: number | null | undefined): number | null => (v === null || v === undefined || !Number.isFinite(v) ? null : Math.round(v * 1e4) / 1e4)
 
 const r5 = (v: number): number => Math.round(v * 1e5) / 1e5
 
@@ -48,39 +84,66 @@ export function unpackLandmarks(a: readonly number[] | null): Landmark[] | null 
 /** Records frames in memory. Bounded so a forgotten recording can't eat memory. */
 export class TraceRecorder {
   private frames: TraceFrame[] = []
+  private events: TraceEvent[] = []
+  private strokes: Stroke[] = []
   private aspect = 16 / 9
   recording = false
   static readonly MAX_FRAMES = 30 * 60 * 5 // five minutes at 30 fps
 
   start(): void {
     this.frames = []
+    this.events = []
+    this.strokes = []
     this.recording = true
   }
 
-  add(t: number, lm: readonly Landmark[] | null, confidence: number, videoAspect: number): void {
+  add(t: number, lm: readonly Landmark[] | null, confidence: number, videoAspect: number, d?: FrameDiagnostics): void {
     if (!this.recording) return
     this.aspect = videoAspect
-    this.frames.push({ t: Math.round(t * 10) / 10, c: Math.round(confidence * 1000) / 1000, lm: packLandmarks(lm) })
+    const f: TraceFrame = { t: Math.round(t * 10) / 10, c: Math.round(confidence * 1000) / 1000, lm: packLandmarks(lm) }
+    if (d) {
+      f.d = {
+        ...d,
+        mid: d.mid ? [r4(d.mid[0])!, r4(d.mid[1])!] : null,
+        cur: d.cur ? [r4(d.cur[0])!, r4(d.cur[1])!] : null,
+        r: r4(d.r),
+        rs: r4(d.rs),
+        b: r4(d.b),
+        v: Math.round((d.v ?? 0) * 100) / 100
+      }
+    }
+    this.frames.push(f)
     if (this.frames.length >= TraceRecorder.MAX_FRAMES) this.recording = false
+  }
+
+  addEvent(e: TraceEvent): void {
+    if (this.recording) this.events.push({ ...e, t: Math.round(e.t * 10) / 10 })
+  }
+
+  addStroke(s: Readonly<Stroke>): void {
+    if (this.recording) this.strokes.push({ ...s, points: s.points.slice() })
   }
 
   get length(): number {
     return this.frames.length
   }
 
-  stop(note?: string): LandmarkTrace {
+  stop(note?: string, settings?: Record<string, unknown>): LandmarkTrace {
     this.recording = false
-    const trace: LandmarkTrace = { format: TRACE_FORMAT, version: 1, videoAspect: this.aspect, frames: this.frames }
+    const trace: LandmarkTrace = { format: TRACE_FORMAT, version: 2, videoAspect: this.aspect, frames: this.frames, events: this.events, strokes: this.strokes }
     if (note) trace.note = note
+    if (settings) trace.settings = settings
     this.frames = []
+    this.events = []
+    this.strokes = []
     return trace
   }
 }
 
 export function parseTrace(data: unknown): LandmarkTrace {
   const d = data as Partial<LandmarkTrace> | null
-  if (!d || d.format !== TRACE_FORMAT || d.version !== 1 || !Array.isArray(d.frames)) {
-    throw new Error('Not a WISP landmark trace (format "wisp.landmarks", version 1).')
+  if (!d || d.format !== TRACE_FORMAT || (d.version !== 1 && d.version !== 2) || !Array.isArray(d.frames)) {
+    throw new Error('Not a WISP landmark trace (format "wisp.landmarks", version 1 or 2).')
   }
   const videoAspect = typeof d.videoAspect === 'number' && d.videoAspect > 0 ? d.videoAspect : 16 / 9
   const frames: TraceFrame[] = []
@@ -89,5 +152,14 @@ export function parseTrace(data: unknown): LandmarkTrace {
     const lm = Array.isArray(f.lm) && f.lm.length >= 63 && f.lm.every((v) => typeof v === 'number' && Number.isFinite(v)) ? f.lm : null
     frames.push({ t: f.t, c: typeof f.c === 'number' ? f.c : 1, lm })
   }
-  return { format: TRACE_FORMAT, version: 1, videoAspect, note: typeof d.note === 'string' ? d.note : undefined, frames }
+  return {
+    format: TRACE_FORMAT,
+    version: d.version,
+    videoAspect,
+    note: typeof d.note === 'string' ? d.note : undefined,
+    settings: d.settings && typeof d.settings === 'object' ? d.settings : undefined,
+    frames,
+    events: Array.isArray(d.events) ? d.events : undefined,
+    strokes: Array.isArray(d.strokes) ? d.strokes : undefined
+  }
 }

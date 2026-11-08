@@ -37,8 +37,29 @@ export interface NoiseModel {
   handWobbleRho: number
   /** Depth noise (z), which feeds the pinch ratio. */
   zWhite: number
+  /**
+   * Fingertip noise multiplier while pinched (gap < 0.35): when the thumb
+   * covers the index tip, MediaPipe has to guess the hidden tip, and both
+   * tips get noisier exactly while you write. 1 = no extra noise.
+   */
+  occlusionBoost?: number
+  /** Probability per frame of a one-frame landmark glitch on a fingertip, and its size (camera units). */
+  glitchProb?: number
+  glitchSize?: number
+  /**
+   * Slow change of the APPARENT thumb–index separation as the hand rotates
+   * while writing (AR(1) std in camera units along the pinch axis, and
+   * correlation). Moves the tips apart/together; the midpoint stays put.
+   */
+  gapWobble?: number
+  gapWobbleRho?: number
+  /** Frame-time jitter as a fraction of the frame interval (0.25 = ±25 %). */
+  fpsJitter?: number
+  /** Probability per frame that the tracker misses the hand entirely. */
+  dropoutProb?: number
 }
 
+/** The v0.1.1 model: steady 30 fps, Gaussian jitter only. */
 export const DEFAULT_NOISE: NoiseModel = {
   tipWhite: 0.0015,
   tipWobble: 0.0012,
@@ -46,6 +67,29 @@ export const DEFAULT_NOISE: NoiseModel = {
   handWobble: 0.0012,
   handWobbleRho: 0.85,
   zWhite: 0.004
+}
+
+/**
+ * Harsher "webcam" profile (v0.1.2): adds the MediaPipe behaviours the
+ * first model left out — noisier tips while pinched (occlusion), single-frame
+ * glitches, apparent pinch-distance drift from hand rotation, depth noise,
+ * uneven frame timing and occasional missed frames. Still a model, chosen to
+ * be pessimistic; recorded traces from a real camera remain the real test.
+ */
+export const WEBCAM_NOISE: NoiseModel = {
+  tipWhite: 0.0022,
+  tipWobble: 0.0018,
+  tipWobbleRho: 0.75,
+  handWobble: 0.0016,
+  handWobbleRho: 0.88,
+  zWhite: 0.01,
+  occlusionBoost: 1.8,
+  glitchProb: 0.02,
+  glitchSize: 0.02,
+  gapWobble: 0.004,
+  gapWobbleRho: 0.95,
+  fpsJitter: 0.25,
+  dropoutProb: 0.008
 }
 
 export const NO_NOISE: NoiseModel = { tipWhite: 0, tipWobble: 0, tipWobbleRho: 0, handWobble: 0, handWobbleRho: 0, zWhite: 0 }
@@ -130,20 +174,23 @@ export function synthesize(script: ScriptFrame[], opts: { seed?: number; noise?:
   const r = rng(opts.seed ?? 1)
   const n = opts.noise ?? DEFAULT_NOISE
   const dt = 1000 / (opts.fps ?? 30)
-  let hx = 0, hy = 0
+  const ar = (prev: number, rho: number, sd: number) => rho * prev + Math.sqrt(1 - rho ** 2) * sd * gauss(r)
+  let hx = 0, hy = 0, gw = 0
   const tw = [
     [0, 0],
     [0, 0]
   ]
   const frames: LandmarkTrace['frames'] = []
   const truth: SynthResult['truth'] = []
+  let t = opts.t0 ?? 1000
   script.forEach((s, i) => {
-    const t = (opts.t0 ?? 1000) + i * dt
-    hx = n.handWobbleRho * hx + Math.sqrt(1 - n.handWobbleRho ** 2) * n.handWobble * gauss(r)
-    hy = n.handWobbleRho * hy + Math.sqrt(1 - n.handWobbleRho ** 2) * n.handWobble * gauss(r)
+    if (i > 0) t += dt * (1 + (n.fpsJitter ?? 0) * (2 * r() - 1))
+    hx = ar(hx, n.handWobbleRho, n.handWobble)
+    hy = ar(hy, n.handWobbleRho, n.handWobble)
+    gw = ar(gw, n.gapWobbleRho ?? 0, n.gapWobble ?? 0)
     for (const w of tw) {
-      w[0] = n.tipWobbleRho * w[0]! + Math.sqrt(1 - n.tipWobbleRho ** 2) * n.tipWobble * gauss(r)
-      w[1] = n.tipWobbleRho * w[1]! + Math.sqrt(1 - n.tipWobbleRho ** 2) * n.tipWobble * gauss(r)
+      w[0] = ar(w[0]!, n.tipWobbleRho, n.tipWobble)
+      w[1] = ar(w[1]!, n.tipWobbleRho, n.tipWobble)
     }
     const clean = handAt(s.pen, s.gap, s.mover ?? 'both')
     truth.push({
@@ -153,20 +200,29 @@ export function synthesize(script: ScriptFrame[], opts: { seed?: number; noise?:
       index: { x: clean[8]!.x, y: clean[8]!.y },
       intendInk: s.intendInk
     })
-    if (s.present === false) {
+    if (s.present === false || r() < (n.dropoutProb ?? 0)) {
       frames.push({ t, c: 0, lm: null })
       return
     }
-    const lm = handAt(s.pen, s.gap, s.mover ?? 'both').map((p, j) => {
+    const occl = s.gap < 0.35 ? (n.occlusionBoost ?? 1) : 1
+    // Pinch axis (index − thumb direction) for the apparent-gap drift.
+    const axL = Math.hypot(clean[8]!.x - clean[4]!.x, clean[8]!.y - clean[4]!.y)
+    const ax = axL > 1e-9 ? (clean[8]!.x - clean[4]!.x) / axL : -0.45
+    const ay = axL > 1e-9 ? (clean[8]!.y - clean[4]!.y) / axL : -0.89
+    const glitchTip = r() < (n.glitchProb ?? 0) ? (r() < 0.5 ? 4 : 8) : -1
+    const ga = 2 * Math.PI * r()
+    const lm = clean.map((p, j) => {
       const tip = j === 4 ? tw[0]! : j === 8 ? tw[1]! : null
-      const white = tip ? n.tipWhite : n.tipWhite * 0.6
+      const white = tip ? n.tipWhite * occl : n.tipWhite * 0.6
+      const sign = j === 8 ? 0.5 : j === 4 ? -0.5 : 0
+      const g = j === glitchTip ? (n.glitchSize ?? 0) : 0
       return {
-        x: p.x + hx + (tip ? tip[0]! : 0) + white * gauss(r),
-        y: p.y + hy + (tip ? tip[1]! : 0) + white * gauss(r),
-        z: p.z + n.zWhite * gauss(r)
+        x: p.x + hx + (tip ? tip[0]! * occl : 0) + white * gauss(r) + sign * gw * ax + g * Math.cos(ga),
+        y: p.y + hy + (tip ? tip[1]! * occl : 0) + white * gauss(r) + sign * gw * ay + g * Math.sin(ga),
+        z: p.z + n.zWhite * (tip ? occl : 1) * gauss(r)
       }
     })
-    frames.push({ t, c: 0.97, lm: packLandmarks(lm) })
+    frames.push({ t: Math.round(t * 10) / 10, c: 0.97, lm: packLandmarks(lm) })
   })
   return { trace: { format: 'wisp.landmarks', version: 1, videoAspect: 1, frames }, truth }
 }

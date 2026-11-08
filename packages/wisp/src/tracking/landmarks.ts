@@ -60,13 +60,20 @@ export function palmSize(lm: readonly Landmark[], videoAspect: number): number {
  * gesture gives the same ratio near or far from the camera. Returns null
  * when the landmarks are missing or degenerate.
  */
-export function pinchRatio(lm: readonly Landmark[], videoAspect: number): number | null {
+/**
+ * Weight of MediaPipe's depth (z) in the thumb–index distance. z is the
+ * least reliable landmark coordinate, and fingertip z is especially noisy
+ * while the thumb hides the index tip. v0.1/v0.1.1 used 0.5; see README.
+ */
+export const DEFAULT_DEPTH_WEIGHT = 0.25
+
+export function pinchRatio(lm: readonly Landmark[], videoAspect: number, depthWeight = DEFAULT_DEPTH_WEIGHT): number | null {
   if (lm.length < 21) return null
   const thumb = lm[LM.THUMB_TIP]!
   const index = lm[LM.INDEX_TIP]!
   const palm = palmSize(lm, videoAspect)
   if (!(palm > 1e-4)) return null
-  const r = landmarkDistance(thumb, index, videoAspect) / palm
+  const r = landmarkDistance(thumb, index, videoAspect, depthWeight) / palm
   return Number.isFinite(r) ? r : null
 }
 

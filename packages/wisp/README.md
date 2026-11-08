@@ -2,7 +2,7 @@
 
 WISP lets you write in the air with your finger, using an ordinary laptop webcam. Pinch your thumb and index finger together to put the pen down, move, and open your fingers to lift it. Strokes are captured as structured vector data, ready to become an input mode inside Inkling Notebook.
 
-This is **v0.1.1**: a standalone, independently runnable prototype that lives inside the Inkling repository but has no dependency on Inkling's app code, and Inkling has none on it.
+This is **v0.1.2**: a standalone, independently runnable prototype that lives inside the Inkling repository but has no dependency on Inkling's app code, and Inkling has none on it.
 
 ## Goals
 
@@ -10,19 +10,19 @@ This is **v0.1.1**: a standalone, independently runnable prototype that lives in
 - Reliable stroke capture first: smooth, low-latency ink with clean stroke boundaries. Handwriting recognition comes later.
 - Everything runs locally in the browser. No backend, account, paid API or cloud inference. Camera frames are never recorded, stored or uploaded.
 
-## What works (v0.1.1)
+## What works (v0.1.2)
 
 | Area | Implemented |
 |---|---|
 | Tracking | Webcam permission and preview, MediaPipe Tasks Vision Hand Landmarker (21 landmarks, one hand), GPU delegate with CPU fallback, one inference per new video frame, mirroring, landmark overlay, tracker status (loading / ready / unavailable) |
 | Pen point | Virtual pen between the thumb and index fingertips (default), or the index fingertip |
-| Gestures | Asymmetric pinch detection: careful pen-down (waits for the closing fingers to settle), fast pen-up (relative to your own pinch, velocity-aware, noise-adaptive), release-tail trimming, re-arm protection against flicker, no writing when a hand enters already pinched, short-dropout tolerance |
-| Ink | One continuous One Euro filter for cursor and ink, jitter stabilizer, zero-lag refinement of each finished stroke, pen-down seeding (no start hooks), spike rejection and stroke splitting on confirmed jumps, distance-based resampling, raw positions kept beside smoothed ones, perfect-freehand rendering (same ink library as Inkling) |
+| Gestures | Asymmetric pinch detection: deliberate pen-down (a real closing motion that has settled), fast pen-up (relative to your own pinch, velocity-aware, noise-adaptive), release-onset trimming by a hinge fit, re-arm protection against flicker, no writing when a hand enters already pinched or fingers merely drift close, tolerance of one-frame tracking gaps |
+| Ink | One continuous noise-gated One Euro filter for cursor and live ink, noise-scaled stabilizer, noise-matched zero-lag refinement of each finished stroke (glitch removal + Whittaker smoother), pen-down seeding, spike rejection and stroke splitting on confirmed jumps, distance-based resampling, raw positions kept beside smoothed ones, perfect-freehand rendering (same ink library as Inkling) |
 | Mapping | Page-normalized coordinates, automatic writing region that keeps circles round, writing sensitivity, optional two-pinch calibration, letterboxed page that keeps geometry on resize |
 | Editing | Pen colour and thickness, undo/redo, clear (undoable), JSON export/import with validation, PNG export |
 | Mouse mode | Mouse drives the same engine as the webcam (left button = pinch) for development and testing without a camera |
-| UI | Toolbar, camera panel with status, settings, onboarding, status pill, optional developer diagnostics (tracking FPS, inference time, gesture state, pinch ratio/baseline/noise, trimmed points) and a landmark-trace recorder |
-| Evaluation | Landmark replay harness (`npm run replay`): synthetic acceptance scenarios with ground truth, and recorded traces from your own webcam |
+| UI | Toolbar, camera panel with status, settings, onboarding, status pill, optional developer diagnostics (tracking FPS, inference time, gesture state, pinch ratio/baseline/noise, trimmed points) and a trace recorder (landmarks + per-frame measurements + pen events + strokes, never video) |
+| Evaluation | Replay harness (`npm run replay`): 13 synthetic scenarios with ground truth under two noise profiles, recorded traces from your own webcam, side-by-side setting comparisons, and an HTML page that draws the strokes |
 | Integration surface | Typed `onStrokeStart / onStrokeUpdate / onStrokeEnd / onTrackingLost / onGestureChange / onCursor`, each returning an unsubscribe function; a pure WISP → Inkling `createStroke` adapter sketch (not wired in) |
 
 ## Setup
@@ -50,7 +50,7 @@ The MediaPipe WASM runtime is copied from `node_modules` into `public/mediapipe/
 | `npm test` | Unit tests (Vitest) |
 | `npm run typecheck` | Strict TypeScript, no emit |
 | `npm run fetch-model` | Download the Hand Landmarker model into `public/models/` |
-| `npm run replay` | Replay harness: synthetic scenarios A–F (`--noise 2.5` for a noisier camera, `--compare smoothing=0.3,0.5,0.8`), or a recorded trace (`npm run replay -- trace.json`) |
+| `npm run replay` | Replay harness: 13 synthetic scenarios (`--profile webcam|model`, `--noise 1.5`, `--fps 20`, `--compare smoothing=0.3,0.5,0.8`, `--html out.html` to draw the strokes, `--json`), or a recorded trace (`npm run replay -- trace.json --compare releaseSensitivity=0.8,1,1.2 --html out.html`) |
 
 Camera access requires a secure origin; `localhost` counts, so `dev` and `preview` both work.
 
@@ -111,121 +111,152 @@ Key boundaries:
 
 ## How gesture detection works
 
-1. **Pinch ratio.** Thumb-tip to index-tip distance divided by palm size (mean side of the wrist / index-MCP / pinky-MCP triangle), in frame-width units so x and y count equally on 16:9 video. The ratio is the same near or far from the camera.
+1. **Pinch ratio.** Thumb-tip to index-tip distance divided by palm size (mean side of the wrist / index-MCP / pinky-MCP triangle), in frame-width units so x and y count equally on 16:9 video. Depth (z) counts at weight **0.25** (v0.1–0.1.1: 0.5), because MediaPipe's depth is its least reliable coordinate, especially for a fingertip the thumb is covering.
 2. **Signal.** The ratio is lightly smoothed (EMA, α = 0.6) and its two-frame opening velocity is tracked. The unsmoothed ratio is also kept, for the decisions that must not wait.
-3. **State machine** (`gestures/gestureState.ts`): `no-hand → hover → pinch-pending → writing → hover`, plus `lost`. It is designed around the whole cycle, and it is asymmetric: careful when putting the pen down, fast when lifting it.
+3. **State machine** (`gestures/gestureState.ts`): `no-hand → hover → pinch-pending → writing → hover`, plus `lost`. It is designed around the whole cycle, and it is asymmetric: deliberate when putting the pen down, fast when lifting it.
 
-**Pen down (careful).**
-- The smoothed ratio must be below **0.30** for **2 frames**.
-- Ink starts only once the fingers have stopped closing. The unsmoothed closing speed must be under **2.0 ratio/s**, or the pen goes down anyway after **5 frames**. Any frame already at the settled pinch level also counts.
-- While the fingers close, the pen point moves with them. Drawing during that motion is what makes a start hook.
+**Pen down (deliberate).**
+- The smoothed ratio must be below **0.27** (v0.1.1: 0.30) for **2 frames**.
+- It must have *closed* by at least **0.12** from an open position seen in the last second (v0.1.1: 0.10). Fingers that merely drift close together while you reposition don't count.
+- Ink starts once the closing has settled. The unsmoothed closing speed must be under 2.0 ratio/s, or the pen goes down anyway after 5 frames. Earlier pinched frames already at the settled level are included, so the start of the stroke isn't lost.
 
 **Pen up (fast, no debounce).** The pen lifts on the **first** frame that meets any of these:
-- The smoothed ratio rises **0.08** above your own pinched **baseline** (the running mean of your ratio while writing). v0.1 waited for an absolute 0.45. If your fingers rest at 0.15 when pinched, that meant opening 0.30 palm-widths before the pen lifted.
-- The unsmoothed ratio rises **0.12** above the baseline: a big, fast opening, caught without waiting for smoothing.
-- The ratio opens faster than **2.0 ratio/s** after rising at least **0.06**.
-- The ratio crosses **0.42**: an absolute backstop.
-
-**Tail trimming.** When the pen lifts, the ink drawn while the fingers were already opening is removed. That is the final run of frames whose ratio was both rising and above the baseline, up to **200 ms** back. The fingers' own movement during release never becomes a tail.
+- The smoothed ratio rises **0.07** (v0.1.1: 0.08) above your own pinched baseline.
+- The unsmoothed ratio rises **0.105** above it (1.5 × that 0.07).
+- The ratio opens faster than **1.7 ratio/s** (v0.1.1: 2.0) after rising at least **0.05** (v0.1.1: 0.06).
+- The ratio crosses the 0.42 backstop.
 
 **Noise adaptation.**
-- WISP measures how noisy your pinch ratio is while you write, from frame-to-frame differences, and keeps that measurement across strokes.
-- It also tracks how uncertain the baseline still is, early in a stroke.
-- The release thresholds rise only as far as needed to stay **4σ** above that noise. A clean camera keeps the fast, small-opening release; a noisy one doesn't break strokes.
+- WISP measures your pinch ratio's noise while you write, and how uncertain the baseline still is early in a stroke.
+- The three relative thresholds above rise to stay 4σ above that noise, but by no more than **2.5×**. A cap of 1.75× was tried and measured: it doubled broken strokes on noisy input.
 
-**Anti-flicker.** After a release, the pen can only go down again once the ratio has fallen **0.10** below its peak since the release. Noise around the release point can't toggle the pen.
+**Release-onset trimming (hinge fit).** When the pen lifts, WISP fits the unsmoothed ratio over the last 250 ms with a "hinge": flat at your baseline, then a straight rise into the release. Ink after the hinge point is removed.
+- A quick release trims nothing.
+- A slow release trims the frames where your fingers were already opening.
+- Isolated noisy frames don't form a ramp, so they are kept.
+
+v0.1.1 instead trimmed every frame above a noise level, which also cut real ink off short strokes.
+
+**Anti-flicker.** After a release, a new pinch must close by 0.12 from the peak since the release.
+
+**Tracking gaps.**
+- One- and two-frame gaps are tolerated in every state for 160 ms: a stroke continues, and a pinch that is closing is kept.
+- v0.1.1 reset to "no hand" on the first missed frame before pen-down, which lost the whole stroke if the thumb hid the index tip for one frame.
+- After 160 ms the stroke ends cleanly, and a hand that returns already pinched does not resume writing (no connecting line).
 
 **Accidents.**
 - A hand that enters the frame already pinched never writes until it has been seen open.
 - A hand must be visible for 3 frames before a pinch counts.
-- If the hand disappears mid-stroke, the stroke survives a 160 ms dropout; after that it ends.
 
 
 ## Smoothing and accuracy
 
-The virtual pen point is the **midpoint of the thumb and index fingertips** (`input/handFrameProcessor.ts`).
-- **While pinched, it is the contact point.** The tips touch, so their midpoint is where the fingers meet, like holding a pen.
-- **It is steadier than either tip alone.** The two tips' independent jitter partly cancels out.
-- **It barely moves while the pinch closes.** When both fingers close toward each other, the midpoint stays put; the index tip alone would travel the whole gap.
-- **One filter on the midpoint, not two on the tips.** Filtering each tip and then averaging would be nearly the same for a fixed filter. But One Euro adapts to speed: while the fingers close, each tip moves fast and its filter would loosen exactly when it should stay tight.
+The virtual pen point is the **midpoint of the thumb and index fingertips**: while pinched, the contact point (`input/handFrameProcessor.ts`). One filter runs on the midpoint, rather than one per tip.
 
-Pipeline per sample (`strokes/strokeEngine.ts`):
+Pipeline (`strokes/strokeEngine.ts`):
 
 ```
-raw pen point ─► outlier gate ─► One Euro filter ─► stabilizer ─► cursor
-                                                              └─► live ink (pen down) ─► distance resampling
-pen-up:  raw samples of the stroke ─► trim release tail ─► zero-phase refinement ─► resampling ─► final stroke
+raw pen point ─► outlier gate ─► One Euro (noise-gated) ─► stabilizer (noise-scaled) ─► cursor + live ink
+pen-up:  raw samples ─► trim release onset ─► remove glitches ─► noise-matched Whittaker smoother ─► final stroke
 ```
 
-- **One continuous filter for cursor and ink.** Pen-down and pen-up don't reset it. It restarts only when tracking is lost or a jump is confirmed.
-- **Pen-down seeding.** The stroke starts where the pen really is: the average raw position of the last 110 ms if you were holding still, otherwise the latest raw position. It does not start where the filter still lags behind the movement that brought you there, so there is no start hook and no jump.
-- **One Euro filter.** Its smoothing loosens with speed: strong when you write slowly (where shake shows), light when you move fast (where lag shows). *Stroke smoothing* maps to its parameters (see the table below).
-- **Stabilizer** ("lazy pen", webcam only). The ink only moves when the filtered point is more than a small radius away (default 1.6 px on the page), so leftover micro-tremor never reaches the ink. Any larger movement does, so small details survive.
-- **Zero-phase refinement at pen-up.** A real-time filter must lag, which cuts tight curves (loops, superscripts) and ends strokes short. Once a stroke is finished, WISP re-smooths it forward and then backward in time, so the two lags cancel. Both ends are reflection-padded so endpoints stay put. The live stroke may shift by a few pixels at pen-up as it settles into the refined shape.
-- **Outlier gate** (webcam only). A single-frame tracking spike is dropped. If two samples agree on a far-away position, the stroke is split instead of drawing a connecting line.
-- **Resampling** stores a point only when it is at least 0.15% of the page width (2.4 px) from the last one.
-- **Raw positions** are kept on every point (`raw`), so filtering can be evaluated offline.
+- **Measured tracking noise (new).** WISP estimates landmark noise continuously from second differences of the raw pen point while it moves slowly (`NoiseEstimator`). Everything below scales with it.
+- **Noise-gated live filter (new).** One Euro loosens with speed, but only speed beyond what the measured noise produces now counts (gate 1×). Random landmark fluctuation no longer reads as "intentional fast movement" and passes straight through.
+- **Stabilizer.** Its radius is now *jitter stabilizer* × 3σ of the measured noise, at most 6.4 px. The default is 0.25 (v0.1.1: 0.4 × a fixed 6.4 px). A clean camera gets a small radius (less rounding), a noisy one a larger one.
+- **Pen-down seeding.** The stroke starts at the average position of the last 110 ms if the hand was still, otherwise at the latest position. A median-of-three start was tried in this release and rejected: its one-frame lag created start hooks.
+- **Noise-matched refinement at pen-up (new).** This replaces v0.1.1's forward-backward One Euro, which barely acts on the 4–6 samples of a quick tick or dash.
+  1. **Glitch removal.** A point that departs from the line through its neighbours by more than 4× the stroke's typical deviation (and at least 9.6 px) is a one-frame landmark glitch and is replaced.
+  2. **Whittaker smoother** (penalised least squares, second differences, solved exactly in O(n)). Its strength λ is chosen so the movement it removes matches the measured noise: it removes what noise explains and keeps the rest.
+  3. **Cap on λ.** λ is capped by the *Stroke smoothing* setting (scaled to the frame rate), so loops, superscripts and corners at handwriting speed are never flattened.
 
-Mouse input skips the gate, the stabilizer and the refinement (it has no tracking noise), but uses the same filter, seeding, strokes, undo and export.
+  It has zero lag, endpoints included.
+- **Outlier gate, resampling and raw positions** work as before.
 
-### What caused the shakiness in v0.1
+**Live vs final.** Finished strokes are re-smoothed, so the live view and the final ink can differ by a few pixels at pen-up; the live view is tuned for low lag and low shake. Mouse input skips the gate, the stabilizer and the refinement, and uses the same filter, strokes, undo and export.
 
-| Cause | Fix |
-|---|---|
-| The pen was the **index fingertip**, MediaPipe's noisiest point, and it travels the whole pinch gap while the fingers close or open | Midpoint of thumb and index tips |
-| The filter's speed estimate (dCutoff 1 Hz) let **tracking noise register as speed**, which opened the filter and let the noise through | dCutoff 0.7 Hz |
-| A **separate stroke filter was reset at every pen-down**, so every stroke started with unfiltered raw points, and the first point jumped away from the smoothed cursor | One continuous filter, plus pen-down seeding |
-| **No stage for sub-pixel tremor** that survives the filter | Stabilizer |
-| A low speed coefficient (beta 0.012) left fast small details in the filter's attenuation band; turning smoothing up only shrank loops and superscripts | beta 0.04, plus zero-phase refinement |
+### What caused the distorted handwriting (v0.1.2 diagnosis)
 
-Rendering wasn't a cause: perfect-freehand draws the points it is given. Coordinate mapping scales jitter (a smaller writing area means more page movement per pixel of camera noise) but doesn't create it.
+No screenshot or real traces reached this session, so the diagnosis comes from your description plus a harsher replay model. That model adds known MediaPipe behaviour the first one left out:
+- noisier fingertips while pinched (occlusion)
+- one-frame glitches
+- apparent pinch-distance drift from hand rotation
+- depth noise
+- uneven frame timing and missed frames
 
-### Parameter reference (v0.1.1)
+Under it, v0.1.1 reproduced every symptom you described. Causes, in order of impact:
 
-| Parameter | Setting / location | v0.1 | v0.1.1 | Why |
-|---|---|---|---|---|
-| Pen point | *Pen tip* | index tip | thumb–index midpoint | Contact point; steadier; no closing hook |
-| One Euro minCutoff at 50% | *Stroke smoothing* | 1.6 Hz | 1.1 Hz (3 Hz → 0.4 Hz over the slider) | Steadier slow writing |
-| One Euro beta at 50% | *Stroke smoothing* | 0.012 | 0.04 (0.06 → 0.02) | Fast small details stay sharp; largest single gain in the sweep |
-| One Euro dCutoff | `smoothing.ts` | 1 Hz | 0.7 Hz | Noise isn't mistaken for speed |
-| Stabilizer radius | *Jitter stabilizer* 40% | — | 1.6 px (max 6.4 px) | Removes residual tremor |
-| Refinement | *Refine each stroke…* | — | on | Recovers curves and ends without live lag |
-| Min point spacing | `strokeEngine.ts` | 1.9 px | 2.4 px | Fewer redundant points |
-| Pen-down threshold | *Pen-down sensitivity* | 0.30, 2 frames | 0.30, 2 frames + settled | No start hooks |
-| Pen-up | *Pen-up sensitivity* | absolute 0.45, 2-frame debounce | +0.08 relative, raw +0.12, velocity 2.0/s after +0.06, backstop 0.42; first frame | Lifts at the start of opening |
-| Release tail | `gestureState.ts` | frames after the threshold dropped | rising frames trimmed back to onset (≤ 200 ms) | No tails |
-| Noise margin | `gestureState.ts` | — | 4σ of measured ratio noise | Fast on clean cameras, robust on noisy ones |
-| Re-arm | `gestureState.ts` | hysteresis 0.30/0.45 | must fall 0.10 below the post-release peak | No flicker |
+| Symptom | Cause | Fix |
+|---|---|---|
+| Strokes lost entirely, broken strokes | A one-frame tracking gap while the pinch closed reset the gesture; depth noise made the pinch ratio noisy | Gap tolerance before pen-down; depth weight 0.25; noise cap 2.5× |
+| Irregular, kinked short strokes and loops | Fingertip noise is largest exactly while pinched; a 4–6-sample stroke gives a recursive filter nothing to work with; glitches passed through | Noise-matched Whittaker refinement; glitch removal; noise-gated live filter |
+| Short strokes losing their end | Release trim removed ordinary noisy frames before the release | Hinge-fit onset |
+| Short strokes losing their start | Strict settle rule plus one-frame gaps | Pinched-level inclusion; gap tolerance |
+| Tails / overshoots | Release detected a frame late; trim missed noisy slow openings | More sensitive pen-up; hinge-fit onset |
+| Stray marks while repositioning | Fingers drifting close together could start a stroke | Deliberate-close requirement; pen-down threshold 0.27 |
 
-Settings saved by v0.1 are migrated once: display options and the calibrated area are kept, and tuning values reset to the new defaults (they were tuned against the old behaviour).
+Stroke coordinates, mirroring and rendering were checked and are not causes. Cursor and live ink share one filtered point, and the renderer draws exactly the stored points.
 
-### How the defaults were chosen
+Also tried and rejected (measured worse):
+- **"Hand-shape" fusion of fingertips with knuckle landmarks.** Fingertips move relative to the knuckles as the pinch closes, so start hooks tripled.
+- **Down-weighting stroke-end samples.** Mixed results.
+- **A median-of-three start point.** Caused hooks.
+- **A noise cap of 1.75×.** Doubled broken strokes.
 
-`npm run replay` runs synthetic landmark traces through the real pipeline. Each trace has a known intended stroke, and the scenarios mirror the acceptance tests:
-- A: a slow line
-- B: "Hello"
-- C: x² + 3x − 5 = 0
-- D: rapid and slow release
-- F: repeated strokes
+### Parameter reference (v0.1.2)
 
-The noise is a **model** (white plus slowly correlated jitter on the fingertips and the whole hand, at roughly webcam magnitudes), not a measurement. The defaults came from sweeping parameters on that model at 1× and 2.5× noise.
+| Parameter | Setting / location | v0.1.1 | v0.1.2 |
+|---|---|---|---|
+| Pen-down threshold | *Pen-down sensitivity* 1.0× | 0.30 | **0.27** (needs a ~10% tighter pinch) |
+| Deliberate close | `pinchDetector.ts` | 0.10 below the last open peak | **0.12** below an open peak within 1 s |
+| Pen-up relative rise | *Pen-up sensitivity* 1.0× | 0.08 | **0.07** |
+| Pen-up raw rise | (1.5 × the above) | 0.12 | **0.105** |
+| Pen-up opening speed | | 2.0/s after +0.06 | **1.7/s after +0.05** |
+| Noise cap on pen-up thresholds | `gestureState.ts` | none | **2.5×** |
+| Release trim | `gestureState.ts` | frames above a noise level, ≤ 200 ms | **hinge fit**, ≤ 250 ms |
+| Tracking gap before pen-down | `gestureState.ts` | reset on the first missed frame | **160 ms grace** |
+| Pinch depth weight | `landmarks.ts` | 0.5 | **0.25** |
+| Live filter noise gate | `strokeEngine.ts` | none | **1× noise speed** |
+| Stabilizer | *Jitter stabilizer* | 0.4 × 6.4 px | **0.25 × 3σ** (≤ 6.4 px) |
+| Pen-up refinement | *Refine…* | forward-backward One Euro | **glitch removal + noise-matched Whittaker**; λ cap 2→60 over *Stroke smoothing* (0.5 → ≈11 at 30 fps) |
+| Pen point, One Euro base parameters, resampling | | unchanged | unchanged |
 
-v0.1 vs v0.1.1 on identical inputs, 1× modelled noise, mean of 5 seeds, px on the 1600-px page:
+Settings sliders keep their meaning (1.0× = the defaults above). If you changed sliders while testing v0.1.1, press **Reset writing defaults** in Settings before testing v0.1.2.
 
-| Scenario | Shape error | Release tail | Stray ink | Missing ink | Strokes |
-|---|---|---|---|---|---|
-| A slow line | 7.0 → 5.4 | 33 → 2 | 190 → 85 | 142 → 81 | 1/1 → 1/1 |
-| B "Hello" | 7.1 → 4.3 | 115 → 3 | 304 → 109 | 194 → 95 | 7/7 → 7/7 |
-| C maths | 9.0 → 5.5 | 306 → 11 | 406 → 174 | 260 → 229 | 14/14 → 14/14 |
-| D slow release | 20.9 → 4.2 | 69 → 3 | 81 → 6 | 18 → 3 | 1/1 → 1/1 |
-| F repeated strokes | 5.2 → 4.3 | 0 → 22 | 167 → 66 | 187 → 83 | 6/6 → 6/6 |
+### Before/after on identical inputs
 
-At 2.5× noise the gains are smaller:
-- Stray ink and tails are still lower.
-- Missing ink is similar to v0.1.
-- A stroke occasionally splits in two (on average 1.2 strokes for the slow line), where v0.1 instead drew long tails.
+`npm run replay -- --json` runs v0.1, v0.1.1 and v0.1.2 on the same 13 scenarios: slow horizontal and vertical lines, a circle, small loops, "Hello", the equation, three kinds of repeated short strokes, rapid and slow pinch/release, repositioning, and tracking loss. Each runs 6 times with different noise.
 
-At 4× noise, strokes break more often. If that happens with your camera, lower *Pen-up sensitivity*. None of this proves real-webcam quality; recorded traces from your own camera are the real test (see Testing).
+Totals over the 13 scenarios (mean per run), px on the 1600-px page. Values marked * are averages per scenario. **Synthetic, modelled noise; not a real-webcam measurement.**
+
+| Webcam-like noise (×1) | v0.1 | v0.1.1 | v0.1.2 |
+|---|---|---|---|
+| Unintended strokes | 1.17 | 0.00 | 0.17 |
+| Broken intentional strokes | 0.00 | 0.83 | **0.17** |
+| Strokes lost entirely | 1.17 | 1.00 | **0.17** |
+| Unwanted tails | 1131 | 610 | **413** |
+| Start hooks | 1099 | 435 | **400** |
+| Missed ink | 3998 | 3339 | **3116** |
+| Stray ink | 6036 | 3223 | **2657** |
+| End displacement* | 31.4 | 20.6 | 21.1 |
+| Jitter of finished strokes* | 0.8 | 0.4 | **0.1** |
+| Live lag* | 16.9 | 13.2 | 16.0 |
+| Largest point gap* | 48.1 | 34.8 | **21.8** |
+| Processing per frame* | 0.01 ms | 0.02 ms | 0.02 ms |
+
+Repeated short strokes, v0.1 / v0.1.1 / v0.1.2 (webcam ×1):
+
+| Scenario | Tails | Missed ink | Hooks |
+|---|---|---|---|
+| Spaced strokes | 58 / 80 / **45** | 485 / 475 / **431** | 151 / 61 / **46** |
+| Fast tight ticks | 91 / 122 / **74** | 343 / 377 / **291** | 102 / 74 / **36** |
+| Dashes | 149 / 75 / **61** | 175 / 157 / 186 | 196 / 81 / **68** |
+
+Dashes miss slightly more ink because the more deliberate pen-down occasionally skips a loose pinch.
+
+**Costs, stated plainly:**
+- Live lag is about 3 px higher than v0.1.1, in exchange for 40% less live shake.
+- At 1.5× noise, repeated-stroke tails are worse than v0.1.1 (152 vs 111 px).
+- On the gentle model, tails (54 → 69 px) and hooks (45 → 63 px) are slightly worse, totalled over all 13 scenarios.
 
 
 ## Coordinates
@@ -289,42 +320,45 @@ Nothing in Inkling has been changed for this yet.
 
 ## Testing
 
-`npm test` runs 128 unit tests. They cover:
-- **Gestures:** pinch thresholds and asymmetry; pen-down settling (no start hooks); pen-up cases (rapid release, slow release, small openings, fast openings, noisy measurements that must not lift the pen, re-pinch after release); tail trimming; lost tracking.
-- **Ink:** the midpoint pen point and mirroring; the continuous filter and pen-down seeding; the stabilizer; zero-phase refinement; smoothing, outlier rejection and coordinates.
-- **Editing and data:** undo/redo; serialization round-trips and invalid input; the stroke-format compatibility check; settings migration; the Inkling adapter.
-- **Replay-harness regressions:** acceptance scenarios A–F must keep exact stroke counts, small tails, sub-pixel wobble on a slow line, and legible small symbols.
+`npm test` runs 157 unit tests. They cover:
+- **Gestures:** pinch thresholds and asymmetry; deliberate pen-down (drifting fingers don't start ink); pen-up cases (rapid, slow, small and fast openings, noisy measurements, re-pinch); hinge-fit trimming (quick release trims nothing, slow release trims the ramp); tracking gaps before and during writing.
+- **Smoothing:** the Whittaker solver against a dense reference; glitch removal; noise estimation; noise-matched refinement (straightens noisy ticks without shortening them, keeps loops round); the noise-gated filter.
+- **Ink and data:** the midpoint and mirroring; the continuous filter and seeding; pinch depth weight; trace v2 recording and parsing; serialization round-trips and invalid input; settings migration; undo/redo; the Inkling adapter.
+- **Replay-harness regressions** on both noise profiles: exact stroke counts on the gentle model; stroke counts within one, no accidental strokes while repositioning, and no connecting lines after tracking loss on webcam noise; per-stroke tail and missed-ink bounds for short strokes.
 
 These tests show the logic is correct on modelled input. They say nothing about real-world accuracy, latency or comfort.
 
-**Recording your own traces.**
-1. Turn on *Developer diagnostics* and click *Record landmark trace* in the camera panel.
-2. Write, then click *Stop & save trace*. This saves a JSON file of hand-landmark positions only, never video.
-3. Replay it under different settings: `npm run replay -- wisp-trace-….json --compare releaseSensitivity=0.7,1,1.4` (also `smoothing`, `stabilizer`, `pinchSensitivity`, `penPoint`). Every run sees the identical hand motion.
+**Recording your own traces (the real test).**
+1. Turn on *Developer diagnostics* and click *Record landmark trace*.
+2. Write one test, then click *Stop & save trace*.
 
-**Needs manual testing with a real webcam and hand:**
-- Pen-up and pen-down feel across hand sizes, distances and lighting, and whether 0.08 is a comfortable release opening
-- Shake and lag while writing letters, digits and maths
-- The settle-at-pen-up shift from refinement: is it pleasant or distracting?
-- Accidental strokes while repositioning the hand
-- Tracking loss at frame edges and with partially hidden fingers
-- Frame rate and inference time on typical student laptops
-- Firefox and Safari
+The file contains:
+- the hand landmarks, including the raw thumb and index tips
+- per frame: the raw and filtered pen point, unsmoothed and smoothed pinch ratio, baseline, opening velocity, gesture state and pen state
+- pen-down and pen-up events, and the finished strokes (raw and processed)
+- your settings
+
+Never video. Replay it with: `npm run replay -- wisp-trace-….json --compare releaseSensitivity=0.8,1,1.2 --html compare.html`. Every run sees exactly the same hand motion, and the HTML page draws the strokes for each setting side by side. Any setting can be compared, including `depthWeight` and `noiseGate`.
+
+**Needs testing with a real webcam and hand:**
+- Whether pen-down at 0.27 feels deliberate without missing strokes, and whether pen-up lifts early enough without breaking strokes mid-letter
+- Short strokes, superscripts and loops in "Hello World" and x² + 3x − 5 = 0
+- The small settle at pen-up when the refinement replaces the live stroke
+- Live lag vs live shake
+- Whether depth weight 0.25 suits real MediaPipe depth noise (compare 0.5 on your traces)
+- Frame rate and inference time on your laptop
 
 
 ## Known limitations
 
-- **Defaults are tuned on modelled noise.** Real MediaPipe noise (especially depth noise in the pinch ratio) may differ. Recorded traces from real cameras should drive the next round of tuning.
-- **The finished stroke settles slightly at pen-up.** Refinement moves the live stroke into its refined shape, usually by a few pixels near the end. It can be turned off in Settings.
-- **Very noisy tracking can still split a stroke.** Under very poor tracking (modelled at 2.5–4× noise), a long stroke can occasionally break. Lower *Pen-up sensitivity* if this happens.
-- **Pen-up confirmation takes a frame or two.** A small opening held still is confirmed after 1–3 frames, because the smoothed ratio must catch up. The ink is trimmed back to the onset, so it doesn't leave a tail, but the pen lifts visibly a moment later.
-- **Starts can lose a frame of ink.** If you start moving at the very instant your fingers touch, the first frame of the stroke can be lost.
-- **Inference runs on the main thread.** On slow machines each frame can block the UI noticeably (in a headless VM with software WebGL, inference took hundreds of milliseconds per frame). Moving tracking into a Web Worker is planned.
-- One hand only; strokes have uniform width (no pressure).
-- Point timestamps use the recording session's `performance.now()` clock, so they are relative within a file, not absolute times.
-- The calibrated writing area is stored in view space; changing *Mirror camera* afterwards mirrors the area.
-- No eraser tool yet (undo and clear only).
-- Settings are stored in `localStorage` (settings only, never camera data).
+- **Defaults are tuned on modelled noise.** Two models agree on the direction of every change, but real traces are needed to confirm the values.
+- **Slow drift can still bend very short strokes.** Fingertip landmark drift over a few frames is in the same frequency band as writing. No filter can separate it from intentional motion, so very short strokes can still lean or bow a little.
+- **Loose pinches.** The more deliberate pen-down can skip a pinch that reads loose (e.g. with the hand turned). Pinch slightly tighter, or raise *Pen-down sensitivity*.
+- **Conservative first second.** In the first second of writing, before your pinch noise is measured, pen-up needs a slightly larger opening.
+- **Noisy tracking.** Under very noisy tracking, a long stroke can occasionally split in two; lower *Pen-up sensitivity* if this happens.
+- **Live vs final ink.** The live stroke and the final stroke can differ by a few pixels at pen-up.
+- **Main-thread tracking.** Inference runs on the main thread.
+- One hand only; uniform stroke width; timestamps are relative within a file; the calibrated area is stored in view space; no eraser yet.
 
 
 ## Planned improvements

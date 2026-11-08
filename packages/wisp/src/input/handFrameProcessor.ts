@@ -12,7 +12,7 @@ import type { PenPoint } from '../core/settings'
 import { applySensitivity, cameraToPage, defaultRegion, type WritingRegion } from '../strokes/coordinates'
 import type { StrokeEngine } from '../strokes/strokeEngine'
 import type { NormPoint } from '../strokes/types'
-import { LM, pinchRatio, validLandmarks, type Landmark } from '../tracking/landmarks'
+import { DEFAULT_DEPTH_WEIGHT, LM, pinchRatio, validLandmarks, type Landmark } from '../tracking/landmarks'
 
 export interface ProcessorConfig {
   mirror: boolean
@@ -22,6 +22,8 @@ export interface ProcessorConfig {
   /** 0.5–2: how small/slow a finger opening lifts the pen. */
   releaseSensitivity: number
   penPoint: PenPoint
+  /** Weight of landmark depth (z) in the pinch distance; default DEFAULT_DEPTH_WEIGHT. */
+  depthWeight?: number
   /** Calibrated region (view space) or null for the automatic default. */
   region: WritingRegion | null
   /** Logical page aspect ratio (width / height). */
@@ -39,8 +41,12 @@ export interface FrameOutput {
   gesture: GestureState
   /** Smoothed pinch ratio (as used by the gesture logic). */
   pinchRatio: number | null
+  /** Unsmoothed pinch ratio this frame. */
+  rawRatio: number | null
   /** View-space pen point (for calibration and overlays), null if no hand. */
   viewPoint: NormPoint | null
+  /** Raw page-space pen point (before smoothing), null if no hand. */
+  pagePoint: NormPoint | null
   actions: GestureAction[]
 }
 
@@ -97,7 +103,7 @@ export class HandFrameProcessor {
     let viewPoint: NormPoint | null = null
     let hand = null
     if (validLandmarks(f.landmarks)) {
-      ratio = pinchRatio(f.landmarks, f.videoAspect)
+      ratio = pinchRatio(f.landmarks, f.videoAspect, this.cfg.depthWeight ?? DEFAULT_DEPTH_WEIGHT)
       const cam = penPointOf(f.landmarks, this.cfg.penPoint)
       viewPoint = { x: this.cfg.mirror ? 1 - cam.x : cam.x, y: cam.y }
       const page = cameraToPage(cam, { mirror: this.cfg.mirror, region: effectiveRegion(this.cfg, f.videoAspect) })
@@ -105,7 +111,7 @@ export class HandFrameProcessor {
     }
     const actions = this.gestures.update({ t: f.t, hand })
     if (this.forward) this.apply(actions, f.t)
-    return { gesture: this.gestures.state, pinchRatio: this.gestures.ratio ?? ratio, viewPoint, actions }
+    return { gesture: this.gestures.state, pinchRatio: this.gestures.ratio ?? ratio, rawRatio: ratio, viewPoint, pagePoint: hand ? { x: hand.x, y: hand.y } : null, actions }
   }
 
   /** Ends any active stroke (camera stopped, mode switched). */

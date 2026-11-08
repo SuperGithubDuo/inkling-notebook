@@ -95,9 +95,11 @@ describe('pen up (fast, relative, trimmed)', () => {
     expect(endOf(a)).toBeDefined()
   })
 
-  it('a small, quick opening (+0.1) lifts the pen within three frames', () => {
+  it('a small, quick opening (+0.1) lifts the pen within three frames once the pinch noise is known', () => {
+    // Early in a session the release margin is conservative (noise not measured yet);
+    // after ~1 s of steady writing it adapts and a +0.10 opening is enough.
     const m = new GestureStateMachine()
-    const a = writeThen(m, [0.21, 0.26, 0.27])
+    const a = run(m, [...open3(), ...Array.from({ length: 30 }, (_, i) => hand(0.16, 0.3 + i * 0.003)), hand(0.21), hand(0.26), hand(0.27)])
     expect(endOf(a)).toBeDefined()
   })
 
@@ -135,10 +137,11 @@ describe('pen up (fast, relative, trimmed)', () => {
     expect(after[0]!.x).toBeGreaterThanOrEqual(0.5)
   })
 
-  it('rapid pinch/release cycles produce well-formed start/end pairs', () => {
+  it('rapid pinch/release cycles (130 ms pinches) produce well-formed start/end pairs', () => {
+    // v0.1.2 pen-down is deliberately less eager: a 100 ms (3-frame) pinch is marginal; 130 ms registers.
     const m = new GestureStateMachine()
     const list = [...open3()]
-    for (let i = 0; i < 8; i++) list.push(hand(0.16), hand(0.16), hand(0.16), hand(0.75), hand(0.75))
+    for (let i = 0; i < 8; i++) list.push(hand(0.16), hand(0.16), hand(0.16), hand(0.16), hand(0.75), hand(0.75))
     const a = run(m, list)
     let down = false
     for (const x of a) {

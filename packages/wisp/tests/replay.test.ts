@@ -1,12 +1,13 @@
 /**
  * Replay-harness regression tests: synthetic landmark traces with known
  * intended strokes, run through the real webcam pipeline. These guard the
- * v0.1.1 handwriting-quality fixes against regressions. They use a MODELLED
- * noise level, so they prove the logic, not real-webcam quality.
+ * v0.1.1/v0.1.2 handwriting-quality fixes against regressions. They use
+ * MODELLED noise ("model" = gentle Gaussian, "webcam" = harsher MediaPipe-like
+ * profile), so they prove the logic, not real-webcam quality.
  */
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { replay, score, truthStrokes, wobble } from '../src/replay/replay'
-import { SCENARIOS, setNoiseScale } from '../src/replay/scenarios'
+import { SCENARIOS, setNoiseProfile, setNoiseScale } from '../src/replay/scenarios'
 import { NO_NOISE, line, synthesize, writeStrokes } from '../src/replay/synth'
 import { packLandmarks, parseTrace, TraceRecorder, unpackLandmarks } from '../src/replay/trace'
 import { fakeHand } from './helpers'
@@ -19,8 +20,11 @@ const run = (id: string, seed = 1) => {
   return { r, s: score(r, truthStrokes(truth, r.config, trace.videoAspect)) }
 }
 
-describe('acceptance-test scenarios (modelled noise)', () => {
-  setNoiseScale(1)
+describe('acceptance-test scenarios — gentle "model" noise (strict bounds)', () => {
+  beforeAll(() => {
+    setNoiseScale(1)
+    setNoiseProfile('model')
+  })
   for (const id of SCENARIOS.map((s) => s.id)) {
     it(`${id}: one stroke per intended stroke (no breaks, no accidental connections)`, () => {
       for (let seed = 1; seed <= 3; seed++) {
@@ -35,9 +39,18 @@ describe('acceptance-test scenarios (modelled noise)', () => {
     expect(s.wobble).toBeLessThan(0.5 * PX)
   })
 
-  it('B/C/F: release tails stay small (v0.1 had 100–300 px)', () => {
-    for (const id of ['B-hello', 'C-math', 'F-repeated']) {
-      expect(run(id).s.tail).toBeLessThan(40 * PX)
+  it('release tails stay small: under 8 px per stroke (v0.1 had up to ~25 px per stroke)', () => {
+    for (const id of ['B-hello', 'C-math', 'F-repeated', 'F2-fast-ticks', 'F3-dashes']) {
+      const { s } = run(id)
+      expect(s.tail / s.expected).toBeLessThan(8 * PX)
+    }
+  })
+
+  it('repeated short strokes keep their ink (no over-trimming)', () => {
+    for (const id of ['F-repeated', 'F2-fast-ticks', 'F3-dashes']) {
+      const { s } = run(id)
+      // Missed ink per stroke stays under ~8 px on average.
+      expect(s.missing / s.expected).toBeLessThan(8 * PX)
     }
   })
 
@@ -58,6 +71,35 @@ describe('acceptance-test scenarios (modelled noise)', () => {
     const sm = score(mid, truthStrokes(truth, mid.config, 1))
     const si = score(idx, truthStrokes(truth, idx.config, 1))
     expect(sm.excess).toBeLessThan(si.excess)
+  })
+})
+
+describe('acceptance-test scenarios — harsher "webcam" noise (robustness bounds)', () => {
+  beforeAll(() => {
+    setNoiseScale(1)
+    setNoiseProfile('webcam')
+  })
+  afterAll(() => setNoiseProfile('model'))
+
+  it('no accidental strokes while repositioning without a pinch', () => {
+    for (let seed = 1; seed <= 4; seed++) expect(run('E-reposition', seed).s.strokes).toBe(0)
+  })
+
+  it('stroke counts stay within one of the intended count across all scenarios', () => {
+    for (const sc of SCENARIOS) {
+      for (let seed = 1; seed <= 3; seed++) {
+        const { s } = run(sc.id, seed)
+        expect(Math.abs(s.strokes - s.expected)).toBeLessThanOrEqual(1)
+      }
+    }
+  })
+
+  it('tracking loss ends the stroke cleanly (no connecting line, no stray ink between)', () => {
+    for (let seed = 1; seed <= 4; seed++) expect(run('L-tracking-loss', seed).s.unintended).toBe(0)
+  })
+
+  it('finished strokes have sub-pixel jitter even under webcam-like noise', () => {
+    for (const id of ['A-slow-line', 'G-circle', 'B-hello']) expect(run(id).s.wobble).toBeLessThan(0.3 * PX)
   })
 })
 

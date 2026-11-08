@@ -82,8 +82,12 @@ export interface GestureConfig {
   minConfidence: number
   /** How long a writing hand may vanish before the stroke is ended. */
   lostGraceMs: number
-  /** Release onset: last frame within this rise of the baseline. */
+  /** Release onset: frames more than max(onsetRise, 1.2σ) above the baseline count as opening. */
   onsetRise: number
+  /** A pinch must close from an open peak seen within this many ms (deliberate closing, not drift). */
+  peakWindowMs: number
+  /** Noise may raise the release thresholds by at most this factor (keeps pen-up responsive on noisy cameras). */
+  maxNoiseFactor: number
   /** Never trim more than this much ink from a stroke end. */
   maxTrimMs: number
   /** While the pinch is steady, the baseline follows the ratio at this rate per frame (EMA weight). */
@@ -107,8 +111,10 @@ export const DEFAULT_GESTURE: GestureConfig = {
   minHandFrames: 3,
   minConfidence: 0.5,
   lostGraceMs: 160,
-  onsetRise: 0.035,
-  maxTrimMs: 200,
+  onsetRise: 0.02,
+  maxTrimMs: 250,
+  peakWindowMs: 1000,
+  maxNoiseFactor: 2.5,
   baselineFollow: 0.05,
   noiseK: 4,
   initialNoise: 0.035
@@ -133,11 +139,13 @@ export class GestureStateMachine {
   private sawOpen = false
   /** Highest ratio since the last release / hand appearance (for re-arming). */
   private openPeak = 0
+  /** Smoothed ratios of the last `peakWindowMs` while hovering (for the deliberate-close check). */
+  private peakHist: Array<{ t: number; r: number }> = []
   private pending: Pending[] = []
   private baseline = 0
   /** Number of samples behind the baseline estimate (its uncertainty shrinks as 1/√n). */
   private baselineN = 0
-  private history: Array<{ t: number; r: number }> = []
+  private history: Array<{ t: number; r: number; raw: number }> = []
   private lastSeenT = 0
   /** Running variance of the RAW ratio (from frame-to-frame differences) while writing. */
   private noiseVar: number
@@ -165,6 +173,11 @@ export class GestureStateMachine {
   /** Smoothed pinch ratio (for diagnostics). */
   get ratio(): number | null {
     return this.signal.value
+  }
+
+  /** Opening velocity of the smoothed ratio, ratio/s (for diagnostics). */
+  get openingVelocity(): number {
+    return this.signal.velocity
   }
 
   get writingBaseline(): number | null {
@@ -214,8 +227,18 @@ export class GestureStateMachine {
           break
         }
         this.openPeak = Math.max(this.openPeak, r)
+        this.peakHist.push({ t: frame.t, r })
+        while (this.peakHist.length > 1 && frame.t - this.peakHist[0]!.t > this.cfg.peakWindowMs) this.peakHist.shift()
+        const recentPeak = Math.max(...this.peakHist.map((h) => h.r))
         if (r > th.enter + 0.05) this.sawOpen = true
-        const canStart = this.sawOpen && this.handFrames >= this.cfg.minHandFrames && r < th.enter && r < this.openPeak - th.rearmDrop
+        // Deliberate pinch: below `enter`, and closed by at least rearmDrop from an
+        // open position seen recently — fingers that merely drift close together don't start ink.
+        const canStart =
+          this.sawOpen &&
+          this.handFrames >= this.cfg.minHandFrames &&
+          r < th.enter &&
+          r < this.openPeak - th.rearmDrop &&
+          r < recentPeak - th.rearmDrop
         if (canStart) {
           this.go('pinch-pending', out)
           this.pending = [{ sample, ratio: r, raw: this.signal.raw ?? r, rawVelocity: rv }]
@@ -253,19 +276,20 @@ export class GestureStateMachine {
         const sigmaB = sigmaR / Math.sqrt(Math.max(1, this.baselineN))
         const sigmaS = Math.hypot(this.signal.smoothedNoise(sigmaR), sigmaB)
         const K = this.cfg.noiseK
-        const k = Math.max(1, (K * sigmaS) / th.releaseRise)
+        const k = Math.min(this.cfg.maxNoiseFactor, Math.max(1, (K * sigmaS) / th.releaseRise))
         const riseNeed = th.releaseRise * k
         // Unsmoothed check for big, fast openings: lifts on the first frame instead of
         // waiting for the smoothed ratio; scaled by the raw noise, which is larger.
-        const rawNeed = Math.max(th.releaseRise * 1.5, K * Math.hypot(sigmaR, sigmaB))
-        const vNeed = Math.max(th.openVelocity, (K * sigmaS * Math.SQRT2) / 0.067)
+        const rawNeed = Math.min(th.releaseRise * 1.5 * this.cfg.maxNoiseFactor, Math.max(th.releaseRise * 1.5, K * Math.hypot(sigmaR, sigmaB)))
+        const vNeed = Math.min(th.openVelocity * this.cfg.maxNoiseFactor, Math.max(th.openVelocity, (K * sigmaS * Math.SQRT2) / 0.067))
         const rawRise = (this.signal.raw ?? r) - this.baseline
         const release = r > th.releaseAbs || rise > riseNeed || rawRise > rawNeed || (v > vNeed && rise > th.releaseMinRise * k)
         if (release) {
-          out.push({ type: 'end', reason: 'released', trimAfter: this.onsetTime(frame.t) })
+          out.push({ type: 'end', reason: 'released', trimAfter: this.onsetTime(frame.t, this.signal.raw ?? r) })
           this.go('hover', out)
           this.sawOpen = true
           this.openPeak = r
+          this.peakHist = [{ t: frame.t, r }]
           this.history = []
           out.push({ type: 'sample', sample })
           break
@@ -341,7 +365,7 @@ export class GestureStateMachine {
     this.baselineN = settled.length
     this.signal.reseed(last.sample.t, this.baseline)
     this.prevRaw = last.raw
-    this.history = p.slice(k).map((x) => ({ t: x.sample.t, r: x.ratio }))
+    this.history = p.slice(k).map((x) => ({ t: x.sample.t, r: x.ratio, raw: x.raw }))
     this.flushPending(k, out)
     this.go('writing', out)
   }
@@ -353,35 +377,62 @@ export class GestureStateMachine {
   }
 
   private pushHistory(t: number, r: number): void {
-    this.history.push({ t, r })
+    this.history.push({ t, r, raw: this.signal.raw ?? r })
     const cutoff = t - this.cfg.maxTrimMs - 100
     while (this.history.length > 2 && this.history[0]!.t < cutoff) this.history.shift()
   }
 
   /**
-   * Release onset: the time of the last ink frame to keep. Walks back over
-   * the final run of frames where the smoothed ratio was RISING and already
-   * at least onsetRise/2 above the baseline — the fingers visibly opening —
-   * and trims those. Requiring both a rise and a level keeps ordinary noise
-   * wiggles (and a baseline that crept up during a slow release) from
-   * trimming real ink. Bounded by maxTrimMs.
+   * Release onset: the time of the last ink frame to keep (v0.1.2).
+   *
+   * Fits a "hinge" to the RAW pinch ratio over the last `maxTrimMs`: flat at
+   * the writing baseline up to frame k, then rising in a straight line
+   * through the release frame. The k with the smallest squared error is
+   * where the fingers began to open; ink after it is trimmed.
+   *  - A quick release (ratio flat, then a jump) puts k on the last ink
+   *    frame: nothing real is trimmed.
+   *  - A slow release (a ramp over several frames) puts k at the start of
+   *    the ramp: the ink drawn while opening is removed.
+   *  - Noisy frames that don't form a ramp into the release don't move k.
+   * v0.1.1 trimmed every frame above a noise-scaled level, which also cut
+   * ordinary noisy frames — real ink — off the end of short strokes.
    */
-  private onsetTime(now: number): number {
-    const h = this.history
+  private onsetTime(now: number, releaseRaw: number): number {
     const limit = now - this.cfg.maxTrimMs
-    const level = this.baseline + this.cfg.onsetRise / 2
-    let i = h.length - 1
-    while (i >= 0) {
-      const cur = h[i]!
-      const opening = cur.r > level && (i === 0 || h[i - 1]!.r < cur.r)
-      if (!opening || cur.t < limit) break
-      i--
+    const h = this.history.filter((x) => x.t >= limit)
+    if (h.length === 0) return this.history.at(-1)?.t ?? now
+    const pts = [...h.map((x) => ({ t: x.t, y: x.raw })), { t: now, y: releaseRaw }]
+    const b = this.baseline
+    let bestK = h.length - 1
+    let bestErr = Infinity
+    for (let k = 0; k < h.length; k++) {
+      // Frames 0..k flat at b; frames k+1..end on a line through (t_k, b), slope fitted.
+      let err = 0
+      for (let i = 0; i <= k; i++) err += (pts[i]!.y - b) ** 2
+      let num = 0
+      let den = 0
+      for (let i = k + 1; i < pts.length; i++) {
+        const dt = pts[i]!.t - pts[k]!.t
+        num += dt * (pts[i]!.y - b)
+        den += dt * dt
+      }
+      const slope = den > 0 ? Math.max(0, num / den) : 0
+      for (let i = k + 1; i < pts.length; i++) err += (pts[i]!.y - b - slope * (pts[i]!.t - pts[k]!.t)) ** 2
+      // Prefer the latest k on ties: never trim more than the data demands.
+      if (err <= bestErr + 1e-12) (bestErr = err), (bestK = k)
     }
-    return i >= 0 ? h[i]!.t : Math.max(limit, (h[0]?.t ?? now) - 1)
+    return h[bestK]!.t
   }
 
+  /**
+   * A frame without a (confident) hand. Brief gaps — a frame or two, common
+   * while the thumb hides the index tip — are tolerated in every state for
+   * `lostGraceMs`: while writing the stroke continues; before writing, the
+   * pinch in progress is kept (v0.1.1 reset to "no hand" on the first missed
+   * frame, which threw away a pinch that was closing and lost the stroke).
+   */
   private onMissing(t: number, out: GestureAction[]): void {
-    this.handFrames = 0
+    const gone = t - this.lastSeenT > this.cfg.lostGraceMs
     switch (this.s) {
       case 'no-hand':
         return
@@ -389,20 +440,24 @@ export class GestureStateMachine {
         this.go('lost', out)
         return
       case 'lost':
-        if (t - this.lastSeenT > this.cfg.lostGraceMs) {
+        if (gone) {
           out.push({ type: 'end', reason: 'lost' })
           this.toNoHand(out)
         }
         return
       case 'pinch-pending':
       case 'hover':
-        this.pending = []
-        this.toNoHand(out)
+        if (gone) {
+          this.flushPending(this.pending.length, out)
+          this.toNoHand(out)
+        }
         return
     }
   }
 
   private toNoHand(out: GestureAction[]): void {
+    this.handFrames = 0
+    this.peakHist = []
     this.signal.reset()
     this.sawOpen = false
     this.history = []

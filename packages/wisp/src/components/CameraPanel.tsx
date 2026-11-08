@@ -9,7 +9,7 @@ import { HAND_CONNECTIONS, LM } from '../tracking/landmarks'
  * Records a landmark trace (21 hand points per frame, no images) for the
  * replay harness: `npm run replay -- wisp-trace-….json`.
  */
-function TraceButton({ ctl, on }: { ctl: WispController; on: boolean }) {
+function TraceButton({ ctl, on, settings }: { ctl: WispController; on: boolean; settings: WispSettings }) {
   const [rec, setRec] = useState(false)
   const [frames, setFrames] = useState(0)
   const cam = ctl.webcamInput
@@ -23,7 +23,7 @@ function TraceButton({ ctl, on }: { ctl: WispController; on: boolean }) {
   }, [rec, cam])
   if (!cam) return null
   const stop = () => {
-    const trace = cam.recorder.stop()
+    const trace = cam.recorder.stop(undefined, { ...settings, version: '0.1.2' })
     setRec(false)
     if (trace.frames.length === 0) return
     const blob = new Blob([JSON.stringify(trace)], { type: 'application/json' })
@@ -45,7 +45,7 @@ function TraceButton({ ctl, on }: { ctl: WispController; on: boolean }) {
           Record landmark trace
         </button>
       )}
-      <p className="muted small">Saves hand-landmark positions only (no video) so writing can be replayed and compared offline.</p>
+      <p className="muted small">Saves hand-landmark positions and WISP’s per-frame measurements (pinch ratio, pen state, pen position) — never video — so your writing can be replayed and tuned offline.</p>
     </div>
   )
 }
@@ -297,7 +297,7 @@ export function CameraPanel(p: Props) {
             <dt>Release-trimmed points</dt>
             <dd>{p.ctl.engine.stats.trimmed}</dd>
           </dl>
-          <TraceButton ctl={p.ctl} on={on} />
+          <TraceButton ctl={p.ctl} on={on} settings={p.settings} />
         </section>
       )}
     </aside>

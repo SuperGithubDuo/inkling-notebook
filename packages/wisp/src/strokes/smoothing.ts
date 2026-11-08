@@ -55,6 +55,12 @@ export class OneEuroFilter {
   private readonly x = new LowPass()
   private readonly dx = new LowPass()
   private lastT: number | null = null
+  /**
+   * Speed (units/s) that tracking noise alone produces in the filtered
+   * derivative. Speeds below it don't open the filter: only movement beyond
+   * what noise can explain counts as intentional (v0.1.2).
+   */
+  noiseSpeed = 0
 
   constructor(public params: OneEuroParams) {}
 
@@ -70,7 +76,7 @@ export class OneEuroFilter {
     const prev = this.x.last
     const d = (value - prev) / dt
     const ed = this.dx.filter(d, alphaFor(this.params.dCutoff, dt))
-    const cutoff = this.params.minCutoff + this.params.beta * Math.abs(ed)
+    const cutoff = this.params.minCutoff + this.params.beta * Math.max(0, Math.abs(ed) - this.noiseSpeed)
     return this.x.filter(value, alphaFor(cutoff, dt))
   }
 
@@ -97,6 +103,19 @@ export class PointFilter {
     this.fx.params = params
     this.fy.params = params
     this.enabled = enabled
+  }
+
+  /**
+   * Noise gate from a position-noise σ (page-normalized): the filtered
+   * derivative of white noise has std ≈ σ·√2/dt·√(α/(2−α)); speeds up to
+   * `k` times that don't loosen the filter.
+   */
+  setNoise(sigma: number, dtS = 1 / 30, k = 2.5): void {
+    const d = this.fx.params.dCutoff
+    const alpha = 1 / (1 + 1 / (2 * Math.PI * d) / dtS)
+    const v = ((sigma * Math.SQRT2) / dtS) * Math.sqrt(alpha / (2 - alpha)) * PAGE_UNITS * k
+    this.fx.noiseSpeed = v
+    this.fy.noiseSpeed = v
   }
 
   filter(p: NormPoint, tMs: number): NormPoint {
@@ -220,6 +239,189 @@ export function refineZeroPhase<T extends { x: number; y: number; t: number }>(s
   const b: NormPoint[] = new Array(all.length)
   for (let i = all.length - 1; i >= 0; i--) b[i] = bwd.filter(a[i]!, T - all[i]!.t)
   return b.slice(pad, pad + n)
+}
+
+/**
+ * Solves (W + λ·DᵀD)·z = W·y, where D is the k-th order difference matrix
+ * and W optional per-sample weights (Whittaker–Henderson smoother). The system is symmetric, positive-definite
+ * and banded (bandwidth k), so a banded Cholesky solves it in O(n·k²).
+ */
+export function whittaker(y: readonly number[], lambda: number, order = 2, weights?: readonly number[]): number[] {
+  const n = y.length
+  if (n <= order || !(lambda > 0)) return y.slice()
+  const w = (i: number) => (weights ? Math.max(1e-6, weights[i] ?? 1) : 1)
+  // Coefficients of the k-th difference operator, e.g. order 2 → [1, −2, 1].
+  let c = [1]
+  for (let k = 0; k < order; k++) c = [...c, 0].map((v, i) => v - (i > 0 ? c[i - 1]! : 0))
+  const bw = order
+  // Band storage: A[i][j] = matrix entry (i, i + j), j = 0..bw.
+  const A = Array.from({ length: n }, () => new Array<number>(bw + 1).fill(0))
+  for (let r = 0; r + order < n; r++) {
+    // Row r of D touches columns r..r+order with coefficients c.
+    for (let a = 0; a <= order; a++) {
+      for (let b = a; b <= order; b++) A[r + a]![b - a]! += lambda * c[a]! * c[b]!
+    }
+  }
+  for (let i = 0; i < n; i++) A[i]![0]! += w(i)
+  // Banded Cholesky: A = L·Lᵀ (stored in place, L[i][j] = entry (i+j, i)).
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j <= bw && i + j < n; j++) {
+      let sum = A[i]![j]!
+      for (let k = 1; k <= bw - j && i - k >= 0; k++) sum -= A[i - k]![k]! * A[i - k]![k + j]!
+      if (j === 0) A[i]![0] = Math.sqrt(Math.max(sum, 1e-12))
+      else A[i]![j] = sum / A[i]![0]!
+    }
+  }
+  const z = y.map((v, i) => v * w(i))
+  for (let i = 0; i < n; i++) {
+    let sum = z[i]!
+    for (let k = 1; k <= bw && i - k >= 0; k++) sum -= A[i - k]![k]! * z[i - k]!
+    z[i] = sum / A[i]![0]!
+  }
+  for (let i = n - 1; i >= 0; i--) {
+    let sum = z[i]!
+    for (let k = 1; k <= bw && i + k < n; k++) sum -= A[i]![k]! * z[i + k]!
+    z[i] = sum / A[i]![0]!
+  }
+  return z
+}
+
+/**
+ * Robust noise estimate of a sampled path from second differences:
+ * for white noise σ, Var(Δ²) = 6σ². The median makes it insensitive to real
+ * accelerations and glitches. Returns σ per axis combined (page units).
+ */
+export function noiseFromSecondDiff(pts: ReadonlyArray<{ x: number; y: number }>): number | null {
+  if (pts.length < 5) return null
+  const d: number[] = []
+  for (let i = 1; i < pts.length - 1; i++) {
+    d.push(Math.abs(pts[i + 1]!.x - 2 * pts[i]!.x + pts[i - 1]!.x), Math.abs(pts[i + 1]!.y - 2 * pts[i]!.y + pts[i - 1]!.y))
+  }
+  d.sort((a, b) => a - b)
+  const med = d[Math.floor(d.length / 2)]!
+  return med / 0.6745 / Math.sqrt(6)
+}
+
+/**
+ * Removes single-frame glitches. Each point is compared with the midpoint of
+ * its two neighbours (at the ends, with the line through the next two):
+ * smooth handwriting stays close to that prediction even while moving fast,
+ * a landmark that jumps for one frame does not. A point is a glitch when its
+ * deviation is a local maximum and exceeds max(k × robust scale, minDist);
+ * it is then replaced by the prediction.
+ */
+export function despike<T extends { x: number; y: number }>(pts: readonly T[], minDist: number, k = 4): T[] {
+  const n = pts.length
+  if (n < 4) return pts.slice()
+  const pred = (i: number): { x: number; y: number } => {
+    if (i === 0) return { x: 2 * pts[1]!.x - pts[2]!.x, y: 2 * pts[1]!.y - pts[2]!.y }
+    if (i === n - 1) return { x: 2 * pts[n - 2]!.x - pts[n - 3]!.x, y: 2 * pts[n - 2]!.y - pts[n - 3]!.y }
+    return { x: (pts[i - 1]!.x + pts[i + 1]!.x) / 2, y: (pts[i - 1]!.y + pts[i + 1]!.y) / 2 }
+  }
+  const dev = pts.map((p, i) => {
+    const q = pred(i)
+    return Math.hypot(p.x - q.x, p.y - q.y)
+  })
+  const sorted = dev.slice().sort((a, b) => a - b)
+  const scale = sorted[Math.floor(n / 2)]! * 1.4826
+  const limit = Math.max(k * scale, minDist)
+  const out = pts.slice()
+  for (let i = 0; i < n; i++) {
+    const isPeak = (i === 0 || dev[i]! >= dev[i - 1]!) && (i === n - 1 || dev[i]! >= dev[i + 1]!)
+    if (isPeak && dev[i]! > limit) out[i] = { ...pts[i]!, ...pred(i) }
+  }
+  return out
+}
+
+/**
+ * Noise-matched smoothing of a COMPLETED stroke (v0.1.2 refinement):
+ *   1. despike — drop one-frame landmark glitches;
+ *   2. Whittaker smoother whose strength λ is chosen so the removed
+ *      movement (RMS residual) matches the measured landmark noise σ
+ *      ("remove what noise explains, keep the rest"), capped at `maxLambda`
+ *      so real details at handwriting frequencies are never flattened.
+ * Zero lag, endpoints included. Works on strokes of any length, including
+ * the 4–6 sample strokes of quick ticks and dashes, where a recursive filter
+ * barely acts.
+ */
+export function refineNoiseMatched<T extends { x: number; y: number }>(
+  samples: readonly T[],
+  sigma: number,
+  opts: { maxLambda: number; minLambda?: number; strength?: number; spikeMin: number }
+): NormPoint[] {
+  const n = samples.length
+  if (n < 3) return samples.map((p) => ({ x: p.x, y: p.y }))
+  const clean = despike(samples, opts.spikeMin)
+  const xs = clean.map((p) => p.x)
+  const ys = clean.map((p) => p.y)
+  const target = Math.max(0, sigma) * (opts.strength ?? 1)
+  const rms = (lam: number) => {
+    const zx = whittaker(xs, lam)
+    const zy = whittaker(ys, lam)
+    let s = 0
+    for (let i = 0; i < n; i++) s += (zx[i]! - xs[i]!) ** 2 + (zy[i]! - ys[i]!) ** 2
+    return { r: Math.sqrt(s / (2 * n)), zx, zy }
+  }
+  const lo0 = opts.minLambda ?? 0.05
+  let best = rms(opts.maxLambda)
+  if (best.r > target) {
+    // Bisection on log λ for residual ≈ target (residual grows with λ).
+    let lo = Math.log(lo0)
+    let hi = Math.log(opts.maxLambda)
+    for (let it = 0; it < 18; it++) {
+      const mid = (lo + hi) / 2
+      const m = rms(Math.exp(mid))
+      if (m.r > target) hi = mid
+      else (lo = mid), (best = m)
+    }
+    if (best.r > target) best = rms(lo0)
+  }
+  return best.zx.map((x, i) => ({ x, y: best.zy[i]! }))
+}
+
+/**
+ * Online estimate of tracking noise (page units) from second differences of
+ * raw positions, updated only while the pointer moves slowly (real motion
+ * then contributes little). Used to gate One Euro's speed response and to
+ * size the stabilizer and the pen-up refinement.
+ */
+export class NoiseEstimator {
+  private v: number
+  private last: Array<{ x: number; y: number; t: number }> = []
+  samples = 0
+
+  constructor(
+    initial = 0.0025,
+    private readonly maxSpeed = 0.35
+  ) {
+    this.v = initial * initial
+  }
+
+  get sigma(): number {
+    return Math.sqrt(this.v)
+  }
+
+  add(p: { x: number; y: number }, t: number): void {
+    this.last.push({ x: p.x, y: p.y, t })
+    if (this.last.length > 3) this.last.shift()
+    if (this.last.length < 3) return
+    const [a, b, c] = this.last as [typeof p & { t: number }, typeof p & { t: number }, typeof p & { t: number }]
+    const dt = (c.t - a.t) / 2000
+    if (!(dt > 0)) return
+    const speed = Math.hypot(c.x - a.x, c.y - a.y) / (2 * dt)
+    if (speed > this.maxSpeed) return
+    const d2 = (c.x - 2 * b.x + a.x) ** 2 + (c.y - 2 * b.y + a.y) ** 2
+    // Per-axis variance = E[d2]/(2·6); clip to 9× current to resist glitches.
+    const est = Math.min(d2 / 12, 9 * this.v)
+    const rate = this.samples < 60 ? 0.08 : 0.03
+    this.v += rate * (est - this.v)
+    this.samples++
+  }
+
+  /** Forget the last positions (tracking gap) but keep the noise level. */
+  break(): void {
+    this.last = []
+  }
 }
 
 export interface OutlierConfig {

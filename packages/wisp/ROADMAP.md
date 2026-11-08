@@ -3,7 +3,10 @@
 ## v0.1: reliable stroke capture
 Standalone prototype: webcam hand tracking, pinch-to-write, One Euro smoothing with outlier rejection, vector stroke model with JSON import/export, undo/redo, mouse simulation, unit tests.
 
-## v0.1.1: handwriting quality (this release)
+## v0.1.2: handwriting quality and gesture calibration (this release)
+Noise-aware pipeline: measured tracking noise gates the live filter and sizes the stabilizer; finished strokes get glitch removal plus a noise-matched Whittaker smoother; hinge-fit release trimming; deliberate pen-down (0.27, deliberate close); slightly more sensitive pen-up with a 2.5× noise cap; tracking-gap tolerance before pen-down; pinch depth weight 0.25. Harsher MediaPipe-like replay profile, 13 scenarios, full metric set, HTML stroke drawings, trace v2 with per-frame diagnostics. Tuned on modelled noise; awaiting real-webcam traces.
+
+## v0.1.1: handwriting quality
 Pen point moved to the thumb–index midpoint; asymmetric, noise-adaptive pinch release with tail trimming; continuous One Euro filter retuned (beta 0.04, dCutoff 0.7 Hz) with pen-down seeding, a jitter stabilizer and zero-lag refinement at pen-up; landmark replay harness and trace recorder. Tuned on modelled noise; awaiting real-webcam testing.
 
 ## v0.2: measure and harden

@@ -23,7 +23,8 @@ export interface StrokeUpdateEvent {
 /**
  * The completed stroke. This is the FINAL, authoritative version: it can
  * differ from the points streamed through strokeUpdate, because the release
- * tail is trimmed and webcam strokes are refined (zero-lag re-smoothing) at
+ * tail is trimmed and webcam strokes are refined (glitch removal and
+ * noise-matched zero-lag smoothing) at
  * pen-up. Hosts should draw live points provisionally and replace them with this.
  */
 export interface StrokeEndEvent {

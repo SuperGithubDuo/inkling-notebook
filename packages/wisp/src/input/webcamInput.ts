@@ -90,6 +90,10 @@ export class WebcamInput {
   private calib: { corners: NormPoint[]; resolve: (r: WritingRegion | null) => void } | null = null
   private disposed = false
 
+  /** Latest filtered pen point (for trace diagnostics). */
+  private lastCursor: { x: number; y: number; down: boolean } | null = null
+  private readonly unsubs: Array<() => void> = []
+
   constructor(
     private readonly video: HTMLVideoElement,
     engine: StrokeEngine,
@@ -97,6 +101,16 @@ export class WebcamInput {
   ) {
     this.processor = new HandFrameProcessor(engine, cfg)
     this.overlay.mirror = cfg.mirror
+    // Trace diagnostics: these listeners only record while a trace is being recorded.
+    this.unsubs.push(
+      engine.onCursor((c) => (this.lastCursor = c)),
+      engine.events.on('cursorHidden', () => (this.lastCursor = null)),
+      engine.onStrokeStart((e) => this.recorder.addEvent({ t: e.stroke.startedAt, type: 'pen-down' })),
+      engine.onStrokeEnd((e) => {
+        this.recorder.addEvent({ t: e.stroke.endedAt, type: 'pen-up', reason: e.reason })
+        this.recorder.addStroke(e.stroke)
+      })
+    )
   }
 
   get status(): WebcamStatus {
@@ -169,6 +183,7 @@ export class WebcamInput {
   dispose(): void {
     this.stop()
     this.disposed = true
+    this.unsubs.splice(0).forEach((u) => u())
     this.tracker?.close()
     this.tracker = null
     this.events.clear()
@@ -285,7 +300,20 @@ export class WebcamInput {
     d.pinchBaseline = this.processor.gestures.writingBaseline
     d.pinchNoise = this.processor.gestures.ratioNoise
     d.frames++
-    this.recorder.add(t, result.landmarks, result.confidence, videoAspect)
+    if (this.recorder.recording) {
+      const g = this.processor.gestures
+      const c = this.lastCursor
+      this.recorder.add(t, result.landmarks, result.confidence, videoAspect, {
+        mid: out.pagePoint ? [out.pagePoint.x, out.pagePoint.y] : null,
+        cur: c ? [c.x, c.y] : null,
+        down: c?.down ? 1 : 0,
+        r: out.rawRatio,
+        rs: out.pinchRatio,
+        b: g.writingBaseline,
+        v: g.openingVelocity,
+        s: out.gesture
+      })
+    }
     this.overlay.landmarks = result.landmarks
     this.overlay.viewPoint = out.viewPoint
     this.overlay.region = effectiveRegion(this.processor.config, videoAspect)

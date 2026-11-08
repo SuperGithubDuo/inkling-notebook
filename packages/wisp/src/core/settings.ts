@@ -31,7 +31,7 @@ export const DEFAULT_SETTINGS: WispSettings = {
   mirror: true,
   writingSensitivity: 1,
   smoothing: 0.5,
-  stabilizer: 0.4,
+  stabilizer: 0.25,
   refine: true,
   pinchSensitivity: 1,
   releaseSensitivity: 1,
