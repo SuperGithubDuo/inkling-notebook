@@ -15,6 +15,10 @@
  */
 import { getStroke } from 'perfect-freehand'
 import { fitPage, pageToScreen, type PageFit } from '../strokes/coordinates'
+import type { GuideLines } from '../strokes/layout'
+
+/** Guides to draw (v0.1.4), or null. */
+export type GuideOverlay = (GuideLines & { baseline: boolean; xHeightLine: boolean; capLine: boolean; lineSpacing: boolean }) | null
 import { densify } from '../strokes/smoothing'
 import type { CanvasMeta, Stroke, WispDocument } from '../strokes/types'
 
@@ -26,6 +30,8 @@ export interface CursorState {
 }
 
 const PAGE_PADDING = 28
+/** Corner radius of the page sheet (CSS px). Small, so the drawable corners are visible. */
+const PAGE_RADIUS = 2
 
 function outline(stroke: Pick<Stroke, 'points' | 'width'>, page: CanvasMeta, complete: boolean): Path2D {
   const pts = stroke.points.map((p) => ({ x: p.x * page.width, y: p.y * page.height }))
@@ -68,6 +74,7 @@ export class CanvasRenderer {
   private cursor: CursorState = { x: 0, y: 0, down: false, visible: false }
   private cursorColor = '#1f2430'
   private cursorWidth = 4
+  private guides: GuideOverlay = null
   private _fit: PageFit = { left: 0, top: 0, width: 1, height: 1 }
   private cssW = 1
   private cssH = 1
@@ -122,6 +129,40 @@ export class CanvasRenderer {
     this.cursor = { ...this.cursor, ...c }
     this.overlayDirty = true
     this.schedule()
+  }
+
+  /** Writing guides drawn under the ink (never exported). */
+  setGuides(g: GuideOverlay): void {
+    this.guides = g
+    this.inkDirty = true
+    this.schedule()
+  }
+
+  private drawGuides(ctx: CanvasRenderingContext2D, page: CanvasMeta): void {
+    const g = this.guides
+    if (!g) return
+    const px = page.width / this._fit.width // page px per CSS px: keeps lines 1 CSS px thick
+    ctx.save()
+    g.baselines.forEach((b, i) => {
+      if (g.lineSpacing && i % 2 === 0) {
+        // Faint band for every other line: shows line spacing at a glance.
+        ctx.fillStyle = 'rgba(47, 107, 228, 0.035)'
+        ctx.fillRect(0, b - g.pitch * 0.85, page.width, g.pitch)
+      }
+      const line = (y: number, color: string, dash: number[]) => {
+        ctx.strokeStyle = color
+        ctx.lineWidth = px
+        ctx.setLineDash(dash.map((d) => d * px))
+        ctx.beginPath()
+        ctx.moveTo(0, y)
+        ctx.lineTo(page.width, y)
+        ctx.stroke()
+      }
+      if (g.baseline) line(b, 'rgba(47, 107, 228, 0.38)', [])
+      if (g.xHeightLine) line(b - g.xHeight, 'rgba(47, 107, 228, 0.28)', [6, 5])
+      if (g.capLine) line(b - g.capHeight, 'rgba(47, 107, 228, 0.18)', [2, 5])
+    })
+    ctx.restore()
   }
 
   setPen(color: string, width: number): void {
@@ -212,14 +253,17 @@ export class CanvasRenderer {
     ctx.shadowOffsetY = 6
     ctx.fillStyle = doc.canvas.background
     ctx.beginPath()
-    ctx.roundRect(f.left, f.top, f.width, f.height, 10)
+    ctx.roundRect(f.left, f.top, f.width, f.height, PAGE_RADIUS)
     ctx.fill()
     ctx.restore()
     ctx.save()
+    // v0.1.4: clip ink to the page RECTANGLE. v0.1–v0.1.3 clipped to the
+    // rounded page shape (10 px radius), which hid ink drawn into the corners.
     ctx.beginPath()
-    ctx.roundRect(f.left, f.top, f.width, f.height, 10)
+    ctx.rect(f.left, f.top, f.width, f.height)
     ctx.clip()
     this.pageTransform(ctx, doc.canvas)
+    this.drawGuides(ctx, doc.canvas)
     for (const s of doc.strokes) {
       let p = this.cache.get(s)
       if (!p) this.cache.set(s, (p = outline(s, doc.canvas, true)))
@@ -239,6 +283,12 @@ export class CanvasRenderer {
     if (!doc) return
     if (this.active && this.active.points.length > 0) {
       ctx.save()
+      // Same clip as the finished ink, so live and final strokes look the same at the edges.
+      const f = this._fit
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
+      ctx.beginPath()
+      ctx.rect(f.left, f.top, f.width, f.height)
+      ctx.clip()
       this.pageTransform(ctx, doc.canvas)
       ctx.fillStyle = this.active.color
       ctx.fill(outline(this.active, doc.canvas, false))

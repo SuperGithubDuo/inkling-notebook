@@ -23,7 +23,7 @@ function TraceButton({ ctl, on, settings }: { ctl: WispController; on: boolean; 
   }, [rec, cam])
   if (!cam) return null
   const stop = () => {
-    const trace = cam.recorder.stop(undefined, { ...settings, version: '0.1.3' })
+    const trace = cam.recorder.stop(undefined, { ...settings, version: '0.1.4' })
     setRec(false)
     if (trace.frames.length === 0) return
     const blob = new Blob([JSON.stringify(trace)], { type: 'application/json' })
@@ -263,7 +263,12 @@ export function CameraPanel(p: Props) {
               </button>
             )}
             {p.settings.region && !calib && (
-              <button className="btn link sm" onClick={() => p.onSettings({ region: null })}>Reset to automatic</button>
+              <button className="btn link sm" onClick={() => (p.ctl.refitWritingArea(), p.onSettings({ region: null }))}>Reset to automatic</button>
+            )}
+            {!p.settings.region && !calib && (
+              <button className="btn link sm" onClick={() => p.ctl.refitWritingArea()} title="Measure your hand again so the whole page is reachable with your palm in view">
+                Fit to my hand
+              </button>
             )}
           </div>
         )}

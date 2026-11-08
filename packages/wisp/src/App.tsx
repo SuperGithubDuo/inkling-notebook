@@ -158,6 +158,18 @@ export function App() {
         onSettings={() => setShowSettings((v) => !v)}
         onHelp={() => setShowOnboarding(true)}
         settingsOpen={showSettings}
+        assist={settings.writingMode === 'assist'}
+        canTidy={doc.strokes.length >= 3 && !writing}
+        canRestore={doc.strokes.some((s) => s.assist) && !writing}
+        onTidy={() => {
+          const r = ctl.tidyLines()
+          const moved = r.straightened + r.aligned
+          setToast({ kind: 'ok', text: moved > 0 ? `Tidied ${moved} of ${r.lines} line${r.lines === 1 ? '' : 's'} (undo or Restore original to go back).` : `Nothing to tidy: ${r.lines} line${r.lines === 1 ? '' : 's'} already level, or too short to judge.` })
+        }}
+        onRestore={() => {
+          const n = ctl.restoreOriginal()
+          setToast({ kind: 'ok', text: `Restored ${n} stroke${n === 1 ? '' : 's'} to exactly where you wrote them.` })
+        }}
       />
       <div className="workspace">
         <main className="stage">

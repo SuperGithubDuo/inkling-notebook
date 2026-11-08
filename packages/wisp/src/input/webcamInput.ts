@@ -20,7 +20,7 @@ import type { NormPoint } from '../strokes/types'
 import { CameraError, cameraErrorFrom, openCamera, type CameraHandle } from '../tracking/camera'
 import { HandTracker, TrackerError } from '../tracking/handTracker'
 import type { Landmark } from '../tracking/landmarks'
-import { HandFrameProcessor, effectiveRegion, type ProcessorConfig } from './handFrameProcessor'
+import { HandFrameProcessor, type ProcessorConfig } from './handFrameProcessor'
 import type { GestureState } from '../gestures/gestureState'
 import { TraceRecorder } from '../replay/trace'
 
@@ -146,7 +146,14 @@ export class WebcamInput {
   }
 
   /** Starts camera and tracking. Safe to call repeatedly; concurrent calls collapse. */
+  /** Measure the hand again for the automatic writing area ("Fit writing area"). */
+  refit(): void {
+    this.processor.refit()
+  }
+
   async start(): Promise<void> {
+    // A new camera session: the hand may be at a different distance, so measure it again.
+    this.processor.refit()
     if (this.disposed || this.running) return
     const gen = ++this.generation
     this.abort = new AbortController()
@@ -362,7 +369,7 @@ export class WebcamInput {
     }
     this.overlay.landmarks = result.landmarks
     this.overlay.viewPoint = out.viewPoint
-    this.overlay.region = effectiveRegion(this.processor.config, videoAspect)
+    this.overlay.region = this.processor.region(videoAspect)
 
     if (this.calib) this.calibrationFrame(out.actions, out.viewPoint)
   }

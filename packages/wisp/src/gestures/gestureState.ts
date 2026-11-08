@@ -139,11 +139,14 @@ export const DEFAULT_GESTURE: GestureConfig = {
   baselineFollow: 0.05,
   noiseK: 4,
   initialNoise: 0.035,
-  suspectFraction: 0.5,
+  // v0.1.3 experiments, OFF by default since v0.1.4: v0.1.2's pen-up/pen-down
+  // behaviour was confirmed on a real webcam and is preserved exactly
+  // (tests/gestureGolden.test.ts). Enable for comparison in the replay harness.
+  suspectFraction: Infinity,
   suspectMs: 60,
   suspectMonotonic: false,
-  confirmRawJump: true,
-  onsetShapes: [1, 2]
+  confirmRawJump: false,
+  onsetShapes: [1]
 }
 
 interface Pending {

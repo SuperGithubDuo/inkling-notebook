@@ -2,7 +2,7 @@
 
 WISP lets you write in the air with your finger, using an ordinary laptop webcam. Pinch your thumb and index finger together to put the pen down, move, and open your fingers to lift it. Strokes are captured as structured vector data, ready to become an input mode inside Inkling Notebook.
 
-This is **v0.1.3**: a standalone, independently runnable prototype that lives inside the Inkling repository but has no dependency on Inkling's app code, and Inkling has none on it.
+This is **v0.1.4**: a standalone, independently runnable prototype that lives inside the Inkling repository but has no dependency on Inkling's app code, and Inkling has none on it.
 
 ## Goals
 
@@ -10,7 +10,7 @@ This is **v0.1.3**: a standalone, independently runnable prototype that lives in
 - Reliable stroke capture first: smooth, low-latency ink with clean stroke boundaries. Handwriting recognition comes later.
 - Everything runs locally in the browser. No backend, account, paid API or cloud inference. Camera frames are never recorded, stored or uploaded.
 
-## What works (v0.1.3)
+## What works (v0.1.4)
 
 | Area | Implemented |
 |---|---|
@@ -18,7 +18,8 @@ This is **v0.1.3**: a standalone, independently runnable prototype that lives in
 | Pen point | Virtual pen between the thumb and index fingertips (default), or the index fingertip |
 | Gestures | Orientation-aware pinch measurement (2D image ratio blended with a 3D ratio from MediaPipe world landmarks as the hand turns), tracking-quality indicator, early pen-up feedback (live ink pauses at the first sign of opening), glitch-resistant release; asymmetric pinch detection: deliberate pen-down (a real closing motion that has settled), fast pen-up (relative to your own pinch, velocity-aware, noise-adaptive), release-onset trimming by a hinge fit, re-arm protection against flicker, no writing when a hand enters already pinched or fingers merely drift close, tolerance of one-frame tracking gaps |
 | Ink | One continuous noise-gated One Euro filter for cursor and live ink, noise-scaled stabilizer, noise-matched zero-lag refinement of each finished stroke (glitch removal + Whittaker smoother), pen-down seeding, spike rejection and stroke splitting on confirmed jumps, distance-based resampling, raw positions kept beside smoothed ones, perfect-freehand rendering (same ink library as Inkling) |
-| Mapping | Page-normalized coordinates, automatic writing region that keeps circles round, writing sensitivity, optional two-pinch calibration, letterboxed page that keeps geometry on resize |
+| Mapping | Page-normalized coordinates; automatic writing region fitted to your hand so every page edge and corner is reachable with your palm in view (locked for the session); writing size Small / Medium / Large / Custom; optional two-pinch calibration; letterboxed page that keeps geometry on resize |
+| Writing Assist (optional) | Steady writing size when you lean in or back (distance-compensated writing plane from MediaPipe's 3D landmarks); toggleable baseline, x-height, uppercase and line-spacing guides; *Tidy lines* straightens slightly tilted lines as rigid wholes and is fully reversible (*Restore original*, undo) |
 | Editing | Pen colour and thickness, undo/redo, clear (undoable), JSON export/import with validation, PNG export |
 | Mouse mode | Mouse drives the same engine as the webcam (left button = pinch) for development and testing without a camera |
 | UI | Toolbar, camera panel with status, settings, onboarding, status pill, optional developer diagnostics (tracking FPS, inference time, frame interval, capture→pen-update latency, skipped frames, hand orientation quality, 3D share of the pinch, gesture state, pinch ratio/baseline/noise, trimmed points) and a trace recorder (landmarks + per-frame measurements + pen events + strokes, never video) |
@@ -50,6 +51,7 @@ The MediaPipe WASM runtime is copied from `node_modules` into `public/mediapipe/
 | `npm test` | Unit tests (Vitest) |
 | `npm run typecheck` | Strict TypeScript, no emit |
 | `npm run fetch-model` | Download the Hand Landmarker model into `public/models/` |
+| `npm run layout` | Layout harness (v0.1.4): letter-size consistency, baseline, tilt, notation geometry and edge reach for each mapping on physical-writing scenes (`--seeds 6`, `--profile model`, `--json`) |
 | `npm run replay` | Replay harness: 13 synthetic scenarios (`--profile webcam|model`, `--noise 1.5`, `--fps 20`, `--compare smoothing=0.3,0.5,0.8`, `--html out.html` to draw the strokes, `--json`), or a recorded trace (`npm run replay -- trace.json --compare releaseSensitivity=0.8,1,1.2 --html out.html`) |
 
 Camera access requires a secure origin; `localhost` counts, so `dev` and `preview` both work.
@@ -75,14 +77,14 @@ Tips: good front lighting helps more than anything else. Keep your palm roughly 
 src/
   tracking/     camera.ts (getUserMedia + errors) · handTracker.ts (MediaPipe wrapper) · landmarks.ts (pure geometry)
   gestures/     pinchDetector.ts (hysteresis) · gestureState.ts (state machine)
-  strokes/      types.ts (data model) · coordinates.ts · smoothing.ts · strokeEngine.ts · documentStore.ts (undo/redo) · serialization.ts
+  strokes/      types.ts (data model) · coordinates.ts · writingPlane.ts (hand-fitted region, steady scale) · layout.ts (guides, Tidy lines) · smoothing.ts · strokeEngine.ts · documentStore.ts (undo/redo) · serialization.ts
   input/        handFrameProcessor.ts (landmarks → engine, pure) · webcamInput.ts (camera + tracker + loop) · mouseInput.ts
   canvas/       renderer.ts (Canvas 2D, two layers)
   core/         wispController.ts (wiring) · settings.ts · emitter.ts
   integration/  types.ts (public events) · inklingAdapter.ts (sketch, not wired)
-  replay/       trace.ts (landmark traces, recorder) · synth.ts (synthetic hands + noise model) · scenarios.ts (tests A–F) · replay.ts (pipeline replay + metrics)
+  replay/       trace.ts (landmark traces, recorder) · hand3d.ts (3D hand + camera) · synth.ts (synthetic hands + noise model) · scenarios.ts · replay.ts (pipeline replay + metrics) · font.ts · layout.ts · layoutScenes.ts · boundary.ts (v0.1.4 layout harness)
   components/   React UI
-scripts/        replay.ts (npm run replay) · fetch-model.mjs · copy-wasm.mjs
+scripts/        replay.ts (npm run replay) · layout.ts (npm run layout) · fetch-model.mjs · copy-wasm.mjs
 tests/          Vitest suites for all pure logic, including replay-harness regressions
 ```
 
@@ -109,7 +111,89 @@ Key boundaries:
 - **Inference is separate from rendering and React.** The tracking loop runs on `requestVideoFrameCallback` (one inference per new camera frame; `requestAnimationFrame` + `currentTime` check as fallback). Strokes reach the canvas through engine events; the canvas redraws on the next animation frame only when something changed. React only hears low-frequency events (gesture state, stroke start/end) and polls diagnostics 4×/s.
 - **Editing is separate from rendering.** `DocumentStore` holds the document and an operation history; the renderer just draws whatever document it's given.
 
-## v0.1.3: hand orientation, pen-up feedback, fast writing
+## v0.1.4: canvas edges, steady writing size, alignment
+
+**All measurements below are from synthetic traces (a modelled hand, modelled noise, a modelled camera). None is a real-webcam measurement.** Your new traces did not reach this session; replay them with `npm run replay -- trace.json` when available.
+
+Pen-down / pen-up behaviour is **exactly v0.1.2's** (the version you tested). v0.1.3's gesture experiments are kept but off by default, and `tests/gestureGolden.test.ts` checks that the defaults make the same pen-down and pen-up decisions, to 0.1 ms, as v0.1.2's code on 72 traces.
+
+### 1. The canvas boundary bug
+
+**Cause (main).** The pen is the thumb–index midpoint, but MediaPipe tracks the hand by its **palm**, and the wrist sits about a quarter of the frame height *below* the pen (hand at 45 cm). v0.1–v0.1.3 put the writing region in the middle of the camera view, covering 70 % of its height. To reach the bottom page edge, the pen had to go 85 % of the way down the frame, which pushed the wrist out of the picture, so tracking failed before the ink got there. The same happens near the side the palm extends to, and when the hand is close to the camera.
+
+**Fix.** WISP now measures where your palm is relative to the pen during the first second of hovering (or at the first pen-down), then fits the writing region inside the area where the pen can go while the palm stays in view (3 % margin), with the page's aspect ratio. The region is then **locked** for the session, so the mapping never shifts while you write; *Fit to my hand* (camera panel) measures again. A two-corner calibration still overrides it.
+
+**Smaller causes found and fixed:**
+- Finished ink was clipped to the page's *rounded* corners (10 px radius), so ink in the corners disappeared. Ink is now clipped to the exact rectangle (corner radius 2 px), and the live stroke uses the same clip, so live and final ink look the same at the edges.
+- The pen-up smoother could push a stroke drawn along an edge slightly off the page (e.g. y = 1.0007). An exported file then **failed to re-import** ("must be between 0 and 1"). Refined points are now kept on the page.
+
+**Checked and found correct:** canvas backing-store size and device-pixel-ratio scaling, pointer → page transform (the margin around the page clamps to the edge), coordinate clamping (exact 0 and 1 are reachable), resizing (page aspect kept, round-trip exact). Mouse mode could already reach every edge.
+
+| Edge reach (gap in page px; webcam noise, 6 runs) | top | bottom | left | right | corners | frames without tracking |
+|---|---|---|---|---|---|---|
+| v0.1.3 (centred region) | 0 | **108** | 0 | 0 | 2 / 4 | 207 |
+| v0.1.4 | 0 | **0** | 0 | 0 | **4 / 4** | 5 |
+
+In the browser (mouse, 1× and 2× pixel ratio, after resizing): strokes reach x and y = 0 and 1 exactly, ink is visible in all four corners and along all four edges.
+
+### 2. Was an ML model needed? No.
+
+| Approach | Verdict |
+|---|---|
+| A. MediaPipe image + 3D world landmarks | **Used.** World landmarks give the hand's shape and orientation (not its position). Comparing image palm size with world palm size gives a distance measurement that does not change when the hand turns (±2 % in the model; up to ~10 % with fingers pointing at the camera). |
+| B. Learned landmarks → stable pen position | Not built. It would need recordings with ground-truth pen positions, which don't exist. An untrained model cannot be claimed to help. |
+| C. Adaptive filtering / motion prediction | Already in place (One Euro + refinement). Prediction would cut lag but overshoots at corners; not needed for size or alignment. |
+| D. Learned trajectory normalization | Not built: needs labelled handwriting. The deterministic plane (below) fixes the main cause of size changes (perspective) exactly. |
+| E. Recognition-based normalization | Not built. It would reshape letters by guessing what they are, wrongly for maths, and needs a large model. Kept for the later recognition work. |
+
+The two real causes of inconsistent size and alignment are geometric: perspective (closer hand = bigger letters) and a fixed mapping in the image. Both have exact, deterministic solutions.
+
+### 3. Steady writing size (Writing Assist): the virtual writing plane
+
+- Each frame (pen up only), WISP estimates the hand's image scale: the image spread of the palm divided by its 3D world spread, corrected from palm to pen depth. Seeing the hand from an angle shrinks both by the same factor, so the ratio depends only on distance.
+- The scale is smoothed (0.5 s), rate-limited (≤ 60 %/s) and **frozen while the pen is down**, so a stroke is always drawn at one scale. It is held while the hand is turned more than 20° away from how it was held at the start: the measurement has a small orientation bias, and that bias would otherwise move the writing.
+- The writing region is zoomed about the camera's optical centre by (current scale ÷ scale when the region was fitted). For a writing surface facing the camera this is the exact perspective correction. The same hand movement then gives the same page movement at any distance, and positions stay put, not only sizes.
+- Needs world landmarks (MediaPipe provides them). Natural Writing doesn't use this.
+
+**Writing size** (Settings → Writing): Small 0.8×, Medium 1×, Large 1.25×, or Custom 0.5–2×. This sets the gain between hand movement and page movement; finished strokes are never resized. Below Medium the page is bigger than the area your hand can reach in the camera, so its outer edges can't be reached (the settings say so).
+
+### 4. Alignment: guides and Tidy lines
+
+- **Guides** (toggleable): baselines, a dashed lowercase x-height line, an uppercase-height line, and line-spacing bands. Their spacing follows the writing size. They are an on-screen aid only: not exported, never move ink.
+- **Tidy lines** (Writing Assist toolbar, manual):
+  - Finds each line of writing. A new line starts with a carriage return or a stroke clear of the line's vertical band, so fractions, roots, integrals, superscripts and subscripts stay on their line.
+  - Estimates the line's baseline robustly from stroke bottoms, dropping descenders, subscripts, superscripts and fraction parts.
+  - Rotates the **whole line rigidly** about its start, and optionally moves it onto the nearest guide.
+  - It acts only when the tilt is clearly measured (> 2 jackknife standard errors), between 1.5° and 10°, and at least half the line's strokes agree on the baseline. Otherwise the line is left exactly as written; maths-dense lines usually are.
+  - It never snaps points to a line, never resizes, and never pushes ink off the page.
+- **Reversible:** every moved stroke stores the transform (`assist`). *Restore original* inverts it exactly, and undo works too.
+- **Letter size is not normalized after writing.** Without recognising which strokes are letters, superscripts or fraction parts, a size estimate would shrink maths and enlarge short words. Size consistency comes from the steady writing plane instead.
+
+### 5. Measurements (layout harness, `npm run layout -- --seeds 6`)
+
+The writer writes letters of a fixed physical size (1.4 cm x-height) on a surface in front of the camera. Every mapping gets the same writing and the same noise, placed on the page that mapping shows. Webcam-like noise:
+
+| Scene | Metric | v0.1.3 | Natural v0.1.4 | Writing Assist | + Tidy lines |
+|---|---|---|---|---|---|
+| "hello" ×2 on 3 lines at 45 / 37 / 56 cm | letter-size spread (CV) | 22.2 % | 22.2 % | **5.1 %** | 5.1 % |
+| | largest ÷ smallest word | 1.72 | 1.70 | **1.14** | 1.14 |
+| Leaning in 42 → 52 cm across one line | size spread | 13.0 % | 12.7 % | **5.6 %** | 5.5 % |
+| | line tilt | 4.0° | 8.5° | **0.35°** | 0.5° |
+| Turning the hand (facing / 40° / tilted up) | size spread · baseline steps | 3.9 % · 1.7 px | 4.9 % · 2.2 px | 4.9 % · 2.1 px | same |
+| Arm sinking 1.2 mm/s, two lines | line tilt | 4.8° | 4.8° | 4.8° | **0.42°** |
+| Maths: x², fraction, √x, ∫x₁, Σₙ | notation size / position error* | 0.21 / 0.26 | 0.20 / 0.22 | 0.20 / 0.22 | **unchanged** |
+| All | live cursor vs final ink | 14 px | 17 px | 17 px | — |
+| All | pipeline time per frame | 0.013 ms | 0.010 ms | 0.011 ms | — |
+
+\* How far each superscript, subscript, denominator or root sign is from where the main text predicts, relative to its size / in main-letter heights. Tidy lines changes it by < 0.01 (rigid motion). The remaining error comes from tracking noise and smoothing on small strokes, and is the same in every version. On the gentle noise model it is 0.07 / 0.10.
+
+**Costs, stated plainly:**
+- The fitted region is ~25 % smaller in the camera image than the old centred one, so at Medium the same hand movement makes writing **~1.33× larger** on the page than v0.1.3 (x-height 60 → 80 px in these scenes). Choose *Small* for the old size, at the cost of the page edges.
+- Natural Writing tilts more when you lean while writing (8.5° vs 4°), because the region now sits higher in the image, away from the optical centre where perspective shifts are smallest. Writing Assist removes it (0.35°).
+- Tidy lines can add up to ~0.5° to a line that was already level (estimation noise on short lines).
+- In Writing Assist, a hand turned more than 20° from its starting orientation keeps the last scale, so leaning in *while* the hand is turned is not compensated.
+
+## v0.1.3: hand orientation, pen-up feedback, fast writing (gesture parts now opt-in)
 
 **Everything below is measured on synthetic traces from a modelled hand and modelled noise. None of it is a real-webcam measurement.** The screenshot and traces mentioned in the v0.1.3 brief were not received; real traces are the next step.
 
@@ -322,11 +406,11 @@ Dashes miss slightly more ink because the more deliberate pen-down occasionally 
 | **Page** | **[0,1]² over the page, origin top-left, y down. The only space strokes are stored in.** |
 | Screen | CSS pixels; the page is letterboxed into the canvas |
 
-The page has a fixed logical size (default 1600 × 1000). Pen width is stored in logical page pixels. The default writing region is centred in the camera view, covers 70% of it in its limiting dimension and has the page's aspect ratio *in camera pixels*, so a circle drawn in the air stays a circle on the page.
+The page has a fixed logical size (default 1600 × 1000). Pen width is stored in logical page pixels. The default writing region (v0.1.4) has the page's aspect ratio *in camera pixels*, so a circle drawn in the air stays a circle. It is fitted inside the area where the pen can go with your palm still in the camera frame, measured from your hand and then locked (see v0.1.4 above). v0.1–v0.1.3 centred it at 70 % of the view. In Writing Assist it is also zoomed about the camera's optical centre as you lean in or back.
 
 ## Stroke data format
 
-Unchanged in v0.1.3 (`wisp.strokes` version 1); files from v0.1–v0.1.2 import as before. Page coordinates are unchanged too: world landmarks are used only to measure the pinch and the hand's orientation, never for the pen position.
+Still `wisp.strokes` version 1; files from every earlier version import as before. v0.1.4 adds one **optional** stroke field, `assist: { a, b, tx, ty }`: the rigid transform (page px) *Tidy lines* applied, so the original can be restored. Strokes that were never tidied serialize exactly as before; older WISP versions ignore the field and show the tidied ink. Page coordinates are unchanged too: world landmarks are used only to measure the pinch and the hand's orientation, never for the pen position.
 
 ```jsonc
 {
@@ -376,7 +460,7 @@ Nothing in Inkling has been changed for this yet.
 
 ## Testing
 
-`npm test` runs 197 unit tests (v0.1.3 adds 21: 3D ratio invariance and fallbacks, orientation quality and blending, live-ink pause and identical decisions, glitch confirmation, quadratic onset, robust noise level, fast-loop refinement, orientation scenarios, trace v3, settings). They cover:
+`npm test` runs 291 unit tests (v0.1.4 adds 72 gesture-golden cases and 22 boundary/plane/layout tests; earlier: 197 (v0.1.3 adds 21: 3D ratio invariance and fallbacks, orientation quality and blending, live-ink pause and identical decisions, glitch confirmation, quadratic onset, robust noise level, fast-loop refinement, orientation scenarios, trace v3, settings)). They cover:
 - **Gestures:** pinch thresholds and asymmetry; deliberate pen-down (drifting fingers don't start ink); pen-up cases (rapid, slow, small and fast openings, noisy measurements, re-pinch); hinge-fit trimming (quick release trims nothing, slow release trims the ramp); tracking gaps before and during writing.
 - **Smoothing:** the Whittaker solver against a dense reference; glitch removal; noise estimation; noise-matched refinement (straightens noisy ticks without shortening them, keeps loops round); the noise-gated filter.
 - **Ink and data:** the midpoint and mirroring; the continuous filter and seeding; pinch depth weight; trace v2 recording and parsing; serialization round-trips and invalid input; settings migration; undo/redo; the Inkling adapter.
@@ -422,6 +506,9 @@ Never video. Replay it with: `npm run replay -- wisp-trace-….json --compare re
 - **Main-thread tracking.** Inference runs on the main thread; the diagnostics now show whether that costs frames.
 - **3D pinch is modelled, not verified.** World-landmark noise in the replay model is an assumption (`--world-noise`).
 - **Pen-up decision.** Lifting a little (fingers just separating) still takes ~4 frames to decide on a facing hand; live ink stops sooner, but the decision does not.
+- **Edge reach depends on your camera.** The fitted region assumes MediaPipe loses the hand when the palm leaves the frame; if your camera tracks partly-visible hands, *Set writing area* can make it larger.
+- **Writing size** is about 1.33× larger at Medium than in v0.1.3 (smaller fitted region); use Small for the old size.
+- **Steady size needs a consistent hand pose**; turning the hand > 20° holds the last scale.
 - **Very short fast dashes** lose about a third of their length (≈ one frame of motion at each end).
 - One hand only; uniform stroke width; timestamps are relative within a file; the calibrated area is stored in view space; no eraser yet.
 

@@ -47,6 +47,13 @@ export interface Stroke {
   source: InputSource
   startedAt: number
   endedAt: number
+  /**
+   * Writing Assist (v0.1.4, optional): the similarity transform applied to
+   * this stroke's points by "Tidy lines", in page pixels
+   * (x' = a·x − b·y + tx, y' = b·x + a·y + ty). The original stroke is the
+   * inverse transform of `points`; see strokes/layout.ts. Absent = as written.
+   */
+  assist?: { a: number; b: number; tx: number; ty: number }
 }
 
 export interface CanvasMeta {

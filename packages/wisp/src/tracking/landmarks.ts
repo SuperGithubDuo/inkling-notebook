@@ -5,10 +5,12 @@
 
 export const LM = {
   WRIST: 0,
+  THUMB_CMC: 1,
   THUMB_TIP: 4,
   INDEX_MCP: 5,
   INDEX_TIP: 8,
   MIDDLE_MCP: 9,
+  RING_MCP: 13,
   PINKY_MCP: 17
 } as const
 

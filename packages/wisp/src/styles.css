@@ -247,3 +247,4 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
 .trace { display: grid; gap: 6px; margin-top: 8px; }
 .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); animation: rec 1s ease-in-out infinite; }
 @keyframes rec { 50% { opacity: 0.3; } }
+.sub-toggles { margin: -2px 0 6px 12px; padding-left: 10px; border-left: 2px solid var(--line); }

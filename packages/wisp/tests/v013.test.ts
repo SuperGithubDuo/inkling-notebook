@@ -3,6 +3,9 @@
  * early pen-up feedback, glitch-resistant release, faithful fast writing,
  * trace v3. Synthetic only — these prove the logic on MODELLED input, not
  * real-webcam accuracy.
+ *
+ * Since v0.1.4 the gesture features here are opt-in (v0.1.2's behaviour is
+ * the default), so the tests enable them explicitly.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { GestureStateMachine, type GestureAction } from '../src/gestures/gestureState'
@@ -65,10 +68,13 @@ describe('3D pinch ratio and hand orientation', () => {
 })
 
 // ── Gesture timing ─────────────────────────────────────────────────────────
+/** The v0.1.3 gesture options (off by default since v0.1.4). */
+const V013 = { suspectFraction: 0.5, confirmRawJump: true, onsetShapes: [1, 2] }
+const V013_REPLAY = { gesture: V013, processor: { pinchMetric: 'auto' as const } }
 const hand = (r: number, x = 0.5) => ({ x, y: 0.5, pinchRatio: r, confidence: 1 })
 /** Drives the state machine to 'writing' at ratio 0.15 with a clean signal. */
 function writing(): { g: GestureStateMachine; t: number; feed: (r: number) => GestureAction[] } {
-  const g = new GestureStateMachine({ initialNoise: 0.005 })
+  const g = new GestureStateMachine({ initialNoise: 0.005, ...V013 })
   let t = 0
   const feed = (r: number) => g.update({ t: (t += 33), hand: hand(r, 0.3 + t / 10000) })
   for (let i = 0; i < 6; i++) feed(0.8)
@@ -100,8 +106,8 @@ describe('early pen-up feedback (release suspect)', () => {
     setNoiseProfile('webcam')
     for (const id of ['B-hello', 'A-slow-line', 'P2-gentle-lift-hello']) {
       const { trace } = SCENARIOS.find((s) => s.id === id)!.build(2)
-      const a = replay(trace)
-      const b = replay(trace, { gesture: { suspectFraction: 99 } })
+      const a = replay(trace, V013_REPLAY)
+      const b = replay(trace, { ...V013_REPLAY, gesture: { ...V013, suspectFraction: 99 } })
       expect(a.endDecisions).toEqual(b.endDecisions)
     }
     setNoiseProfile('model')
@@ -113,8 +119,8 @@ describe('early pen-up feedback (release suspect)', () => {
     let off = 0
     for (let seed = 1; seed <= 4; seed++) {
       const { trace, truth } = SCENARIOS.find((s) => s.id === 'P2-gentle-lift-hello')!.build(seed)
-      const a = replay(trace)
-      const b = replay(trace, { gesture: { suspectFraction: 99 } })
+      const a = replay(trace, V013_REPLAY)
+      const b = replay(trace, { ...V013_REPLAY, gesture: { ...V013, suspectFraction: 99 } })
       on += score(a, truthStrokes(truth, a.config, trace.videoAspect)).liveTail
       off += score(b, truthStrokes(truth, b.config, trace.videoAspect)).liveTail
     }
@@ -214,10 +220,10 @@ describe('orientation scenarios (modelled webcam noise, 3D model)', () => {
   })
   afterAll(() => setNoiseProfile('model'))
 
-  it('repositioning with the fingers toward the camera draws nothing', () => {
+  it("repositioning with the fingers toward the camera draws nothing (opt-in 'auto' metric)", () => {
     for (let seed = 1; seed <= 4; seed++) {
       const { trace, truth } = SCENARIOS.find((s) => s.id === 'O10-reposition-toward')!.build(seed)
-      const r = replay(trace)
+      const r = replay(trace, V013_REPLAY)
       expect(score(r, truthStrokes(truth, r.config, trace.videoAspect)).strokes).toBe(0)
     }
   })
@@ -228,7 +234,7 @@ describe('orientation scenarios (modelled webcam noise, 3D model)', () => {
     for (let seed = 1; seed <= 4; seed++) {
       const { trace, truth } = SCENARIOS.find((s) => s.id === 'O3-toward')!.build(seed)
       for (const [metric, add] of [['auto', (v: number) => (auto += v)], ['2d', (v: number) => (flat += v)]] as const) {
-        const r = replay(trace, { processor: { pinchMetric: metric } })
+        const r = replay(trace, { gesture: V013, processor: { pinchMetric: metric } })
         const s = score(r, truthStrokes(truth, r.config, trace.videoAspect))
         add(s.broken + s.unintended + s.lost)
       }
@@ -259,9 +265,9 @@ describe('trace v3 and settings', () => {
     expect(d).toMatchObject({ r2: 0.21, r3: 0.2, q: 'reduced', dt: 33.3, inf: 9.1, age: 41.3 })
   })
 
-  it('pinch measurement setting is validated and defaults to auto', () => {
-    expect(sanitizeSettings({}).pinchMetric).toBe('auto')
-    expect(sanitizeSettings({ pinchMetric: '2d' }).pinchMetric).toBe('2d')
-    expect(sanitizeSettings({ pinchMetric: 'bogus' }).pinchMetric).toBe('auto')
+  it('pinch measurement setting is validated and defaults to 2d (v0.1.2 behaviour)', () => {
+    expect(sanitizeSettings({}).pinchMetric).toBe('2d')
+    expect(sanitizeSettings({ pinchMetric: 'auto' }).pinchMetric).toBe('auto')
+    expect(sanitizeSettings({ pinchMetric: 'bogus' }).pinchMetric).toBe('2d')
   })
 })

@@ -25,6 +25,10 @@ export const REPLAY_PROCESSOR: ProcessorConfig = {
   releaseSensitivity: 1,
   penPoint: 'midpoint',
   region: null,
+  // The v0.1–v0.1.3 scenarios place the pen anywhere in the frame (they do not
+  // model the palm leaving it), so they keep the old centred region. The
+  // v0.1.4 layout scenarios use the hand-fitted region (replay/layout.ts).
+  regionFit: 'centred',
   pageAspect: 1.6
 }
 

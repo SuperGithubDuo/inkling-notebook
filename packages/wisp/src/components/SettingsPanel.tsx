@@ -1,5 +1,5 @@
 import { X } from 'lucide-react'
-import { DEFAULT_SETTINGS, type WispSettings } from '../core/settings'
+import { DEFAULT_SETTINGS, WRITING_SCALES, scalePreset, type WispSettings } from '../core/settings'
 
 interface Props {
   settings: WispSettings
@@ -44,16 +44,65 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
       </div>
 
       <h3>Writing</h3>
-      <Slider
-        label="Writing sensitivity"
-        hint="Higher: smaller hand movements cover the page."
-        value={s.writingSensitivity}
-        min={0.5}
-        max={2}
-        step={0.05}
-        format={times}
-        onChange={(v) => onChange({ writingSensitivity: v })}
-      />
+      <label className="field">
+        <span className="field-head">
+          <span>Mode</span>
+        </span>
+        <select value={s.writingMode} onChange={(e) => onChange({ writingMode: e.target.value === 'assist' ? 'assist' : 'natural' })}>
+          <option value="natural">Natural Writing — follows your hand exactly</option>
+          <option value="assist">Writing Assist — steady size, guides, tidy lines</option>
+        </select>
+        <span className="hint">
+          {s.writingMode === 'assist'
+            ? 'Keeps the same hand movement the same size on the page when you lean in or back (needs a webcam). Tidy lines is in the toolbar; nothing changes your writing unless you press it.'
+            : 'Your writing appears exactly as you move. Writing Assist can keep the size steady when you change distance.'}
+        </span>
+      </label>
+      <label className="field">
+        <span className="field-head">
+          <span>Writing size</span>
+          <span className="value">{times(s.writingSensitivity)}</span>
+        </span>
+        <select
+          value={scalePreset(s.writingSensitivity)}
+          onChange={(e) => {
+            const v = e.target.value as keyof typeof WRITING_SCALES | 'custom'
+            if (v !== 'custom') onChange({ writingSensitivity: WRITING_SCALES[v] })
+            else onChange({ writingSensitivity: s.writingSensitivity === 1 ? 1.1 : s.writingSensitivity })
+          }}
+        >
+          <option value="small">Small</option>
+          <option value="medium">Medium</option>
+          <option value="large">Large</option>
+          <option value="custom">Custom</option>
+        </select>
+        <span className="hint">
+          How far the pen moves on the page for the same hand movement.{' '}
+          {s.writingSensitivity < 1 ? 'Below Medium the page is bigger than the area your hand can reach in the camera, so the outer edges can’t be reached.' : 'At Medium and above every edge of the page is reachable.'}
+        </span>
+      </label>
+      {scalePreset(s.writingSensitivity) === 'custom' && (
+        <Slider
+          label="Custom size"
+          hint="Higher: bigger writing for the same hand movement."
+          value={s.writingSensitivity}
+          min={0.5}
+          max={2}
+          step={0.05}
+          format={times}
+          onChange={(v) => onChange({ writingSensitivity: v })}
+        />
+      )}
+      <Toggle label="Writing guides" checked={s.showGuides} onChange={(v) => onChange({ showGuides: v })} />
+      {s.showGuides && (
+        <div className="sub-toggles">
+          <Toggle label="Baselines" checked={s.guideBaseline} onChange={(v) => onChange({ guideBaseline: v })} />
+          <Toggle label="Lowercase (x-height) line" checked={s.guideXHeight} onChange={(v) => onChange({ guideXHeight: v })} />
+          <Toggle label="Uppercase height line" checked={s.guideCapHeight} onChange={(v) => onChange({ guideCapHeight: v })} />
+          <Toggle label="Line spacing bands" checked={s.guideLineSpacing} onChange={(v) => onChange({ guideLineSpacing: v })} />
+          <p className="hint-text">Guides are only a visual aid: they are not saved in exports and never move your strokes.</p>
+        </div>
+      )}
       <Slider
         label="Stroke smoothing"
         hint="Higher: steadier lines but slower to follow quick details. 0 turns it off."
@@ -113,11 +162,11 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
         </span>
         <select
           value={s.pinchMetric}
-          onChange={(e) => onChange({ pinchMetric: e.target.value === '2d' ? '2d' : e.target.value === '3d' ? '3d' : 'auto' })}
+          onChange={(e) => onChange({ pinchMetric: e.target.value === 'auto' ? 'auto' : e.target.value === '3d' ? '3d' : '2d' })}
         >
-          <option value="auto">Automatic (3D when the hand is turned)</option>
-          <option value="3d">Always 3D hand shape</option>
-          <option value="2d">Camera image only (v0.1.2)</option>
+          <option value="2d">Camera image (default)</option>
+          <option value="auto">Experimental: 3D when the hand is turned</option>
+          <option value="3d">Experimental: always 3D hand shape</option>
         </select>
       </label>
 

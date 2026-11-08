@@ -16,6 +16,7 @@ import { DocumentStore } from '../strokes/documentStore'
 import { parseDocument, serializeDocument, type ParseResult } from '../strokes/serialization'
 import { StrokeEngine } from '../strokes/strokeEngine'
 import { createDocument, type PenStyle } from '../strokes/types'
+import { guideLines, restoreOriginal, tidyLines, type TidyReport } from '../strokes/layout'
 import type { WispSettings } from './settings'
 
 export type InputMode = 'webcam' | 'mouse'
@@ -70,9 +71,51 @@ export class WispController {
       penPoint: this.settings.penPoint,
       pinchMetric: this.settings.pinchMetric,
       region: this.settings.region,
+      keepScale: this.settings.writingMode === 'assist',
       pageAspect: this.store.document.canvas.width / this.store.document.canvas.height
     })
     if (this._mode === 'mouse') this.mouse.attach()
+    this.applyGuides()
+  }
+
+  /** Guides follow the writing scale, so ruled lines match the size the mapping produces. */
+  private guides() {
+    return guideLines(this.store.document.canvas, this.settings.writingSensitivity)
+  }
+
+  private applyGuides(): void {
+    const s = this.settings
+    this.renderer?.setGuides(
+      s.showGuides ? { ...this.guides(), baseline: s.guideBaseline, xHeightLine: s.guideXHeight, capLine: s.guideCapHeight, lineSpacing: s.guideLineSpacing } : null
+    )
+  }
+
+  /**
+   * Writing Assist: straighten slightly tilted lines and, with guides shown,
+   * align them to the nearest ruled line. Whole lines move rigidly; nothing is
+   * resized; reversible (undo, or restoreOriginal). See strokes/layout.ts.
+   */
+  tidyLines(): TidyReport {
+    this.engine.end('stopped')
+    const doc = this.store.document
+    const g = this.settings.showGuides && this.settings.guideBaseline ? this.guides() : null
+    const { strokes, report } = tidyLines(doc.strokes, doc.canvas, { guides: g ? { firstBaseline: g.baselines[0]!, pitch: g.pitch } : null })
+    if (report.straightened + report.aligned > 0) this.store.replace({ ...doc, strokes, updatedAt: Date.now() })
+    return report
+  }
+
+  /** Puts every tidied stroke back exactly where it was written. Returns how many moved. */
+  restoreOriginal(): number {
+    this.engine.end('stopped')
+    const doc = this.store.document
+    const n = doc.strokes.filter((s) => s.assist).length
+    if (n > 0) this.store.replace({ ...doc, strokes: restoreOriginal(doc.strokes, doc.canvas), updatedAt: Date.now() })
+    return n
+  }
+
+  /** Measure the hand again for the automatic writing area. */
+  refitWritingArea(): void {
+    this.webcam?.refit()
   }
 
   setMode(mode: InputMode): void {
@@ -108,8 +151,10 @@ export class WispController {
       releaseSensitivity: s.releaseSensitivity,
       penPoint: s.penPoint,
       pinchMetric: s.pinchMetric,
-      region: s.region
+      region: s.region,
+      keepScale: s.writingMode === 'assist'
     })
+    this.applyGuides()
   }
 
   setPen(pen: Partial<PenStyle>): void {

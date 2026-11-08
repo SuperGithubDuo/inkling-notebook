@@ -2,14 +2,34 @@
 import type { WritingRegion } from '../strokes/coordinates'
 
 export type PenPoint = 'midpoint' | 'index'
+/** Natural Writing follows the hand faithfully; Writing Assist adds a steady writing scale and layout help (v0.1.4). */
+export type WritingMode = 'natural' | 'assist'
+/** Writing scale presets: values of writingSensitivity (hand movement → page movement gain). */
+export const WRITING_SCALES = { small: 0.8, medium: 1, large: 1.25 } as const
+export type WritingScalePreset = keyof typeof WRITING_SCALES | 'custom'
+export function scalePreset(v: number): WritingScalePreset {
+  for (const [k, s] of Object.entries(WRITING_SCALES)) if (Math.abs(v - s) < 1e-6) return k as WritingScalePreset
+  return 'custom'
+}
 /** Which pinch distance lifts and lowers the pen (v0.1.3); see input/handFrameProcessor.ts. */
 export type PinchMetric = 'auto' | '3d' | '2d'
 
 export interface WispSettings {
   /** Selfie-style preview and movement (move right → cursor right). */
   mirror: boolean
-  /** 0.5–2. Higher = less hand movement to cover the page. */
+  /**
+   * Writing scale, 0.5–2 (Small 0.8, Medium 1, Large 1.25): how far the pen
+   * moves on the page for a given hand movement. Higher = bigger writing.
+   */
   writingSensitivity: number
+  /** v0.1.4: Natural Writing (default) or Writing Assist. */
+  writingMode: WritingMode
+  /** v0.1.4 writing guides (page overlay only; never exported). */
+  showGuides: boolean
+  guideBaseline: boolean
+  guideXHeight: boolean
+  guideCapHeight: boolean
+  guideLineSpacing: boolean
   /** 0–1. One Euro smoothing strength. */
   smoothing: number
   /** 0–1. Stabilizer (lazy-pen radius) for webcam input. */
@@ -25,7 +45,7 @@ export interface WispSettings {
   showDiagnostics: boolean
   /** Which point writes: between thumb and index tips (default), or the index fingertip. */
   penPoint: PenPoint
-  /** Pinch measurement: 'auto' blends 2D and 3D by hand orientation (default). */
+  /** Pinch measurement: '2d' (default, v0.1.2 behaviour); 'auto' blends in 3D as the hand turns (experimental). */
   pinchMetric: PinchMetric
   /** Calibrated writing area in view space; null = automatic. */
   region: WritingRegion | null
@@ -34,6 +54,12 @@ export interface WispSettings {
 export const DEFAULT_SETTINGS: WispSettings = {
   mirror: true,
   writingSensitivity: 1,
+  writingMode: 'natural',
+  showGuides: false,
+  guideBaseline: true,
+  guideXHeight: true,
+  guideCapHeight: false,
+  guideLineSpacing: false,
   smoothing: 0.5,
   stabilizer: 0.25,
   refine: true,
@@ -43,7 +69,7 @@ export const DEFAULT_SETTINGS: WispSettings = {
   showLandmarks: true,
   showDiagnostics: false,
   penPoint: 'midpoint',
-  pinchMetric: 'auto',
+  pinchMetric: '2d',
   region: null
 }
 
@@ -73,6 +99,12 @@ export function sanitizeSettings(raw: unknown): WispSettings {
   return {
     mirror: bool(r.mirror, d.mirror),
     writingSensitivity: num(r.writingSensitivity, 0.5, 2, d.writingSensitivity),
+    writingMode: r.writingMode === 'assist' ? 'assist' : 'natural',
+    showGuides: bool(r.showGuides, d.showGuides),
+    guideBaseline: bool(r.guideBaseline, d.guideBaseline),
+    guideXHeight: bool(r.guideXHeight, d.guideXHeight),
+    guideCapHeight: bool(r.guideCapHeight, d.guideCapHeight),
+    guideLineSpacing: bool(r.guideLineSpacing, d.guideLineSpacing),
     smoothing: num(r.smoothing, 0, 1, d.smoothing),
     stabilizer: num(r.stabilizer, 0, 1, d.stabilizer),
     refine: bool(r.refine, d.refine),
@@ -82,7 +114,7 @@ export function sanitizeSettings(raw: unknown): WispSettings {
     showLandmarks: bool(r.showLandmarks, d.showLandmarks),
     showDiagnostics: bool(r.showDiagnostics, d.showDiagnostics),
     penPoint: r.penPoint === 'index' ? 'index' : 'midpoint',
-    pinchMetric: r.pinchMetric === '2d' || r.pinchMetric === '3d' ? r.pinchMetric : 'auto',
+    pinchMetric: r.pinchMetric === 'auto' || r.pinchMetric === '3d' ? r.pinchMetric : '2d',
     region
   }
 }

@@ -32,6 +32,7 @@ export function serializeDocument(doc: WispDocument, pretty = false): string {
       source: s.source,
       startedAt: s.startedAt,
       endedAt: s.endedAt,
+      ...(s.assist ? { assist: { ...s.assist } } : {}),
       points: s.points.map((p) => {
         const q: StrokePoint = { x: r6(p.x), y: r6(p.y), t: p.t }
         if (p.confidence !== undefined) q.confidence = p.confidence
@@ -128,7 +129,14 @@ function validate(data: unknown): { doc: WispDocument; warnings: string[] } {
     const id = typeof so.id === 'string' && ID.test(so.id) ? so.id : newId('stroke')
     const startedAt = typeof so.startedAt === 'number' && Number.isFinite(so.startedAt) ? so.startedAt : points[0]!.t
     const endedAt = typeof so.endedAt === 'number' && Number.isFinite(so.endedAt) ? so.endedAt : points[points.length - 1]!.t
-    return { id, points, color: so.color as string, width: w, source, startedAt, endedAt }
+    const stroke: Stroke = { id, points, color: so.color as string, width: w, source, startedAt, endedAt }
+    if (so.assist !== undefined) {
+      const a = so.assist as Record<string, unknown>
+      if (!isObj(so.assist) || !['a', 'b', 'tx', 'ty'].every((k) => typeof a[k] === 'number' && Number.isFinite(a[k] as number))) fail(`${path}.assist must have finite a, b, tx, ty.`)
+      if (Math.hypot(a.a as number, a.b as number) < 1e-6) fail(`${path}.assist is not invertible.`)
+      stroke.assist = { a: a.a as number, b: a.b as number, tx: a.tx as number, ty: a.ty as number }
+    }
+    return stroke
   })
 
   const ids = new Set<string>()

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { useDismiss } from './useDismiss'
-import { Download, FileJson, Hand, HelpCircle, Image, MousePointer2, Redo2, Settings2, Trash2, Undo2, Upload } from 'lucide-react'
+import { AlignLeft, Download, FileJson, Hand, HelpCircle, Image, MousePointer2, Redo2, RotateCcw, Settings2, Trash2, Undo2, Upload } from 'lucide-react'
 import type { PenStyle } from '../strokes/types'
 
 const COLORS = ['#1f2430', '#2f6be4', '#e5484d', '#1f9d63', '#6d63f0', '#e8870e']
@@ -23,6 +23,12 @@ interface Props {
   onSettings(): void
   onHelp(): void
   settingsOpen: boolean
+  /** Writing Assist tools (v0.1.4); shown only in Writing Assist mode. */
+  assist: boolean
+  canTidy: boolean
+  canRestore: boolean
+  onTidy(): void
+  onRestore(): void
 }
 
 export function Toolbar(p: Props) {
@@ -43,7 +49,7 @@ export function Toolbar(p: Props) {
           </svg>
         </span>
         <span className="brand-name">WISP</span>
-        <span className="brand-sub">Inkling lab · v0.1.3</span>
+        <span className="brand-sub">Inkling lab · v0.1.4</span>
       </div>
 
       <div className="segmented" role="tablist" aria-label="Input mode">
@@ -89,6 +95,16 @@ export function Toolbar(p: Props) {
         <button className="icon" onClick={p.onRedo} disabled={!p.canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
           <Redo2 size={17} />
         </button>
+        {p.assist && (
+          <>
+            <button className="icon" onClick={p.onTidy} disabled={!p.canTidy} title="Tidy lines: straighten slightly tilted lines (whole lines move, letters never change)" aria-label="Tidy lines">
+              <AlignLeft size={17} />
+            </button>
+            <button className="icon" onClick={p.onRestore} disabled={!p.canRestore} title="Restore original: put tidied lines back exactly as written" aria-label="Restore original">
+              <RotateCcw size={17} />
+            </button>
+          </>
+        )}
         <div className="popover-anchor" ref={clearRef}>
           <button className="icon" onClick={() => setConfirmClear((v) => !v)} disabled={!p.canClear} title="Clear page" aria-label="Clear page">
             <Trash2 size={17} />

@@ -157,7 +157,21 @@ export interface SynthResult {
  * pixels on both axes; fingertip noise grows with occlusion (pinching, and
  * orientations where the fingers point at the camera or the palm is edge-on).
  */
-export function synthesize(script: ScriptFrame[], opts: { seed?: number; noise?: NoiseModel; fps?: number; t0?: number } = {}): SynthResult {
+export function synthesize(
+  script: ScriptFrame[],
+  opts: {
+    seed?: number
+    noise?: NoiseModel
+    fps?: number
+    t0?: number
+    /**
+     * v0.1.4: lose tracking when the palm (wrist, MCP joints) leaves the camera frame
+     * (MediaPipe needs the palm). The v0.1–v0.1.3 scenarios leave it off: they
+     * place the pen anywhere in the frame without modelling the hand around it.
+     */
+    edgeLoss?: boolean
+  } = {}
+): SynthResult {
   const r = rng(opts.seed ?? 1)
   const n = opts.noise ?? DEFAULT_NOISE
   const dt = 1000 / (opts.fps ?? 30)
@@ -191,7 +205,10 @@ export function synthesize(script: ScriptFrame[], opts: { seed?: number; noise?:
       index: { x: clean[8]!.x, y: clean[8]!.y },
       intendInk: s.intendInk
     })
-    if (s.present === false || r() < (n.dropoutProb ?? 0)) {
+    const off = (p: { x: number; y: number }) => p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1
+    // Only the palm matters: MediaPipe keeps reporting fingertips (even slightly outside [0, 1]) while the palm is tracked.
+    const outOfFrame = opts.edgeLoss === true && [0, 1, 5, 9, 13, 17].some((j) => off(clean[j]!))
+    if (s.present === false || outOfFrame || r() < (n.dropoutProb ?? 0)) {
       frames.push({ t: Math.round(t * 10) / 10, c: 0, lm: null, w: null })
       return
     }

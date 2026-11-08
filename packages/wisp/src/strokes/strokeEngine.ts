@@ -122,6 +122,8 @@ export const STABILIZER_MAX_RADIUS = 0.004
 /** Input sources whose positions carry tracking noise (get the stabilizer). */
 const NOISY: ReadonlySet<InputSource> = new Set(['webcam'])
 
+const unit = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
+
 export class StrokeEngine implements WispInputEvents {
   readonly events = new Emitter<WispEventMap>()
   private opts: EngineOptions
@@ -358,7 +360,10 @@ export class StrokeEngine implements WispInputEvents {
     const points: StrokePoint[] = []
     refined.forEach((q, i) => {
       const r = log[i]!
-      const p = this.makePoint(q.x, q.y, { x: r.x, y: r.y, t: r.t, confidence: r.confidence, source: s.source }, r)
+      // v0.1.4: the smoother can overshoot slightly past a page edge on a stroke
+      // drawn along it (e.g. y = 1.0007); such a file then failed to re-import
+      // ("must be between 0 and 1"). Keep refined points on the page.
+      const p = this.makePoint(unit(q.x), unit(q.y), { x: r.x, y: r.y, t: r.t, confidence: r.confidence, source: s.source }, r)
       if (sampler.accept(p) || i === refined.length - 1) points.push(p)
     })
     if (points.length === 0) return

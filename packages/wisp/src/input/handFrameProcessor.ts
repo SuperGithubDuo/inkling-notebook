@@ -10,6 +10,7 @@ import { GestureStateMachine, type GestureAction, type GestureConfig, type Gestu
 import { pinchThresholds } from '../gestures/pinchDetector'
 import type { PenPoint } from '../core/settings'
 import { applySensitivity, cameraToPage, defaultRegion, type WritingRegion } from '../strokes/coordinates'
+import { ExtentTracker, PRIOR_EXTENT, ScaleTracker, handImageScale, measureExtent, safeRegion, zoomAboutCentre, type HandExtent } from '../strokes/writingPlane'
 import type { StrokeEngine } from '../strokes/strokeEngine'
 import type { NormPoint } from '../strokes/types'
 import { DEFAULT_DEPTH_WEIGHT, LM, handPose, pinchRatio, pinchRatio3D, validLandmarks, type HandPose, type Landmark } from '../tracking/landmarks'
@@ -24,13 +25,13 @@ export interface ProcessorConfig {
   penPoint: PenPoint
   /**
    * Which pinch distance drives pen-down / pen-up (v0.1.3):
-   *  'auto' (default) – orientation-weighted blend: the 2D ratio while the
+   *  'auto'           – orientation-weighted blend: the 2D ratio while the
    *                    fingers lie across the image (where the camera sees the
    *                    gap directly), shifting to the 3D ratio as the fingers
    *                    tip toward the camera or the palm turns edge-on (where
    *                    the 2D ratio is foreshortened). See blendWeight3D.
    *  '3d'            – always the world-landmark ratio (normalized by the 3D palm size).
-   *  '2d'            – image landmarks only (v0.1–v0.1.2 behaviour).
+   *  '2d' (default)  – image landmarks only (v0.1.2 behaviour, confirmed on a real webcam).
    * Frames without usable world landmarks always use 2D.
    */
   pinchMetric?: 'auto' | '3d' | '2d'
@@ -38,6 +39,20 @@ export interface ProcessorConfig {
   depthWeight?: number
   /** Calibrated region (view space) or null for the automatic default. */
   region: WritingRegion | null
+  /**
+   * Automatic default region (v0.1.4):
+   *  'hand' (default) – fitted inside the area the pen can reach with the palm
+   *                     still in the camera frame, measured from your hand and
+   *                     then locked (fixes unreachable page edges);
+   *  'centred'        – v0.1–v0.1.3: 70 % of the frame, centred.
+   */
+  regionFit?: 'hand' | 'centred'
+  /**
+   * Keep writing size steady (Writing Assist, v0.1.4): zoom the region about
+   * the camera centre as the hand moves nearer or farther, so the same hand
+   * movement always makes the same page movement. Needs world landmarks.
+   */
+  keepScale?: boolean
   /** Logical page aspect ratio (width / height). */
   pageAspect: number
 }
@@ -90,9 +105,10 @@ export function penPointOf(lm: readonly Landmark[], mode: PenPoint): NormPoint {
   return { x: (i.x + t.x) / 2, y: (i.y + t.y) / 2 }
 }
 
-export function effectiveRegion(cfg: ProcessorConfig, videoAspect: number): WritingRegion {
-  const base = cfg.region ?? defaultRegion(videoAspect, cfg.pageAspect, 0.7)
-  return applySensitivity(base, cfg.writingSensitivity)
+export function effectiveRegion(cfg: ProcessorConfig, videoAspect: number, extent: HandExtent = PRIOR_EXTENT, scaleFactor = 1): WritingRegion {
+  const base = cfg.region ?? ((cfg.regionFit ?? 'hand') === 'centred' ? defaultRegion(videoAspect, cfg.pageAspect, 0.7) : safeRegion(extent, videoAspect, cfg.pageAspect))
+  const r = applySensitivity(base, cfg.writingSensitivity)
+  return cfg.keepScale ? zoomAboutCentre(r, scaleFactor) : r
 }
 
 /**
@@ -113,6 +129,10 @@ export class HandFrameProcessor {
   weight3D = 0
   /** When false, gestures are tracked but nothing reaches the engine (used during calibration). */
   forward = true
+  /** The user's hand extent around the pen (locks after ~20 hover frames, or at the first stroke). */
+  readonly extent = new ExtentTracker()
+  /** The hand's image scale, for Keep writing size steady. */
+  readonly scale = new ScaleTracker()
 
   constructor(
     private readonly engine: StrokeEngine,
@@ -123,12 +143,27 @@ export class HandFrameProcessor {
   }
 
   configure(cfg: Partial<ProcessorConfig>): void {
+    const regionChanged = cfg.region !== undefined && cfg.region !== this.cfg.region
+    const scaleTurnedOn = cfg.keepScale === true && !this.cfg.keepScale
     this.cfg = { ...this.cfg, ...cfg }
+    // A new calibration, or turning the steady size on, defines the reference distance.
+    if (regionChanged || scaleTurnedOn) this.scale.setReference()
     this.gestures.configure({ thresholds: pinchThresholds(this.cfg.pinchSensitivity, this.cfg.releaseSensitivity) })
   }
 
   get config(): ProcessorConfig {
     return this.cfg
+  }
+
+  /** The region in use right now (view space). */
+  region(videoAspect: number): WritingRegion {
+    return effectiveRegion(this.cfg, videoAspect, this.extent.extent, this.scale.factor)
+  }
+
+  /** Forget the measured hand and scale (camera restarted, "Fit writing area"). */
+  refit(): void {
+    this.extent.reset()
+    this.scale.reset()
   }
 
   process(f: FrameInput): FrameOutput {
@@ -142,16 +177,29 @@ export class HandFrameProcessor {
       ratio2D = pinchRatio(f.landmarks, f.videoAspect, this.cfg.depthWeight ?? DEFAULT_DEPTH_WEIGHT)
       ratio3D = pinchRatio3D(f.world)
       pose = handPose(f.world)
-      const metric = this.cfg.pinchMetric ?? 'auto'
+      const metric = this.cfg.pinchMetric ?? '2d'
       const w3 = ratio3D === null || ratio2D === null || metric === '2d' ? 0 : metric === '3d' ? 1 : blendWeight3D(pose)
       this.weight3D = w3
       ratio = ratio2D === null ? ratio3D : w3 === 0 ? ratio2D : w3 * ratio3D! + (1 - w3) * ratio2D
       const cam = penPointOf(f.landmarks, this.cfg.penPoint)
       viewPoint = { x: this.cfg.mirror ? 1 - cam.x : cam.x, y: cam.y }
-      const page = cameraToPage(cam, { mirror: this.cfg.mirror, region: effectiveRegion(this.cfg, f.videoAspect) })
+      const writing = this.gestures.isWriting
+      // Learn the hand's extent and scale while the pen is up (never mid-stroke).
+      if (!writing && !this.cfg.region && (this.cfg.regionFit ?? 'hand') === 'hand' && !this.extent.locked) {
+        const midpoint = penPointOf(f.landmarks, 'midpoint')
+        if (this.extent.add(measureExtent(f.landmarks, midpoint, this.cfg.mirror))) this.scale.setReference()
+      }
+      if (this.cfg.keepScale) {
+        this.scale.add(f.t, handImageScale(f.landmarks, f.world, f.videoAspect), writing, pose?.normal ?? null)
+        if (this.scale.reference === null && this.scale.scale !== null && (this.extent.locked || this.cfg.region || this.cfg.regionFit === 'centred')) this.scale.setReference()
+      }
+      const page = cameraToPage(cam, { mirror: this.cfg.mirror, region: this.region(f.videoAspect) })
       if (page) hand = { x: page.x, y: page.y, pinchRatio: ratio, confidence: f.confidence }
     }
     const actions = this.gestures.update({ t: f.t, hand })
+    // The mapping must not change once writing has started: lock the extent at
+    // the first pen-down with whatever has been measured so far.
+    if (this.gestures.isWriting && !this.extent.locked) this.extent.lockNow()
     if (this.forward) this.apply(actions, f.t)
     return { gesture: this.gestures.state, pinchRatio: this.gestures.ratio ?? ratio, rawRatio: ratio, ratio2D, ratio3D, pose, viewPoint, pagePoint: hand ? { x: hand.x, y: hand.y } : null, actions }
   }
