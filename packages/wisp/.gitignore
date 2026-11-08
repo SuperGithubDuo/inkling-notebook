@@ -1,0 +1,6 @@
+node_modules/
+dist/
+# Copied from node_modules by scripts/copy-wasm.mjs
+public/mediapipe/
+# Downloaded by scripts/fetch-model.mjs (Apache-2.0 model from Google)
+public/models/*.task
