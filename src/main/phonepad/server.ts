@@ -80,6 +80,7 @@ export class PhonePadServer {
   private sequencer = new StrokeSequencer()
   private commandsSeen = new Set<string>()
   private commandOrder: string[] = []
+  /** Replayed to a phone that (re)connects: the page status and the latest picture. */
   private lastOutgoing: { status?: PhonePadOutgoing; view?: PhonePadOutgoing } = {}
   private timers = new Set<ReturnType<typeof setTimeout>>()
   private pairingTimer: ReturnType<typeof setTimeout> | null = null
@@ -168,7 +169,7 @@ export class PhonePadServer {
 
   /** From the renderer: page status or a picture of the writing area. */
   send(message: PhonePadOutgoing): void {
-    this.lastOutgoing[message.type] = message
+    if (message.type === 'status' || message.type === 'view') this.lastOutgoing[message.type] = message
     const sock = this.client?.socket
     if (sock && sock.readyState === sock.OPEN) this.sendTo(sock, message)
   }
@@ -383,10 +384,10 @@ export class PhonePadServer {
         return this.sendTo(ws, { type: 'pong', at: msg.at })
       case 'surface':
         return this.options.emit({ type: 'surface', aspect: msg.aspect, width: msg.width, height: msg.height, dpr: msg.dpr })
-      case 'pan':
-        return this.options.emit({ type: 'pan', du: msg.du, dv: msg.dv })
-      case 'zoom':
-        return this.options.emit({ type: 'zoom', factor: msg.factor, u: msg.u, v: msg.v })
+      case 'viewport':
+        return this.options.emit({ type: 'viewport', rect: msg.rect, epoch: msg.epoch })
+      case 'pen':
+        return this.options.emit({ type: 'pen', color: msg.color.toLowerCase(), size: msg.size })
       case 'command': {
         if (!this.commandsSeen.has(msg.id)) {
           this.commandsSeen.add(msg.id)

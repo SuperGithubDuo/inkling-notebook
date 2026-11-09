@@ -16,8 +16,8 @@ export interface CanvasHandle {
   zoom: (action: 'in' | 'out' | 'fit-width' | 'fit-page') => void
   /** The page shown, its camera and the view size (for PhonePad's writing area). */
   camera: () => { pageId: string; cam: Camera; view: Size; page: Size } | null
-  /** Moves the view: pan by screen pixels and/or zoom by a factor around a screen point. */
-  navigate: (op: { pan?: [number, number]; zoom?: { factor: number; sx: number; sy: number } }) => void
+  /** Moves the view to `cam` (kept within the canvas's zoom and pan limits). */
+  setCamera: (cam: Camera) => void
 }
 
 export const activeCanvas: { handle: CanvasHandle | null } = { handle: null }

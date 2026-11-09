@@ -22,6 +22,9 @@ import {
 import { applyOp, removeOp, type Op, type Transaction } from './history'
 import { objectBounds, unionRects, type Rect } from './geometry'
 
+/** Largest page side the page schema allows. */
+export const MAX_PAGE_SIZE = 20000
+
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 const num = z.number().finite()
 const ids = z.array(idSchema).min(1).max(5000)
@@ -105,7 +108,19 @@ export const commandSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('transformObjects'), ids, sx: scale, sy: scale, tx: num, ty: num }),
   z.object({ type: z.literal('duplicateObjects'), ids, dx: num.default(24), dy: num.default(24) }),
-  z.object({ type: z.literal('selectObjects'), ids: z.array(idSchema).max(5000) })
+  z.object({ type: z.literal('selectObjects'), ids: z.array(idSchema).max(5000) }),
+  /**
+   * Grows the page by the given amounts on each side (page units). Growing left
+   * or up moves all content right or down by that much, so nothing moves
+   * relative to the paper. For PhonePad's infinite paper; PDF pages keep their size.
+   */
+  z.object({
+    type: z.literal('extendPage'),
+    left: num.min(0).max(MAX_PAGE_SIZE),
+    top: num.min(0).max(MAX_PAGE_SIZE),
+    right: num.min(0).max(MAX_PAGE_SIZE),
+    bottom: num.min(0).max(MAX_PAGE_SIZE)
+  })
 ])
 
 export type CanvasCommand = z.input<typeof commandSchema>
@@ -209,6 +224,8 @@ export function selectionBounds(objects: readonly CanvasObject[], selected: Read
  */
 export function buildTransaction(page: PageDoc, commands: readonly CanvasCommand[], ctx: CommandContext, label?: string): CommandResult {
   let objects: CanvasObject[] = page.objects.slice()
+  // The page may grow within the batch; later commands see the new size.
+  let size = { width: page.width, height: page.height }
   const ops: Op[] = []
   const created: string[] = []
   let selection: string[] | null = null
@@ -243,7 +260,7 @@ export function buildTransaction(page: PageDoc, commands: readonly CanvasCommand
       if (ctx.author === 'ai') {
         const b = objectBounds(obj)
         const m = AI_PAGE_MARGIN
-        if (b.x < -m || b.y < -m || b.x + b.width > page.width + m || b.y + b.height > page.height + m) {
+        if (b.x < -m || b.y < -m || b.x + b.width > size.width + m || b.y + b.height > size.height + m) {
           fail('content would fall outside the page')
         }
       }
@@ -318,6 +335,21 @@ export function buildTransaction(page: PageDoc, commands: readonly CanvasCommand
       case 'selectObjects':
         selection = existing(cmd.ids).map((o) => o.id)
         break
+      case 'extendPage': {
+        if (ctx.author === 'ai') fail('the AI may not change the page size')
+        if (page.background) fail('a PDF page keeps its size')
+        const after = { width: size.width + cmd.left + cmd.right, height: size.height + cmd.top + cmd.bottom }
+        if (after.width > MAX_PAGE_SIZE || after.height > MAX_PAGE_SIZE) fail(`a page can be at most ${MAX_PAGE_SIZE} units on each side`)
+        if (after.width === size.width && after.height === size.height) break
+        // Content moves with the page's top-left corner, so it stays where it is on the paper.
+        if ((cmd.left || cmd.top) && objects.length) {
+          const before = objects.slice()
+          push({ kind: 'update', before, after: before.map((o) => validate(transformObject(o, { sx: 1, sy: 1, tx: cmd.left, ty: cmd.top }))) })
+        }
+        push({ kind: 'size', before: size, after, shift: [cmd.left, cmd.top] })
+        size = after
+        break
+      }
     }
   })
 

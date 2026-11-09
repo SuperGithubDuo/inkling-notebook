@@ -46,9 +46,9 @@ function connect(origin: string, originHeader = origin): Promise<Phone> {
   })
 }
 const send = (p: Phone, m: unknown): void => p.ws.send(JSON.stringify(m))
-const hello = (p: Phone, token: string, client = 'phone-abc-123') => send(p, { type: 'hello', v: 1, token, client, device: 'Test · Browser' })
+const hello = (p: Phone, token: string, client = 'phone-abc-123') => send(p, { type: 'hello', v: 2, token, client, device: 'Test · Browser' })
 const ink = (stroke: string, seq: number, phase: string, points: number[][], extra = {}) => ({ type: 'ink', stroke, seq, phase, points, ...extra })
-const down = (stroke: string, u = 0.1, v = 0.1) => ink(stroke, 0, 'down', [[u, v, 0]], { tool: 'pen', pointer: 'touch', aspect: 2 })
+const down = (stroke: string, u = 0.1, v = 0.1) => ink(stroke, 0, 'down', [[u, v, 0]], { tool: 'pen', pointer: 'touch', view: [0, 0, 800, 400], epoch: 0 })
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms))
 const inkEvents = (events: PhonePadEvent[]) => events.filter((e) => e.type === 'ink').map((e) => (e.type === 'ink' ? `${e.message.stroke}:${e.message.seq}:${e.message.phase}` : ''))
 
@@ -96,7 +96,7 @@ describe('PhonePad server', () => {
     const { origin, token, status, events } = await startServer()
     const a = await connect(origin)
     hello(a, token)
-    expect(await a.next('welcome')).toMatchObject({ v: 1 })
+    expect(await a.next('welcome')).toMatchObject({ v: 2 })
     expect(server!.status()).toMatchObject({ state: 'connected', device: 'Test · Browser' })
     expect(events.some((e) => e.type === 'status' && e.status.state === 'connected')).toBe(true)
 
@@ -149,7 +149,7 @@ describe('PhonePad server', () => {
     const p = await connect(origin)
     hello(p, token)
     await p.next('welcome')
-    send(p, ink('stroke-0002', 0, 'down', [[2, 0.1, 0]], { tool: 'pen', pointer: 'touch', aspect: 2 })) // u out of range
+    send(p, ink('stroke-0002', 0, 'down', [[2, 0.1, 0]], { tool: 'pen', pointer: 'touch', view: [0, 0, 800, 400], epoch: 0 })) // u out of range
     send(p, { type: 'ink', stroke: 'bad id!', seq: 0, phase: 'down', points: [] })
     p.ws.send('not json')
     expect(inkEvents(events)).toEqual([])
@@ -173,6 +173,30 @@ describe('PhonePad server', () => {
     socks.forEach((r) => r.status === 'fulfilled' && r.value.ws.terminate())
   })
 
+  it('forwards where the phone looks and its pen choice; never replays a goto on reconnect', async () => {
+    const { origin, token, events } = await startServer()
+    const a = await connect(origin)
+    hello(a, token)
+    await a.next('welcome')
+    send(a, { type: 'viewport', rect: [-500, 120, 800, 370], epoch: 3 })
+    send(a, { type: 'pen', color: '#16A34A', size: 6.5 })
+    send(a, { type: 'pen', color: '#16a34a', size: 99 }) // out of range: dropped
+    await tick(60)
+    expect(events.filter((e) => e.type === 'viewport' || e.type === 'pen')).toEqual([
+      { type: 'viewport', rect: [-500, 120, 800, 370], epoch: 3 },
+      { type: 'pen', color: '#16a34a', size: 6.5 }
+    ])
+    server!.send({ type: 'goto', key: 'page-1', epoch: 0, rect: [0, 0, 800, 370] })
+    expect(await a.next('goto')).toMatchObject({ key: 'page-1' })
+    a.ws.terminate()
+    await tick(50)
+    const b = await connect(origin)
+    hello(b, token)
+    await b.next('welcome')
+    await tick(60)
+    expect(b.inbox.some((m) => m.type === 'goto')).toBe(false) // the phone keeps its own place
+  })
+
   it('runs each command once even when resent, and acknowledges it', async () => {
     const { origin, token, events } = await startServer()
     const p = await connect(origin)
@@ -190,7 +214,7 @@ describe('PhonePad server', () => {
     const a = await connect(origin)
     hello(a, token)
     await a.next('welcome')
-    server!.send({ type: 'status', page: 'ready', title: 'p', color: '#1f2430', highlighter: false, width: 0.01 })
+    server!.send({ type: 'status', ready: true, title: 'p', pen: { color: '#1f2430', size: 4 }, page: null })
     send(a, down('stroke-0003'))
     send(a, ink('stroke-0003', 1, 'move', [[0.2, 0.2, 16]]))
     await a.next('ack')
@@ -201,7 +225,7 @@ describe('PhonePad server', () => {
     const b = await connect(origin)
     hello(b, token) // same client id
     await b.next('welcome')
-    expect(await b.next('status')).toMatchObject({ page: 'ready' })
+    expect(await b.next('status')).toMatchObject({ ready: true })
     // The phone resends what wasn't acknowledged plus the rest.
     send(b, ink('stroke-0003', 1, 'move', [[0.2, 0.2, 16]]))
     send(b, ink('stroke-0003', 2, 'up', [[0.3, 0.3, 32]]))

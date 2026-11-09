@@ -75,10 +75,10 @@ function Body({ status }: { status: PhonePadStatus }) {
         </button>
       </div>
       <ul className="space-y-2.5 text-[13.5px] text-ink-2">
-        <li>The blue PhonePad frame on the page shows where your phone writes.</li>
-        <li>Pinch with two fingers on the phone to zoom in for small writing; drag with two fingers to move the frame.</li>
-        <li>Your pen colour and thickness here are used on the phone. Undo works from either device.</li>
-        <li>Using a stylus? After its first stroke, fingers move the page instead of writing, so a resting hand doesn’t leave marks.</li>
+        <li>The phone is a sheet of paper that goes on in every direction: drag with two fingers to move, pinch to zoom.</li>
+        <li>The blue PhonePad frame on the page shows what the phone is looking at. Write past the page’s edge and the page grows to fit.</li>
+        <li>Tap the colour dot on the phone to change the pen’s colour and size; it changes the pen here too. Undo works from either device.</li>
+        <li>Using a stylus? After its first stroke, fingers move the paper instead of writing, so a resting hand doesn’t leave marks.</li>
       </ul>
     </div>
   )

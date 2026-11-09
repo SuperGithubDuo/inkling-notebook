@@ -1,19 +1,23 @@
 /**
  * The phone's writing surface (served by the desktop, runs in the phone's browser).
  *
+ * - Infinite paper: the phone has its own camera over the page. Two fingers
+ *   pan and zoom it instantly; the phone draws the paper itself in every
+ *   direction and lays the desktop's picture of the page over it. The desktop
+ *   is told where the phone is looking, and grows the page when ink goes past
+ *   its edge.
  * - Ink: pointer events (coalesced for accuracy) are normalized to (u, v) on
- *   the surface rect frozen at pen-down, batched once per animation frame and
- *   sent with a per-stroke sequence number.
+ *   the surface, batched once per animation frame and sent with a per-stroke
+ *   sequence number and the page rectangle the surface showed at pen-down.
  * - Delivery: ink and commands stay in an outbox until the desktop
  *   acknowledges them, and are resent after a reconnect.
- * - Display: the desktop sends a picture of the writing area; the phone draws
- *   its own strokes on top until a picture containing them arrives.
- * - Navigation: two fingers pan and zoom the area on the computer. Once a
- *   stylus has been used, single fingers pan too, so a resting palm doesn't
+ * - Pen: colour and size are the computer's pen settings; the pen card changes them.
+ * - Once a stylus has been used, single fingers pan, so a resting palm doesn't
  *   draw. Plain finger writing has no palm rejection (it can't tell a palm).
  */
 import { Outbox } from './outbox'
-import { deviceLabel, normalize, randomId, secondFingerCancels, twoFingerDelta, type Finger, type SurfaceRect } from './gestures'
+import { deviceLabel, normalize, randomId, secondFingerCancels, type Finger, type SurfaceRect } from './gestures'
+import { LINED_MARGIN, fromRect, paperLines, panBy, pinch, toScreen, viewRect, zoomAt, type PageRect, type Paper, type PhoneCamera } from './camera'
 
 type Tool = 'pen' | 'eraser'
 type Conn = 'connecting' | 'live' | 'lost' | 'ended'
@@ -25,20 +29,22 @@ interface Stroke {
   pointerId: number
   pointer: 'touch' | 'pen' | 'mouse'
   rect: SurfaceRect
+  /** The page rectangle the surface showed at pen-down (kept current through content moves). */
+  view: PageRect
   start: number
   seq: number
   /** Points not yet sent. */
   batch: Pt[]
   /** All points, for drawing locally. */
   points: Pt[]
-  /** Width of the drawn line in CSS px, and colour, at pen-down. */
+  /** Line width in page units, and colour, at pen-down. */
   width: number
   color: string
   ended: boolean
   endedAt: number
 }
 
-const PROTOCOL = 1
+const PROTOCOL = 2
 const ERASER_RADIUS_PX = 14
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
@@ -49,6 +55,22 @@ const ctx = canvas.getContext('2d')!
 const connText = $('conn-text')
 const toastEl = $('toast')
 const card = $('card')
+
+/** Inkling's paper colour, and the grey outside a fixed-size (PDF) page. */
+const PAPER_FILL = '#fdfcfa'
+const OUTSIDE_FILL = '#e9ebef'
+/** The computer's pen presets, and a palette of everyday ink colours (the first three are the computer's). */
+const SIZE_PRESETS = [2.5, 4, 6.5] as const
+const PALETTE: [string, string][] = [
+  ['#1f2430', 'Black'],
+  ['#2563eb', 'Blue'],
+  ['#e5484d', 'Red'],
+  ['#16a34a', 'Green'],
+  ['#f59e0b', 'Orange'],
+  ['#7c3aed', 'Purple'],
+  ['#db2777', 'Pink'],
+  ['#6b7280', 'Grey']
+]
 
 // ---- Identity ---------------------------------------------------------------
 
@@ -90,15 +112,29 @@ const outbox = new Outbox()
 
 let pageReady = false
 let penColor = '#1f2430'
-let penWidth = 0.004 // fraction of area width
-let highlighter = false
+let penSize = 4
+/** A pen change made here wins over the computer's echo of the previous value for a moment. */
+let penLocalUntil = 0
 
-let view: { img: HTMLImageElement; rect: [number, number, number, number] } | null = null
+interface PageInfo {
+  key: string
+  width: number
+  height: number
+  paper: Paper
+  growable: boolean
+  epoch: number
+  origin: [number, number]
+}
+let page: PageInfo | null = null
+let cam: PhoneCamera | null = null
+let camSentAt = 0
+let camDirty = false
+
+let picture: { img: HTMLImageElement; rect: PageRect; key: string } | null = null
 const strokes: Stroke[] = []
 let active: Stroke | null = null
 const touches = new Map<number, Finger>()
-let nav: { last: [Finger, Finger] } | null = null
-let pendingNav: { du: number; dv: number; factor: number; u: number; v: number } | null = null
+let nav: { mid: Finger; spread: number } | null = null
 let stylusSeen = false
 let panPointer: { id: number; last: Finger } | null = null
 let dirty = true
@@ -189,14 +225,10 @@ function onMessage(m: Record<string, unknown>): void {
       if (conn === 'live') setConn('live')
       return
     case 'status':
-      pageReady = m.page === 'ready'
-      if (typeof m.color === 'string' && /^#[0-9a-f]{6}$/i.test(m.color)) penColor = m.color
-      if (typeof m.width === 'number' && m.width > 0) penWidth = m.width
-      highlighter = m.highlighter === true
-      document.documentElement.style.setProperty('--nib', penColor)
-      if (!pageReady) showCard('Open a page on your computer', 'PhonePad writes on the handwritten page that’s open in Inkling. Notes and the library can’t take ink.')
-      else hideCard()
-      dirty = true
+      onStatus(m)
+      return
+    case 'goto':
+      onGoto(m)
       return
     case 'view':
       onView(m)
@@ -232,12 +264,64 @@ function onError(code: string, message: string): void {
   showCard(code === 'already-paired' ? 'Another phone is connected' : 'Can’t connect', message)
 }
 
+function isRect(v: unknown): v is PageRect {
+  return Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === 'number' && Number.isFinite(n)) && v[2] > 0 && v[3] > 0
+}
+
+function onStatus(m: Record<string, unknown>): void {
+  pageReady = m.ready === true
+  const pen = m.pen as { color?: unknown; size?: unknown } | undefined
+  if (pen && performance.now() > penLocalUntil) {
+    if (typeof pen.color === 'string' && /^#[0-9a-f]{6}$/i.test(pen.color)) penColor = pen.color.toLowerCase()
+    if (typeof pen.size === 'number' && pen.size > 0 && pen.size <= 100) penSize = pen.size
+    showPen()
+  }
+  const next = m.page as PageInfo | null
+  if (next && typeof next.key === 'string' && Array.isArray(next.origin)) {
+    if (page && page.key === next.key) {
+      // The page grew left or up: its content moved, so move the camera and local ink with it.
+      const dx = next.origin[0] - page.origin[0]
+      const dy = next.origin[1] - page.origin[1]
+      if (dx || dy) shiftContent(dx, dy)
+    } else {
+      // Another page: start fresh there (the computer sends where to look).
+      picture = null
+      strokes.length = 0
+      cam = null
+    }
+    page = { ...next, paper: { ...next.paper } }
+    if (!cam) cam = fromRect([0, 0, page.width, page.width / Math.max(0.2, surfaceAspect())], surfaceSize().w, surfaceSize().h)
+  } else page = null
+  if (!pageReady) showCard('Open a page on your computer', 'PhonePad writes on the handwritten page that’s open in Inkling. Notes and the library can’t take ink.')
+  else if (!card.querySelector('#code-form:not([hidden])')) hideCard()
+  dirty = true
+}
+
+function onGoto(m: Record<string, unknown>): void {
+  if (!page || m.key !== page.key || !isRect(m.rect)) return
+  const { w, h } = surfaceSize()
+  cam = fromRect(m.rect, w, h)
+  camDirty = true
+  dirty = true
+}
+
+function shiftContent(dx: number, dy: number): void {
+  if (cam) cam = { ...cam, x: cam.x + dx, y: cam.y + dy }
+  if (picture) picture.rect = [picture.rect[0] + dx, picture.rect[1] + dy, picture.rect[2], picture.rect[3]]
+  for (const s of strokes) s.view = [s.view[0] + dx, s.view[1] + dy, s.view[2], s.view[3]]
+  dirty = true
+}
+
 function onView(m: Record<string, unknown>): void {
+  if (typeof m.image !== 'string' || !/^data:image\/(jpeg|png);base64,/.test(m.image) || !isRect(m.rect)) return
+  // A picture from before a content move (or of another page) would be misplaced.
+  if (!page || m.key !== page.key || m.epoch !== page.epoch) return
   const rect = m.rect
-  if (typeof m.image !== 'string' || !/^data:image\/(jpeg|png);base64,/.test(m.image) || !Array.isArray(rect) || rect.length !== 4) return
+  const key = page.key
   const img = new Image()
   img.onload = () => {
-    view = { img, rect: rect.map(Number) as [number, number, number, number] }
+    if (!page || page.key !== key) return
+    picture = { img, rect: [...rect] as PageRect, key }
     // Strokes now part of the picture no longer need drawing here.
     const done = new Set(Array.isArray(m.strokes) ? m.strokes.map(String) : [])
     for (let i = strokes.length - 1; i >= 0; i--) if (done.has(strokes[i]!.id)) strokes.splice(i, 1)
@@ -266,15 +350,30 @@ document.addEventListener('visibilitychange', () => {
 
 // ---- Surface size -----------------------------------------------------------
 
+function surfaceSize(): { w: number; h: number } {
+  const r = surface.getBoundingClientRect()
+  return { w: Math.max(1, r.width), h: Math.max(1, r.height) }
+}
+const surfaceAspect = (): number => surfaceSize().w / surfaceSize().h
+
 let surfaceTimer = 0
 function sendSurface(): void {
   const r = surface.getBoundingClientRect()
   if (r.width < 50 || r.height < 50) return
   send({ type: 'surface', aspect: r.width / r.height, width: Math.round(r.width), height: Math.round(r.height), dpr: Math.min(5, Math.max(0.5, devicePixelRatio || 1)) })
+  camDirty = true
 }
+
+let lastSize: { w: number; h: number } | null = null
 
 function resize(): void {
   const r = surface.getBoundingClientRect()
+  // Rotating keeps the middle of what you were looking at in the middle, at the same zoom.
+  if (cam && lastSize && (lastSize.w !== r.width || lastSize.h !== r.height)) {
+    cam = { ...cam, x: cam.x + (lastSize.w - r.width) / 2 / cam.scale, y: cam.y + (lastSize.h - r.height) / 2 / cam.scale }
+    camDirty = true
+  }
+  lastSize = { w: r.width, h: r.height }
   const dpr = Math.min(3, devicePixelRatio || 1)
   canvas.width = Math.round(r.width * dpr)
   canvas.height = Math.round(r.height * dpr)
@@ -287,6 +386,21 @@ function resize(): void {
 }
 window.addEventListener('resize', resize)
 screen.orientation?.addEventListener?.('change', resize)
+
+/** Tells the computer where the phone is looking (at most ~8 times a second while moving). */
+function sendViewport(now: number): void {
+  if (!camDirty || !cam || !page || !welcomed || now - camSentAt < 120) return
+  camDirty = false
+  camSentAt = now
+  const { w, h } = surfaceSize()
+  send({ type: 'viewport', rect: viewRect(cam, w, h), epoch: page.epoch })
+}
+
+function moveCamera(next: PhoneCamera): void {
+  cam = next
+  camDirty = true
+  dirty = true
+}
 
 // ---- Input ------------------------------------------------------------------
 
@@ -302,7 +416,12 @@ function point(s: Stroke, e: PointerEvent): Pt {
 }
 
 surface.addEventListener('pointerdown', (e) => {
-  if (!pageReady || conn === 'ended') return
+  // A tap on the paper while the pen card is open only closes the card.
+  if (!penCard.hidden) {
+    closePenCard()
+    return
+  }
+  if (!pageReady || conn === 'ended' || !cam || !page) return
   try {
     surface.setPointerCapture(e.pointerId)
   } catch {
@@ -318,8 +437,7 @@ surface.addEventListener('pointerdown', (e) => {
         else return
       }
       panPointer = null
-      const [a, b] = [...touches.values()]
-      nav = { last: [a!, b!] }
+      nav = twoFingers()
       return
     }
     if (touches.size > 2 || nav) return
@@ -334,17 +452,19 @@ surface.addEventListener('pointerdown', (e) => {
   // The stylus eraser end (or barrel button) erases.
   const t: Tool = e.pointerType === 'pen' && (e.buttons & 32) !== 0 ? 'eraser' : tool
   const rect = surfaceRect()
+  const view = viewRect(cam, rect.width, rect.height)
   const s: Stroke = {
     id: randomId(),
     tool: t,
     pointerId: e.pointerId,
     pointer: e.pointerType === 'pen' ? 'pen' : e.pointerType === 'mouse' ? 'mouse' : 'touch',
     rect,
+    view,
     start: e.timeStamp,
     seq: 0,
     batch: [],
     points: [],
-    width: t === 'eraser' ? ERASER_RADIUS_PX * 2 : Math.max(1, penWidth * rect.width),
+    width: t === 'eraser' ? (ERASER_RADIUS_PX * 2) / cam.scale : penSize,
     color: penColor,
     ended: false,
     endedAt: 0
@@ -361,7 +481,10 @@ surface.addEventListener('pointerdown', (e) => {
     points: [p],
     tool: t,
     pointer: s.pointer,
-    aspect: rect.width / rect.height,
+    view,
+    epoch: page.epoch,
+    color: penColor,
+    size: penSize,
     ...(t === 'eraser' ? { radius: ERASER_RADIUS_PX / rect.width } : {})
   })
   dirty = true
@@ -370,16 +493,15 @@ surface.addEventListener('pointerdown', (e) => {
 surface.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'touch' && touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY])
   if (nav && touches.size >= 2) {
-    const [a, b] = [...touches.values()]
-    const now: [Finger, Finger] = [a!, b!]
-    const d = twoFingerDelta(surfaceRect(), nav.last, now)
-    nav.last = now
-    queueNav(d)
+    const next = twoFingers()
+    const r = surfaceRect()
+    if (cam) moveCamera(pinch(cam, [nav.mid[0] - r.left, nav.mid[1] - r.top], [next.mid[0] - r.left, next.mid[1] - r.top], nav.spread, next.spread, r.width, r.height, page ?? undefined))
+    nav = next
     return
   }
   if (panPointer?.id === e.pointerId) {
     const r = surfaceRect()
-    queueNav({ du: -(e.clientX - panPointer.last[0]) / r.width, dv: -(e.clientY - panPointer.last[1]) / r.height, factor: 1, u: 0.5, v: 0.5 })
+    if (cam) moveCamera(panBy(cam, e.clientX - panPointer.last[0], e.clientY - panPointer.last[1], r.width, r.height, page ?? undefined))
     panPointer.last = [e.clientX, e.clientY]
     return
   }
@@ -440,25 +562,23 @@ function endStroke(s: Stroke, phase: 'up' | 'cancel'): void {
   dirty = true
 }
 
-function queueNav(d: { du: number; dv: number; factor: number; u: number; v: number }): void {
-  if (!pendingNav) pendingNav = { ...d }
-  else {
-    pendingNav.du += d.du
-    pendingNav.dv += d.dv
-    pendingNav.factor *= d.factor
-    pendingNav.u = d.u
-    pendingNav.v = d.v
-  }
+function twoFingers(): { mid: Finger; spread: number } {
+  const [a, b] = [...touches.values()] as [Finger, Finger]
+  return { mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], spread: Math.hypot(a[0] - b[0], a[1] - b[1]) }
 }
 
-function flushNav(): void {
-  const n = pendingNav
-  pendingNav = null
-  if (!n || !welcomed) return
-  const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
-  if (Math.abs(n.factor - 1) > 0.002) send({ type: 'zoom', factor: clamp(n.factor, 0.2, 5), u: n.u, v: n.v })
-  if (Math.abs(n.du) > 1e-4 || Math.abs(n.dv) > 1e-4) send({ type: 'pan', du: clamp(n.du, -4, 4), dv: clamp(n.dv, -4, 4) })
-}
+// Mouse wheel and trackpads (a phone browser rarely has one; handy on a tablet with a keyboard).
+surface.addEventListener(
+  'wheel',
+  (e) => {
+    e.preventDefault()
+    if (!cam || active) return
+    const r = surfaceRect()
+    if (e.ctrlKey) moveCamera(zoomAt(cam, Math.exp(-e.deltaY / 200), e.clientX - r.left, e.clientY - r.top, r.width, r.height, page ?? undefined))
+    else moveCamera(panBy(cam, -e.deltaX, -e.deltaY, r.width, r.height, page ?? undefined))
+  },
+  { passive: false }
+)
 
 // iOS: no page zoom or callouts from gestures on the writing surface.
 for (const type of ['gesturestart', 'gesturechange', 'dblclick', 'contextmenu']) document.addEventListener(type, (e) => e.preventDefault())
@@ -479,6 +599,89 @@ function command(action: 'undo' | 'redo' | 'clear'): void {
   const id = randomId()
   sendReliable(id, 0, { type: 'command', id, action })
 }
+
+// ---- Pen colour and size ------------------------------------------------------
+
+const penCard = $('pen-card')
+const swatch = $('swatch')
+const sizeInput = $<HTMLInputElement>('size')
+const colorsEl = $('colors')
+const sizesEl = $('sizes')
+
+for (const [color, name] of PALETTE) {
+  const b = document.createElement('button')
+  b.type = 'button'
+  b.setAttribute('role', 'radio')
+  b.setAttribute('aria-label', name)
+  b.dataset.color = color
+  const dot = document.createElement('span')
+  dot.style.setProperty('--c', color)
+  b.append(dot)
+  // Picking a colour is the common quick change: it applies and closes the card.
+  b.addEventListener('click', () => {
+    setPen(color, penSize, true)
+    closePenCard()
+  })
+  colorsEl.append(b)
+}
+for (const [i, size] of SIZE_PRESETS.entries()) {
+  const b = document.createElement('button')
+  b.type = 'button'
+  b.setAttribute('role', 'radio')
+  b.setAttribute('aria-label', ['Fine', 'Medium', 'Bold'][i]!)
+  b.dataset.size = String(size)
+  const dot = document.createElement('span')
+  dot.style.width = dot.style.height = `${6 + i * 5}px`
+  b.append(dot)
+  b.addEventListener('click', () => {
+    setPen(penColor, size, true)
+    closePenCard()
+  })
+  sizesEl.append(b)
+}
+sizeInput.addEventListener('input', () => setPen(penColor, Number(sizeInput.value)))
+
+let penSendTimer = 0
+function sendPen(): void {
+  clearTimeout(penSendTimer)
+  penSendTimer = 0
+  if (welcomed) send({ type: 'pen', color: penColor, size: penSize })
+}
+/** `now`: a single pick (colour, preset) goes at once; the slider sends at most every 100 ms. */
+function setPen(color: string, size: number, now = false): void {
+  penColor = color
+  penSize = Math.min(16, Math.max(1, size))
+  penLocalUntil = performance.now() + 800
+  if (tool !== 'pen') setTool('pen')
+  showPen()
+  if (now) sendPen()
+  else if (!penSendTimer) penSendTimer = window.setTimeout(sendPen, 100)
+}
+
+/** Reflects the pen in the dock, the card and the preview: colour, and size as it will look at this zoom. */
+function showPen(): void {
+  document.documentElement.style.setProperty('--nib', penColor)
+  const onScreen = penSize * (cam?.scale ?? 1)
+  // The swatch dot grows with the size (8–20 px, inside its 26 px well), so the choice is visible at a glance.
+  swatch.style.setProperty('--dot', `${Math.round(8 + ((penSize - 1) / 15) * 12)}px`)
+  penCard.style.setProperty('--preview-width', `${Math.max(1, Math.min(24, onScreen))}px`)
+  sizeInput.value = String(penSize)
+  for (const b of colorsEl.querySelectorAll<HTMLButtonElement>('button')) b.setAttribute('aria-checked', String(b.dataset.color === penColor))
+  for (const b of sizesEl.querySelectorAll<HTMLButtonElement>('button')) b.setAttribute('aria-checked', String(Number(b.dataset.size) === penSize))
+}
+
+function openPenCard(): void {
+  showPen()
+  penCard.hidden = false
+  swatch.setAttribute('aria-expanded', 'true')
+}
+function closePenCard(): void {
+  penCard.hidden = true
+  swatch.setAttribute('aria-expanded', 'false')
+}
+swatch.addEventListener('click', () => (penCard.hidden ? openPenCard() : closePenCard()))
+document.addEventListener('keydown', (e) => e.key === 'Escape' && closePenCard())
+
 $('undo').addEventListener('click', () => command('undo'))
 $('redo').addEventListener('click', () => command('redo'))
 
@@ -580,30 +783,86 @@ function render(): void {
   const w = canvas.clientWidth
   const h = canvas.clientHeight
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, w, h)
-  if (view) {
-    const [u0, v0, u1, v1] = view.rect
-    ctx.drawImage(view.img, u0 * w, v0 * h, (u1 - u0) * w, (v1 - v0) * h)
+  if (!cam || !page) {
+    ctx.fillStyle = PAPER_FILL
+    ctx.fillRect(0, 0, w, h)
+    for (const s of strokes) drawStroke(s)
+    return
   }
-  for (const s of strokes) drawStroke(s, w, h)
+  const c = cam
+  // Paper everywhere (growable pages); grey around a fixed-size PDF page.
+  ctx.fillStyle = page.growable ? PAPER_FILL : OUTSIDE_FILL
+  ctx.fillRect(0, 0, w, h)
+  const [px, py] = toScreen(c, 0, 0)
+  const pw = page.width * c.scale
+  const ph = page.height * c.scale
+  if (!page.growable) {
+    ctx.fillStyle = PAPER_FILL
+    ctx.fillRect(px, py, pw, ph)
+  }
+  drawPaper(c, w, h)
+  if (picture) {
+    const [x, y, rw, rh] = picture.rect
+    const [sx, sy] = toScreen(c, x, y)
+    ctx.drawImage(picture.img, sx, sy, rw * c.scale, rh * c.scale)
+  }
+  if (!page.growable) {
+    ctx.strokeStyle = 'rgba(31, 36, 48, 0.18)'
+    ctx.lineWidth = 1
+    ctx.strokeRect(px - 0.5, py - 0.5, pw + 1, ph + 1)
+  }
+  for (const s of strokes) drawStroke(s)
 }
 
-function drawStroke(s: Stroke, w: number, h: number): void {
+/** The page's paper pattern across the screen, at the positions Inkling's own paper uses. */
+function drawPaper(c: PhoneCamera, w: number, h: number): void {
+  if (!page) return
+  const paper = page.paper
+  const s = paper.spacing * c.scale
+  // Too dense to see: plain paper (also keeps zoomed-out panning fast).
+  if (paper.type === 'blank' || s < 5) return
+  const x0 = c.x
+  const y0 = c.y
+  const x1 = c.x + w / c.scale
+  const y1 = c.y + h / c.scale
+  // Off a fixed page there is no paper to draw.
+  const clipX0 = page.growable ? x0 : Math.max(0, x0)
+  const clipY0 = page.growable ? y0 : Math.max(0, y0)
+  const clipX1 = page.growable ? x1 : Math.min(page.width, x1)
+  const clipY1 = page.growable ? y1 : Math.min(page.height, y1)
+  if (clipX1 <= clipX0 || clipY1 <= clipY0) return
+  const line = Math.max(1 / (canvas.width / Math.max(1, canvas.clientWidth)), c.scale)
+  const sx = (x: number): number => (x - c.x) * c.scale
+  const sy = (y: number): number => (y - c.y) * c.scale
+  ctx.fillStyle = paper.color
+  if (paper.type === 'dotted') {
+    const r = Math.max(0.6, 1.5 * c.scale)
+    for (const x of paperLines(paper, clipX0, clipX1, 'x'))
+      for (const y of paperLines(paper, clipY0, clipY1, 'y')) ctx.fillRect(sx(x) - r, sy(y) - r, 2 * r, 2 * r)
+    return
+  }
+  for (const x of paperLines(paper, clipX0, clipX1, 'x')) ctx.fillRect(sx(x), sy(clipY0), line, (clipY1 - clipY0) * c.scale)
+  for (const y of paperLines(paper, clipY0, clipY1, 'y')) ctx.fillRect(sx(clipX0), sy(y), (clipX1 - clipX0) * c.scale, line)
+  if (paper.type === 'lined' && LINED_MARGIN >= clipX0 && LINED_MARGIN <= clipX1) {
+    ctx.fillStyle = '#f3c6c6'
+    ctx.fillRect(sx(LINED_MARGIN), sy(clipY0), line, (clipY1 - clipY0) * c.scale)
+  }
+}
+
+function drawStroke(s: Stroke): void {
   const pts = s.points
-  if (!pts.length) return
+  if (!pts.length || !cam) return
+  const c = cam
   ctx.save()
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
-  ctx.lineWidth = s.width
-  if (s.tool === 'eraser') {
-    ctx.strokeStyle = 'rgba(253, 252, 250, 0.92)'
-  } else {
-    ctx.strokeStyle = s.color
-    if (highlighter) ctx.globalAlpha = 0.45
-  }
+  ctx.lineWidth = Math.max(1, s.width * c.scale)
+  ctx.strokeStyle = s.tool === 'eraser' ? 'rgba(253, 252, 250, 0.92)' : s.color
   ctx.beginPath()
-  const x = (p: Pt): number => p[0] * w
-  const y = (p: Pt): number => p[1] * h
+  // Points are (u, v) across the view the stroke began in; place them through the current camera.
+  const [vx, vy, vw, vh] = s.view
+  const x = (p: Pt): number => (vx + p[0] * vw - c.x) * c.scale
+  const y = (p: Pt): number => (vy + p[1] * vh - c.y) * c.scale
   ctx.moveTo(x(pts[0]!), y(pts[0]!))
   if (pts.length === 1) ctx.lineTo(x(pts[0]!) + 0.01, y(pts[0]!))
   // Midpoint quadratic curves: smooth without lagging behind the finger.
@@ -628,7 +887,7 @@ function drawStroke(s: Stroke, w: number, h: number): void {
 function frame(): void {
   resendBacklog()
   if (active) flushBatch(active, 'move')
-  flushNav()
+  sendViewport(performance.now())
   // A finished stroke whose picture never came back (e.g. desktop busy) fades out after a while.
   const now = performance.now()
   for (let i = strokes.length - 1; i >= 0; i--) {
@@ -648,6 +907,7 @@ function frame(): void {
 // ---- Start ------------------------------------------------------------------
 
 setTool('pen')
+showPen()
 resize()
 if (token) connect()
 else showCodeEntry('Connect to Inkling', 'In Inkling on your computer, choose Connect phone. Scan the QR code, or type the code shown under it.')

@@ -29,7 +29,7 @@ import { isLineLike, paintShape, shapePathData } from './shapes'
 import { densify } from './eraser'
 import { eraseCommands, erasePieces, eraseSegment, simplify } from './strokeOps'
 import { assetSize } from './assets'
-import { clamp, fitPage, fitWidth, panBy, screenToPage, zoomAt, type Camera, type Size } from './viewport'
+import { clamp, fitPage, fitWidth, MAX_SCALE, minScale, panBy, screenToPage, zoomAt, type Camera, type Size } from './viewport'
 import { SelectionToolbar } from './SelectionToolbar'
 import { ZoomControls } from './ZoomControls'
 import { BacklinksPill } from '@/notes/Connections'
@@ -124,17 +124,26 @@ export function PageCanvas({ pageId }: { pageId: string }) {
     return () => ro.disconnect()
   }, [])
 
+  // A page that grew (PhonePad's infinite paper) keeps the view where it was:
+  // same zoom, and the content that moved with the page's corner stays put.
+  const pageShift = useStore((s) => s.pageShifts[pageId])
+  const seenShift = useRef(pageShift?.rev ?? 0)
+
   // Fit on first layout and on page-size changes; keep fit modes on resize.
   useLayoutEffect(() => {
     if (!view.width || !view.height) return
     const prev = camRef.current
     let next: Camera
-    if (!prev || fitMode.current === 'width') next = fitWidth(pageSize, view)
+    if (prev && pageShift && pageShift.rev !== seenShift.current) {
+      seenShift.current = pageShift.rev
+      fitMode.current = null
+      next = clamp({ ...prev, x: prev.x - pageShift.dx * prev.scale, y: prev.y - pageShift.dy * prev.scale }, pageSize, view)
+    } else if (!prev || fitMode.current === 'width') next = fitWidth(pageSize, view)
     else if (fitMode.current === 'page') next = fitPage(pageSize, view)
     else next = clamp(prev, pageSize, view)
     camRef.current = next
     setCamState(next)
-  }, [view, pageSize])
+  }, [view, pageSize, pageShift])
 
   const zoomBy = useCallback(
     (factor: number, sx?: number, sy?: number) => {
@@ -377,14 +386,11 @@ export function PageCanvas({ pageId }: { pageId: string }) {
     [exec, page.notebookId, page.width, page.height, view, setSelection]
   )
 
-  // PhonePad: where the phone writes depends on what this view shows.
-  const navigate = useCallback(
-    (op: { pan?: [number, number]; zoom?: { factor: number; sx: number; sy: number } }) => {
-      let c = camRef.current
-      if (!c) return
-      if (op.zoom) c = zoomAt(c, op.zoom.factor, op.zoom.sx, op.zoom.sy, pageSize, view)
-      if (op.pan) c = panBy(c, op.pan[0], op.pan[1], pageSize, view)
-      setCam(c)
+  // PhonePad: the computer's view follows the phone's frame.
+  const setCamera = useCallback(
+    (next: Camera) => {
+      const scale = Math.max(minScale(pageSize, view), Math.min(MAX_SCALE, next.scale))
+      setCam(clamp({ ...next, scale }, pageSize, view))
     },
     [pageSize, view, setCam]
   )
@@ -395,14 +401,14 @@ export function PageCanvas({ pageId }: { pageId: string }) {
       placeImage,
       zoom: zoomAction,
       camera: () => (camRef.current && view.width ? { pageId, cam: camRef.current, view, page: pageSize } : null),
-      navigate
+      setCamera
     }
     phoneLive.cameraChanged()
     return () => {
       activeCanvas.handle = null
       phoneLive.cameraChanged()
     }
-  }, [placeImage, zoomAction, navigate, pageId, view, pageSize])
+  }, [placeImage, zoomAction, setCamera, pageId, view, pageSize])
 
   useEffect(() => phoneLive.cameraChanged(), [cam])
 

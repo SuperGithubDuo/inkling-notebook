@@ -1,19 +1,14 @@
 /**
- * Where on the page the phone writes.
+ * PhonePad geometry on the computer's side. Pure, so it is unit-tested.
  *
- * The phone sends normalized (u, v) in [0, 1] across its writing surface.
- * They land in the "PhonePad area": the largest rectangle with the phone's
- * aspect ratio that fits in the part of the page visible on the computer.
- * Because the area has the phone's aspect ratio, u and v are scaled by the
- * same factor (area width ÷ 1 ≡ area height ÷ (1/aspect)): a circle drawn on
- * the phone stays a circle, whatever the phone, orientation, page size, zoom
- * or screen resolution.
+ * The phone has its own camera (infinite paper): each stroke arrives as
+ * normalized (u, v) plus the page rectangle the phone showed, which has the
+ * phone's aspect ratio, so (u, v) scale by the same factor on both axes and a
+ * circle stays a circle on any phone, in any orientation, at any zoom.
  *
- * Zooming the computer in shrinks the area, so the phone writes smaller and
- * more precisely ("zoomed writing"); the phone's two-finger gestures move and
- * zoom the computer's view to choose the area. Each stroke keeps the area it
- * started in, so rotating the phone or zooming mid-stroke never bends a stroke.
- * Pure, so it is unit-tested.
+ * Here: where the phone starts (the part of the page the computer shows, in
+ * the phone's shape), how much the page grows when ink goes past its edge, and
+ * when the computer's view should follow the phone's frame.
  */
 import { screenToPage, type Camera, type Size } from '@/canvas/viewport'
 import type { Rect } from '@/canvas/geometry'
@@ -57,21 +52,64 @@ export function toPage(area: Area, u: number, v: number): [number, number] {
   return [area.x + u * area.width, area.y + v * area.height]
 }
 
-/** Page rectangle → where it sits on the phone, as [u0, v0, u1, v1]. */
-export function toArea(area: Area, r: Rect): [number, number, number, number] {
-  const u = (x: number): number => (x - area.x) / area.width
-  const v = (y: number): number => (y - area.y) / area.height
-  return [u(r.x), v(r.y), u(r.x + r.width), v(r.y + r.height)]
+/** Rect from a wire tuple. */
+export const rectOf = ([x, y, width, height]: readonly [number, number, number, number]): Rect => ({ x, y, width, height })
+
+/** How much to grow a page so `bounds` fits, with breathing room. */
+export interface Growth {
+  left: number
+  top: number
+  right: number
+  bottom: number
 }
 
-/** Screen pixels the camera should move for a phone pan of (du, dv) of the area. */
-export function panToScreen(area: Area, cam: Camera, du: number, dv: number): [number, number] {
-  // The area moves by (du, dv) of itself, so the page moves the other way on screen.
-  return [-du * area.width * cam.scale, -dv * area.height * cam.scale]
+/**
+ * Growth that makes `bounds` fit on the page with `margin` to spare. Amounts are
+ * whole multiples of the paper spacing, so grid, lines and dots stay aligned
+ * with existing ink when the page grows left or up. Capped at `max` per side.
+ * Null when `bounds` already fits.
+ */
+export function growthFor(bounds: Rect, page: Size, spacing: number, margin: number, max: number): Growth | null {
+  const step = Math.max(1, spacing)
+  const need = (overflow: number): number => (overflow > 0 ? Math.ceil((overflow + margin) / step) * step : 0)
+  let left = need(-bounds.x)
+  let top = need(-bounds.y)
+  let right = need(bounds.x + bounds.width - page.width)
+  let bottom = need(bounds.y + bounds.height - page.height)
+  if (!left && !top && !right && !bottom) return null
+  // Never past the largest page: trim the far side first, then the near one.
+  const fit = (near: number, far: number, len: number): [number, number] => {
+    let excess = len + near + far - max
+    if (excess <= 0) return [near, far]
+    const cutFar = Math.min(far, excess)
+    far -= cutFar
+    excess -= cutFar
+    return [Math.max(0, near - excess), far]
+  }
+  ;[left, right] = fit(left, right, page.width)
+  ;[top, bottom] = fit(top, bottom, page.height)
+  return left || top || right || bottom ? { left, top, right, bottom } : null
 }
 
-/** Screen point to zoom around for a phone pinch centred at (u, v). */
-export function zoomOrigin(area: Area, cam: Camera, u: number, v: number): [number, number] {
-  const [x, y] = toPage(area, u, v)
-  return [x * cam.scale + cam.x, y * cam.scale + cam.y]
+/**
+ * The computer's view follows the phone lazily: only when the phone's frame
+ * leaves the visible part of the view does the camera re-centre on it (zooming
+ * out if the frame is bigger than the view). Null when no move is needed.
+ */
+export function followCamera(cam: Camera, view: Size, frame: Rect, insets = VIEW_INSETS): Camera | null {
+  const visW = view.width - insets.left - insets.right
+  const visH = view.height - insets.top - insets.bottom
+  if (visW <= 0 || visH <= 0) return null
+  const sx = frame.x * cam.scale + cam.x
+  const sy = frame.y * cam.scale + cam.y
+  const inside =
+    sx >= insets.left - 1 &&
+    sy >= insets.top - 1 &&
+    sx + frame.width * cam.scale <= view.width - insets.right + 1 &&
+    sy + frame.height * cam.scale <= view.height - insets.bottom + 1
+  if (inside) return null
+  const scale = Math.min(cam.scale, (visW * 0.9) / frame.width, (visH * 0.9) / frame.height)
+  const cx = frame.x + frame.width / 2
+  const cy = frame.y + frame.height / 2
+  return { scale, x: insets.left + visW / 2 - cx * scale, y: insets.top + visH / 2 - cy * scale }
 }

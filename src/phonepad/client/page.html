@@ -21,6 +21,9 @@
     <button type="button" id="tool-pen" class="tool" aria-pressed="true" aria-label="Pen">
       <svg viewBox="0 0 24 24"><path d="M4 20l1.2-4.4L15.6 5.2a2 2 0 012.8 0l.4.4a2 2 0 010 2.8L8.4 18.8z"/><path d="M13.5 7.3l3.2 3.2"/><circle id="nib" cx="5.4" cy="18.6" r="3.6"/></svg>
     </button>
+    <button type="button" id="swatch" aria-label="Pen colour and size" aria-haspopup="dialog" aria-expanded="false">
+      <span id="swatch-dot"></span>
+    </button>
     <button type="button" id="tool-eraser" class="tool" aria-pressed="false" aria-label="Eraser">
       <svg viewBox="0 0 24 24"><path d="M8.6 19.5L3.9 14.8a2 2 0 010-2.8l8.3-8.3a2 2 0 012.8 0l5 5a2 2 0 010 2.8L12.4 19.5"/><path d="M8.6 19.5H20"/><path d="M7.6 8.6l7.8 7.8"/></svg>
     </button>
@@ -40,6 +43,13 @@
       <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
     </button>
   </nav>
+
+  <section id="pen-card" role="dialog" aria-label="Pen colour and size" hidden>
+    <svg id="pen-preview" viewBox="0 0 200 40" aria-hidden="true"><path d="M8 26c22-22 40-22 56-4s34 18 52 0 36-18 76 2"/></svg>
+    <div id="colors" role="radiogroup" aria-label="Colour"></div>
+    <div id="sizes" role="radiogroup" aria-label="Size"></div>
+    <input id="size" type="range" min="1" max="16" step="0.5" aria-label="Pen size">
+  </section>
 
   <p id="toast" role="status" aria-live="polite" hidden></p>
 

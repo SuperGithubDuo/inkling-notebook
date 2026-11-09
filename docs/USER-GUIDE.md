@@ -74,8 +74,9 @@ The data comes from the link index (`graph()`), and the layout is a d3-force sim
 
 Write with your phone as a wireless tablet, no app or account needed. Open a handwritten page, click **Connect phone** (the phone icon in the toolbar) and scan the QR code. Your phone must be on the same Wi-Fi as your computer.
 
-- Write with a finger or stylus. The ink appears inside the blue **PhonePad** frame, in the pen colour and thickness picked on the computer.
-- Pinch with two fingers on the phone to zoom in and write smaller; drag with two fingers to move the frame.
+- Write with a finger or stylus. The ink appears on the page, inside the blue **PhonePad** frame that shows what the phone is looking at.
+- The phone is a sheet of paper that goes on in every direction: drag with two fingers to move, pinch to zoom. Write past the page's edge and the page grows to fit (one undo step with the ink). PDF pages keep their size.
+- Tap the colour dot next to the pen for colours and sizes. It's the same pen as on the computer.
 - Eraser, undo, redo and clear (tap twice) are on the phone. Undo is shared with the computer.
 - Phone handwriting is ordinary ink: it saves, undoes and exports like anything else.
 

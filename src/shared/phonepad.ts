@@ -6,13 +6,21 @@
  * talks only to the main process; the main process validates every message
  * with these schemas and forwards nothing but ink and a few commands.
  *
- * Coordinates on the wire are normalized: (u, v) in [0, 1] across the phone's
- * writing surface, whatever its pixel size. The desktop maps them onto a
- * rectangle of the page with the same aspect ratio, so ink never stretches.
+ * Infinite paper: the phone has its own camera over the page. Ink points are
+ * normalized, (u, v) in [0, 1] across the phone's writing surface whatever its
+ * pixel size, and each stroke says which page rectangle (`view`) the surface
+ * showed when it began. That rectangle has the surface's aspect ratio, so ink
+ * never stretches, and it can extend past the page: the desktop grows the page.
+ *
+ * Growing a page left or up moves its content. Each move bumps the page's
+ * `epoch`, and the page status carries `origin`, the total move so far: the
+ * phone shifts its camera by any change in it (also after a reconnect). Phone
+ * messages carry the epoch their coordinates belong to, so one that crossed a
+ * move in flight is corrected rather than misplaced.
  */
 import { z } from 'zod'
 
-export const PHONEPAD_PROTOCOL = 1
+export const PHONEPAD_PROTOCOL = 2
 
 export const PHONEPAD_LIMITS = {
   /** Largest WebSocket message accepted from the phone (bytes). */
@@ -50,6 +58,17 @@ export const inkPointSchema = z.union([
 export const POINTER_KINDS = ['touch', 'pen', 'mouse'] as const
 export const PHONE_TOOLS = ['pen', 'eraser'] as const
 
+/** A page rectangle [x, y, width, height] in page units (may extend past the page). */
+export const pageRectSchema = z.tuple([finite.min(-1e6).max(1e6), finite.min(-1e6).max(1e6), finite.min(1).max(1e5), finite.min(1).max(1e5)])
+export type PageRect = z.infer<typeof pageRectSchema>
+
+const epochSchema = z.number().int().min(0).max(1e9)
+
+/** Pen sizes the phone may pick (the desktop's pen slider range). */
+export const PEN_SIZE_RANGE = [1, 16] as const
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/)
+
+
 const inkSchema = z
   .object({
     type: z.literal('ink'),
@@ -61,14 +80,18 @@ const inkSchema = z
     /** Only on `down`: */
     tool: z.enum(PHONE_TOOLS).optional(),
     pointer: z.enum(POINTER_KINDS).optional(),
-    /** Writing surface width ÷ height when the stroke began. */
-    aspect: finite.min(0.15).max(8).optional(),
+    /** The page rectangle the writing surface showed when the stroke began. */
+    view: pageRectSchema.optional(),
+    epoch: epochSchema.optional(),
     /** Eraser radius as a fraction of the surface width. */
-    radius: finite.min(0.001).max(0.5).optional()
+    radius: finite.min(0.001).max(0.5).optional(),
+    /** The pen the stroke was drawn with (so a pen change just before can't race the stroke). */
+    color: hexColor.optional(),
+    size: finite.min(PEN_SIZE_RANGE[0]).max(PEN_SIZE_RANGE[1]).optional()
   })
   .superRefine((m, ctx) => {
-    if (m.phase === 'down' && (m.seq !== 0 || !m.tool || !m.pointer || m.aspect === undefined || !m.points.length)) {
-      ctx.addIssue({ code: 'custom', message: 'down needs seq 0, tool, pointer, aspect and a point' })
+    if (m.phase === 'down' && (m.seq !== 0 || !m.tool || !m.pointer || !m.view || m.epoch === undefined || !m.points.length)) {
+      ctx.addIssue({ code: 'custom', message: 'down needs seq 0, tool, pointer, view, epoch and a point' })
     }
     if (m.phase === 'down' && m.tool === 'eraser' && m.radius === undefined) ctx.addIssue({ code: 'custom', message: 'eraser needs radius' })
     if (m.phase !== 'down' && m.seq === 0) ctx.addIssue({ code: 'custom', message: 'only down has seq 0' })
@@ -95,9 +118,10 @@ export const phoneMessageSchema = z.discriminatedUnion('type', [
   }),
   inkSchema,
   z.object({ type: z.literal('command'), id: phoneIdSchema, action: z.enum(['undo', 'redo', 'clear']) }),
-  /** Two-finger gestures move the writing area: pan by (du, dv) of the area, zoom by `factor` around (u, v). */
-  z.object({ type: z.literal('pan'), du: finite.min(-4).max(4), dv: finite.min(-4).max(4) }),
-  z.object({ type: z.literal('zoom'), factor: finite.min(0.2).max(5), u: unit, v: unit }),
+  /** Where the phone is looking (after panning or zooming its paper). */
+  z.object({ type: z.literal('viewport'), rect: pageRectSchema, epoch: epochSchema }),
+  /** The phone picked a pen colour or size: it becomes the computer's pen setting. */
+  z.object({ type: z.literal('pen'), color: hexColor, size: finite.min(PEN_SIZE_RANGE[0]).max(PEN_SIZE_RANGE[1]) }),
   z.object({ type: z.literal('ping'), at: finite })
 ])
 
@@ -106,16 +130,32 @@ export type InkMessage = Extract<PhoneMessage, { type: 'ink' }>
 export type InkPoint = z.infer<typeof inkPointSchema>
 export type PhoneCommand = Extract<PhoneMessage, { type: 'command' }>['action']
 
+/** The page the phone writes on, for drawing its paper beyond the picture. */
+export interface PhonePage {
+  /** Changes when the computer opens another page. */
+  key: string
+  width: number
+  height: number
+  paper: { type: 'grid' | 'lined' | 'dotted' | 'blank'; spacing: number; color: string }
+  /** False for PDF pages, which keep their size: the phone shows their edge. */
+  growable: boolean
+  epoch: number
+  /** How far the content has moved this session (page grown left/up): the phone keeps its place by following changes. */
+  origin: [number, number]
+}
+
 /** Messages from the desktop to the phone. The phone treats them as data only. */
 export type DesktopMessage =
   | { type: 'welcome'; v: typeof PHONEPAD_PROTOCOL }
   | { type: 'error'; code: PhonePadErrorCode; message: string }
-  /** What the phone writes onto right now. */
-  | { type: 'status'; page: 'ready' | 'none'; title: string; color: string; highlighter: boolean; /** Pen width as a fraction of the area's width. */ width: number }
+  /** What the phone writes onto right now, and with which pen. */
+  | { type: 'status'; ready: boolean; title: string; pen: { color: string; size: number }; page: PhonePage | null }
+  /** Show this page rectangle (on connect, or when the computer opens another page). */
+  | { type: 'goto'; key: string; epoch: number; rect: PageRect }
   /** Everything up to and including `seq` of stroke `id` has arrived (commands: `id` is the command id, `seq` 0). */
   | { type: 'ack'; id: string; seq: number }
-  /** A picture of the writing area. `rect` is where the picture sits, in area coordinates. `strokes` lists phone strokes it already contains. */
-  | { type: 'view'; rev: number; image: string; rect: [number, number, number, number]; strokes: string[] }
+  /** A picture of part of the page. `rect` is where it sits, in page units at `epoch`. `strokes` lists phone strokes it already contains. */
+  | { type: 'view'; rev: number; key: string; epoch: number; image: string; rect: PageRect; strokes: string[] }
   | { type: 'pong'; at: number }
   | { type: 'bye'; reason: 'disconnected' | 'replaced' | 'expired' | 'quit' }
 
@@ -153,26 +193,40 @@ export type PhonePadEvent =
   | { type: 'surface'; aspect: number; width: number; height: number; dpr: number }
   | { type: 'ink'; message: InkMessage }
   | { type: 'command'; action: PhoneCommand }
-  | { type: 'pan'; du: number; dv: number }
-  | { type: 'zoom'; factor: number; u: number; v: number }
+  | { type: 'viewport'; rect: PageRect; epoch: number }
+  | { type: 'pen'; color: string; size: number }
 
 /** What the renderer sends the phone. */
-export type PhonePadOutgoing = Extract<DesktopMessage, { type: 'status' } | { type: 'view' }>
+export type PhonePadOutgoing = Extract<DesktopMessage, { type: 'status' | 'view' | 'goto' }>
+
+const pageKey = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
 
 export const phonePadOutgoingSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('status'),
-    page: z.enum(['ready', 'none']),
+    ready: z.boolean(),
     title: z.string().max(200),
-    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-    highlighter: z.boolean(),
-    width: finite.min(0).max(1)
+    pen: z.object({ color: hexColor, size: finite.min(0.1).max(100) }),
+    page: z
+      .object({
+        key: pageKey,
+        width: finite.min(1).max(1e5),
+        height: finite.min(1).max(1e5),
+        paper: z.object({ type: z.enum(['grid', 'lined', 'dotted', 'blank']), spacing: finite.min(1).max(1000), color: hexColor }),
+        growable: z.boolean(),
+        epoch: epochSchema,
+        origin: z.tuple([finite.min(-1e6).max(1e6), finite.min(-1e6).max(1e6)])
+      })
+      .nullable()
   }),
+  z.object({ type: z.literal('goto'), key: pageKey, epoch: epochSchema, rect: pageRectSchema }),
   z.object({
     type: z.literal('view'),
     rev: z.number().int().min(0),
-    image: z.string().max(4_000_000).regex(/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/),
-    rect: z.tuple([finite, finite, finite, finite]),
+    key: pageKey,
+    epoch: epochSchema,
+    image: z.string().max(6_000_000).regex(/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/),
+    rect: pageRectSchema,
     strokes: z.array(phoneIdSchema).max(500)
   })
 ])

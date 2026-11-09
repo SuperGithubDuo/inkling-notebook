@@ -8,6 +8,17 @@ export type Op =
   | { kind: 'add'; items: { object: CanvasObject; index: number }[] }
   | { kind: 'remove'; items: { object: CanvasObject; index: number }[] }
   | { kind: 'update'; before: CanvasObject[]; after: CanvasObject[] }
+  /**
+   * The page's size changes. `shift` is how far the page's content moved with it
+   * (growing left or up moves everything right or down); the objects themselves
+   * move through an `update` op in the same transaction.
+   */
+  | { kind: 'size'; before: PageSize; after: PageSize; shift: [number, number] }
+
+export interface PageSize {
+  width: number
+  height: number
+}
 
 export interface Transaction {
   label: string
@@ -38,6 +49,8 @@ export function applyOp(objects: readonly CanvasObject[], op: Op): CanvasObject[
       const byId = new Map(op.after.map((o) => [o.id, o]))
       return objects.map((o) => byId.get(o.id) ?? o)
     }
+    case 'size':
+      return objects as CanvasObject[]
   }
 }
 
@@ -49,11 +62,23 @@ export function invertOp(op: Op): Op {
       return { kind: 'add', items: op.items }
     case 'update':
       return { kind: 'update', before: op.after, after: op.before }
+    case 'size':
+      return { kind: 'size', before: op.after, after: op.before, shift: [-op.shift[0], -op.shift[1]] }
   }
 }
 
 export function applyTransaction(page: PageDoc, tx: Transaction): PageDoc {
-  return { ...page, objects: tx.ops.reduce(applyOp, page.objects), updatedAt: Date.now() }
+  let { width, height } = page
+  for (const op of tx.ops) if (op.kind === 'size') ({ width, height } = op.after)
+  return { ...page, width, height, objects: tx.ops.reduce(applyOp, page.objects), updatedAt: Date.now() }
+}
+
+/** How far a transaction moved the page's content (non-zero only when a page grew left or up). */
+export function contentShift(tx: Transaction): [number, number] {
+  let dx = 0
+  let dy = 0
+  for (const op of tx.ops) if (op.kind === 'size') (dx += op.shift[0]), (dy += op.shift[1])
+  return [dx, dy]
 }
 
 export function invertTransaction(tx: Transaction): Transaction {

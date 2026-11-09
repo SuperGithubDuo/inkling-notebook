@@ -61,7 +61,9 @@ Also worth trying: iPad + Apple Pencil (pressure), Android + S Pen or USI stylus
 - [ ] Write a line of maths and a small diagram with a finger. Ink appears inside the blue frame on the computer while writing, without visible gaps, and the finished strokes match what the phone shows. Note the felt delay (none / slight / distracting).
 - [ ] A circle drawn on the phone is round on the computer, in landscape and portrait.
 - [ ] Rotate the phone while writing: the stroke ends cleanly, and the next stroke uses the new shape.
-- [ ] Pinch with two fingers to zoom in; write small; it lands in the right place at the smaller size. Drag with two fingers to move along the page.
+- [ ] Pinch with two fingers to zoom in; write small; it lands in the right place at the smaller size. Pinching and dragging feel smooth (no stutter) and never leave a mark.
+- [ ] Drag past each edge of the page (left, right, up, down) and write there: the page grows, the ink lands where written, and nothing already on the page jumps on either screen. Undo removes the ink and the growth together.
+- [ ] Pen card: one tap on the colour dot; pick each colour and size; the slider is easy to use with one thumb; the computer's pen changes too, and a change on the computer shows on the phone.
 - [ ] Eraser, Undo, Redo and Clear (two taps) on the phone; undo on the computer undoes phone strokes too.
 - [ ] With a stylus: pressure changes the line width on the computer; after the first stylus stroke, a resting palm doesn't draw and a finger moves the page.
 - [ ] Turn Wi-Fi off on the phone for 5 s mid-stroke, then on: it reconnects by itself and the stroke is complete (no gap, no double).

@@ -112,3 +112,45 @@ html, body {
 }
 #code-form input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 #code-form button { height: 48px; border: 0; border-radius: 14px; background: var(--accent); color: #fff; font: 600 16px/1 system-ui, -apple-system, sans-serif; }
+
+/* ---- Pen colour and size --------------------------------------------------- */
+
+/* The swatch shows the pen as it will write: its colour, and a dot as thick as the line. */
+/* A small paper-coloured well, so it reads as "the pen" and not as a status light. */
+#swatch::before {
+  content: ""; position: absolute; inset: 9px; border-radius: 50%; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line);
+}
+#swatch-dot {
+  position: relative; display: block; width: var(--dot, 12px); height: var(--dot, 12px); border-radius: 50%; background: var(--nib);
+}
+#swatch[aria-expanded="true"] { background: var(--accent-soft); }
+
+#pen-card {
+  position: absolute; z-index: 3; width: 232px; padding: 12px; display: grid; gap: 10px;
+  background: #fff; border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow);
+}
+@media (orientation: landscape) {
+  #pen-card { left: calc(76px + var(--safe-l)); top: 50%; transform: translateY(-50%); }
+}
+@media (orientation: portrait) {
+  #pen-card { left: 50%; bottom: calc(80px + var(--safe-b)); transform: translateX(-50%); }
+}
+#pen-preview { width: 100%; height: 40px; display: block; border-radius: 12px; background: var(--paper); }
+#pen-preview path { fill: none; stroke: var(--nib); stroke-width: var(--preview-width, 3px); stroke-linecap: round; stroke-linejoin: round; }
+
+#colors { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+#colors button, #sizes button {
+  height: 44px; border: 0; border-radius: 14px; background: transparent; display: grid; place-items: center; padding: 0; cursor: pointer;
+}
+#colors button:active, #sizes button:active { background: #eef0f4; }
+#colors span { width: 28px; height: 28px; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08); }
+/* The chosen colour gets a ring in its own colour. */
+#colors button[aria-checked="true"] span { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--c); }
+
+#sizes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+#sizes span { border-radius: 50%; background: var(--ink-2); }
+#sizes button[aria-checked="true"] { background: var(--accent-soft); }
+#sizes button[aria-checked="true"] span { background: var(--accent); }
+
+#size { width: 100%; height: 28px; margin: 0; accent-color: var(--accent); }
+#pen-card button:focus-visible, #size:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

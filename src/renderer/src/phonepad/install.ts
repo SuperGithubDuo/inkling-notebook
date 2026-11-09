@@ -61,33 +61,28 @@ export function installPhonePad(): () => void {
         return { pageId, title: nb?.pages.find((p) => p.id === pageId)?.title || nb?.name || 'Untitled page' }
       },
       page: (pageId) => useStore.getState().pages[pageId],
-      style() {
+      pen() {
         const s = useStore.getState()
-        return {
-          color: s.penColor,
-          size: s.penSize,
-          highlighter: s.tool === 'highlighter',
-          highlightColor: s.highlightColor,
-          highlightSize: s.highlightSize,
-          precise: s.eraserMode === 'precise'
-        }
+        return { color: s.penColor, size: s.penSize, precise: s.eraserMode === 'precise' }
       },
+      // The phone's pen choice becomes the computer's pen setting (without touching any selection).
+      setPen: (color, size) => useStore.setState({ penColor: color, penSize: size }),
       run: (commands, options) => useStore.getState().run(commands, options),
       undo: () => useStore.getState().undo(),
       redo: () => useStore.getState().redo(),
+      shift: (pageId) => useStore.getState().pageShifts[pageId],
       subscribe(fn) {
-        // Page content, the open page, tool and pen settings: what the phone shows and writes with.
+        // Page content and size, the open page, and the pen: what the phone shows and writes with.
         return useStore.subscribe((s, prev) => {
           const pageId = s.activePageId
           if (
             s.activePageId !== prev.activePageId ||
             s.view !== prev.view ||
             (pageId && s.pages[pageId] !== prev.pages[pageId]) ||
-            s.tool !== prev.tool ||
+            s.pageShifts !== prev.pageShifts ||
             s.penColor !== prev.penColor ||
             s.penSize !== prev.penSize ||
-            s.highlightColor !== prev.highlightColor ||
-            s.highlightSize !== prev.highlightSize ||
+            s.eraserMode !== prev.eraserMode ||
             s.library !== prev.library
           )
             fn()
@@ -96,7 +91,7 @@ export function installPhonePad(): () => void {
     },
     canvas: {
       camera: () => activeCanvas.handle?.camera() ?? null,
-      navigate: (op) => activeCanvas.handle?.navigate(op)
+      setCamera: (cam) => activeCanvas.handle?.setCamera(cam)
     },
     send: (message) => window.inkling.phonepad.send(message),
     render: (page, rect, pixelRatio) => renderPageRegionPng(page, rect, pixelRatio, 0, { type: 'image/jpeg', quality: 0.82 })

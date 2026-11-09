@@ -10,7 +10,7 @@ if (window.inkling.testHooks) {
   // Lets acceptance tests drive the assistant API the future AI Tutor will use.
   void Promise.all([import('./services/notebookContext'), import('./phonepad/install')]).then(([{ notebookContext }, { phonePadForTests }]) => {
     // PhonePad's writing area, so tests can check where phone ink lands.
-    const phonepad = { area: () => phonePadForTests()?.area ?? null }
+    const phonepad = { area: () => phonePadForTests()?.viewport ?? null }
     ;(window as unknown as { __inkling: unknown }).__inkling = { notebookContext, phonepad }
   })
 }

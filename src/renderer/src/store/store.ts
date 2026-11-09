@@ -11,7 +11,7 @@ import {
   type PageSize
 } from '@shared/factory'
 import type { CanvasObject, Library, NoteDoc, NoteNode, NotebookIcon, NotebookMeta, PageDoc, PageKind, PageMeta, PaperType, PdfBackground } from '@shared/schema'
-import { HISTORY_LIMIT, applyTransaction, invertTransaction, type PageHistory, type Transaction } from '@/canvas/history'
+import { HISTORY_LIMIT, applyTransaction, contentShift, invertTransaction, type PageHistory, type Transaction } from '@/canvas/history'
 import { buildTransaction, pasteCommands, CommandError, type CanvasCommand, type CommandContext } from '@/canvas/commands'
 import { SaveQueue, type SaveStatus } from '@/services/saveQueue'
 import type { FlushResult } from '@shared/ipc'
@@ -51,6 +51,12 @@ interface State {
   conflicts: Conflict[]
   /** Pages saved by a newer version of Inkling: shown empty, never saved over. */
   lockedPages: Record<string, true>
+  /**
+   * The last time a page's size changed through history (PhonePad growing it, or
+   * undo/redo of that), and how far its content moved: (dx, dy) when it grew
+   * left or up. `rev` counts changes, so views can keep their place.
+   */
+  pageShifts: Record<string, { dx: number; dy: number; rev: number }>
   saveStatus: SaveStatus
 
   tool: Tool
@@ -248,6 +254,7 @@ export const useStore = create<Store>()((set, get) => {
     history: {},
     conflicts: [],
     lockedPages: {},
+    pageShifts: {},
     saveStatus: { state: 'saved' },
 
     tool: 'pen',
@@ -605,7 +612,8 @@ export const useStore = create<Store>()((set, get) => {
       const prev = get().history[pageId] ?? { undo: [], redo: [] }
       set((s) => ({
         pages: { ...s.pages, [pageId]: applyTransaction(page, tx) },
-        history: { ...s.history, [pageId]: { undo: [...prev.undo, tx].slice(-HISTORY_LIMIT), redo: [] } }
+        history: { ...s.history, [pageId]: { undo: [...prev.undo, tx].slice(-HISTORY_LIMIT), redo: [] } },
+        pageShifts: withShift(s.pageShifts, pageId, tx)
       }))
       saver.markPage(pageId)
       touchPage(page.notebookId, pageId)
@@ -805,7 +813,8 @@ export const useStore = create<Store>()((set, get) => {
         : { undo: [...hist.undo, tx], redo: hist.redo.slice(0, -1) }
     set((s) => ({
       pages: { ...s.pages, [pageId]: applyTransaction(page, applied) },
-      history: { ...s.history, [pageId]: nextHist }
+      history: { ...s.history, [pageId]: nextHist },
+      pageShifts: withShift(s.pageShifts, pageId, applied)
     }))
     const remaining = new Set(get().pages[pageId]!.objects.map((o) => o.id))
     set((s) => ({ selection: s.selection.filter((id) => remaining.has(id)) }))
@@ -813,6 +822,13 @@ export const useStore = create<Store>()((set, get) => {
     touchPage(page.notebookId, pageId)
   }
 })
+
+/** Records a page growing or shrinking through history (and how far its content moved), so views keep their place. */
+function withShift(shifts: State['pageShifts'], pageId: string, tx: Transaction): State['pageShifts'] {
+  if (!tx.ops.some((op) => op.kind === 'size')) return shifts
+  const [dx, dy] = contentShift(tx)
+  return { ...shifts, [pageId]: { dx, dy, rev: (shifts[pageId]?.rev ?? 0) + 1 } }
+}
 
 const LAST_KEY = 'inkling:last-opened'
 function readLastOpened(): { notebookId: string; pageId: string } | null {
