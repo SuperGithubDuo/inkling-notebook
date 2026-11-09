@@ -48,6 +48,9 @@ Free beta · Windows 10/11 · macOS 12 or later
 **✍️ Write and draw naturally**<br>
 Pen, highlighter, precise or whole-stroke eraser, shapes, text and images. Lasso to move, resize and restyle. Zoom, pan, undo and redo. Grid, lined, dotted or blank paper.
 
+**📱 Write with your phone**<br>
+PhonePad turns your phone into a wireless writing tablet: scan a QR code and write with a finger or stylus, straight onto the open page. Local Wi-Fi only, no app to install. *(New — not yet tested on real phones.)*
+
 **📄 Annotate PDFs**<br>
 Import lecture slides or handouts, write on them, and export the annotated notebook as a PDF. The original pages are kept unchanged.
 

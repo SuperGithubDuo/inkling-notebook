@@ -8,8 +8,10 @@ window.inkling.onFlushRequest(() => useStore.getState().flush())
 
 if (window.inkling.testHooks) {
   // Lets acceptance tests drive the assistant API the future AI Tutor will use.
-  void import('./services/notebookContext').then(({ notebookContext }) => {
-    ;(window as unknown as { __inkling: unknown }).__inkling = { notebookContext }
+  void Promise.all([import('./services/notebookContext'), import('./phonepad/install')]).then(([{ notebookContext }, { phonePadForTests }]) => {
+    // PhonePad's writing area, so tests can check where phone ink lands.
+    const phonepad = { area: () => phonePadForTests()?.area ?? null }
+    ;(window as unknown as { __inkling: unknown }).__inkling = { notebookContext, phonepad }
   })
 }
 

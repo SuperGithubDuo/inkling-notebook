@@ -44,3 +44,31 @@ For each device you have (Surface Pen, Wacom tablet, Apple Pencil via Sidecar, a
 - [ ] On a fresh install with no setup (cloud AI is the default): ask about handwritten algebra, and get a correct answer. *Show this on my page* previews marks, *Add* applies them, and undo removes them.
 - [ ] Without any AI set up: the tutor shows how to set it up, and everything else works.
 - [ ] Turn off Wi-Fi and ask: a clear "couldn't reach" message, and the notebook keeps working.
+
+## 6. PhonePad
+
+Not yet tested on any real phone. The automated tests (`tests/e2e/phonepad.e2e.mjs`) use Chromium over loopback with mouse input. Do each check on all four combinations, and record the phone model, OS version, browser and Wi-Fi router.
+
+| | iPhone (Safari) | Android (Chrome) |
+|---|---|---|
+| Windows computer | not tested | not tested |
+| macOS computer | not tested | not tested |
+
+Also worth trying: iPad + Apple Pencil (pressure), Android + S Pen or USI stylus (pressure, palm), Samsung Internet, Firefox.
+
+- [ ] *Connect phone* → scan the QR with the camera app → the page opens and says Connected within a few seconds. On first use, the Windows Firewall / macOS prompt appears; allowing it on private networks is enough.
+- [ ] Typing the address and the 8-character code by hand also connects.
+- [ ] Write a line of maths and a small diagram with a finger. Ink appears inside the blue frame on the computer while writing, without visible gaps, and the finished strokes match what the phone shows. Note the felt delay (none / slight / distracting).
+- [ ] A circle drawn on the phone is round on the computer, in landscape and portrait.
+- [ ] Rotate the phone while writing: the stroke ends cleanly, and the next stroke uses the new shape.
+- [ ] Pinch with two fingers to zoom in; write small; it lands in the right place at the smaller size. Drag with two fingers to move along the page.
+- [ ] Eraser, Undo, Redo and Clear (two taps) on the phone; undo on the computer undoes phone strokes too.
+- [ ] With a stylus: pressure changes the line width on the computer; after the first stylus stroke, a resting palm doesn't draw and a finger moves the page.
+- [ ] Turn Wi-Fi off on the phone for 5 s mid-stroke, then on: it reconnects by itself and the stroke is complete (no gap, no double).
+- [ ] Lock the phone for 30 s and unlock it: it reconnects within a few seconds.
+- [ ] A second phone scanning the same QR is refused with a clear message.
+- [ ] *Disconnect* on the computer: the phone says so; scanning the old QR no longer works.
+- [ ] Save, quit, reopen: the phone's handwriting is there. *Export notebook as PDF* contains it.
+- [ ] On a computer with VPN/WSL/Hyper-V/Docker adapters: the right Wi-Fi address is chosen first, or the *Network* picker fixes it.
+- [ ] Guest Wi-Fi with client isolation: the phone can't connect, and the "Phone can't connect?" tips explain why.
+

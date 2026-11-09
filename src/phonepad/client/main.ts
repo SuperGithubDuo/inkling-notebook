@@ -106,6 +106,8 @@ let dirty = true
 // ---- Connection -------------------------------------------------------------
 
 function setConn(next: Conn): void {
+  if (conn === 'live' && next === 'lost') toast('Connection lost. Keep writing: it’s sent when the phone reconnects.', 4000)
+  if (conn === 'lost' && next === 'live') toast('Reconnected')
   conn = next
   app.dataset.conn = next
   connText.textContent = next === 'live' ? (rtt ? `Connected · ${rtt} ms` : 'Connected') : next === 'lost' ? 'Reconnecting…' : next === 'ended' ? 'Disconnected' : 'Connecting…'
@@ -144,10 +146,26 @@ function send(m: object, sock = ws): boolean {
   return true
 }
 
-/** Ink and commands: queued until acknowledged, sent now if possible. */
+/** Messages sent on the current connection (after a reconnect, the backlog is resent first). */
+let sentOnSocket = new WeakSet<object>()
+let syncing = false
+const RESEND_PER_FRAME = 5
+
+/** Ink and commands: queued until acknowledged, sent now if possible (in order, behind any backlog). */
 function sendReliable(id: string, seq: number, m: object): void {
   outbox.push(id, seq, m)
-  if (welcomed) send(m)
+  if (welcomed && !syncing && send(m)) sentOnSocket.add(m)
+}
+
+/** After a reconnect: resend unacknowledged messages a few per frame, under the computer's rate limit. */
+function resendBacklog(): void {
+  if (!syncing || !welcomed) return
+  const batch = outbox.unsent(sentOnSocket, RESEND_PER_FRAME)
+  for (const m of batch) {
+    if (!send(m)) return
+    sentOnSocket.add(m)
+  }
+  if (batch.length < RESEND_PER_FRAME) syncing = false
 }
 
 function onMessage(m: Record<string, unknown>): void {
@@ -159,7 +177,8 @@ function onMessage(m: Record<string, unknown>): void {
       setConn('live')
       hideCard()
       sendSurface()
-      for (const p of outbox.pending()) send(p)
+      sentOnSocket = new WeakSet()
+      syncing = outbox.size > 0
       return
     case 'ack':
       outbox.ack(String(m.id), Number(m.seq))
@@ -284,7 +303,11 @@ function point(s: Stroke, e: PointerEvent): Pt {
 
 surface.addEventListener('pointerdown', (e) => {
   if (!pageReady || conn === 'ended') return
-  surface.setPointerCapture(e.pointerId)
+  try {
+    surface.setPointerCapture(e.pointerId)
+  } catch {
+    /* capture is a nicety: moves still arrive while over the surface */
+  }
   if (e.pointerType === 'pen') stylusSeen = true
   if (e.pointerType === 'touch') {
     touches.set(e.pointerId, [e.clientX, e.clientY])
@@ -603,6 +626,7 @@ function drawStroke(s: Stroke, w: number, h: number): void {
 }
 
 function frame(): void {
+  resendBacklog()
   if (active) flushBatch(active, 'move')
   flushNav()
   // A finished stroke whose picture never came back (e.g. desktop busy) fades out after a while.

@@ -157,6 +157,22 @@ describe('PhonePad server', () => {
     expect(await p.closed).toBe(1008)
   })
 
+  it('closes (instead of silently dropping) a connection that sends too fast, so the phone resends', async () => {
+    const { origin, token } = await startServer({ maxMessagesPerSecond: 5 })
+    const p = await connect(origin)
+    hello(p, token)
+    await p.next('welcome')
+    for (let i = 0; i < 10; i++) send(p, { type: 'ping', at: i })
+    expect(await p.closed).toBe(1013)
+  })
+
+  it('refuses a flood of sockets', async () => {
+    const { origin } = await startServer()
+    const socks = await Promise.allSettled(Array.from({ length: 20 }, () => connect(origin)))
+    expect(socks.filter((r) => r.status === 'rejected').length).toBeGreaterThan(0)
+    socks.forEach((r) => r.status === 'fulfilled' && r.value.ws.terminate())
+  })
+
   it('runs each command once even when resent, and acknowledges it', async () => {
     const { origin, token, events } = await startServer()
     const p = await connect(origin)

@@ -186,6 +186,21 @@ describe('PhonePad phone client', () => {
     expect(o.size).toBe(5) // newest kept
   })
 
+  it('paces a resend: a few unsent messages at a time, oldest first, new ones queued behind', () => {
+    const o = new Outbox()
+    const sent = new WeakSet<object>()
+    const msgs = Array.from({ length: 12 }, (_, i) => ({ i }))
+    msgs.forEach((m, i) => o.push('s', i, m))
+    const seen: number[] = []
+    for (let frame = 0; frame < 4; frame++) {
+      const batch = o.unsent(sent, 5) as { i: number }[]
+      batch.forEach((m) => (sent.add(m), seen.push(m.i)))
+      if (frame === 1) o.push('s', 12, { i: 12 }) // written while catching up
+    }
+    expect(seen).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+    expect(o.unsent(sent, 5)).toEqual([])
+  })
+
   it('describes the device without identifying it', () => {
     expect(deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1')).toBe('iPhone · Safari')
     expect(deviceLabel('Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36')).toBe('Android · Chrome')

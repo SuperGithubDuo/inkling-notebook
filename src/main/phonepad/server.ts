@@ -68,6 +68,7 @@ interface Client {
 
 const HELLO_TIMEOUT_MS = 10_000
 const HEARTBEAT_MS = 15_000
+const MAX_SOCKETS = 16
 
 export class PhonePadServer {
   private http: Server | null = null
@@ -179,8 +180,12 @@ export class PhonePadServer {
     http.headersTimeout = 10_000
     http.requestTimeout = 15_000
     // Before anything reaches HTTP or WebSocket handling, drop clients outside the local network.
+    let open = 0
     http.on('connection', (socket) => {
-      if (!this.allowedRemote(socket.remoteAddress)) socket.destroy()
+      // One phone needs one or two sockets; a flood of them is refused.
+      if (!this.allowedRemote(socket.remoteAddress) || open >= MAX_SOCKETS) return void socket.destroy()
+      open++
+      socket.once('close', () => open--)
     })
     const wss = new WebSocketServer({ noServer: true, maxPayload: this.limits.maxMessageBytes, perMessageDeflate: false })
     http.on('upgrade', (req, socket, head) => this.upgrade(req, socket, head))
@@ -279,7 +284,9 @@ export class PhonePadServer {
         windowStart = t
         windowCount = 0
       }
-      if (++windowCount > this.limits.maxMessagesPerSecond) return
+      // Too fast: close rather than drop (a dropped ink message would leave a gap). The phone
+      // reconnects and resends everything unacknowledged, so nothing is lost.
+      if (++windowCount > this.limits.maxMessagesPerSecond) return void ws.close(1013, 'too fast')
       if (isBinary) return bad()
       let parsed: unknown
       try {

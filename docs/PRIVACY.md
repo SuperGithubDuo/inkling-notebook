@@ -17,6 +17,8 @@ Tutor chats are kept only while Inkling is open. Marks you add to a page from th
 
 We have no account system and no cloud storage, and we can't see your notebooks.
 
+**PhonePad** (writing with your phone) connects your phone straight to your computer over your local network, only after you click *Connect phone*. Nothing goes through the internet or to us. Your phone receives pictures of the part of the page you write on, and sends back only your strokes. The connection isn't encrypted on the local network, so don't use PhonePad on a network you don't trust. More in [PhonePad](PHONEPAD.md#security).
+
 ## What leaves your device, and when
 
 ### 1. The AI Tutor, only after you allow it

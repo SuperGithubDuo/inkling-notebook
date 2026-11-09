@@ -2,7 +2,7 @@
 
 Everything Inkling can do, and how to do it. New here? Start with the [install guide](INSTALL.md).
 
-- [Using the canvas](#using-the-canvas) · [Rich-text notes](#rich-text-notes) · [Search, links and backlinks](#search-links-and-backlinks) · [Knowledge graph](#knowledge-graph) · [PDFs](#pdfs) · [AI Tutor](#ai-tutor)
+- [Using the canvas](#using-the-canvas) · [Rich-text notes](#rich-text-notes) · [Search, links and backlinks](#search-links-and-backlinks) · [Knowledge graph](#knowledge-graph) · [PDFs](#pdfs) · [PhonePad](#phonepad) · [AI Tutor](#ai-tutor)
 - Where your notes live, backups and privacy: [Your notebooks and your data](#your-notebooks-and-your-data)
 
 ## Using the canvas
@@ -70,6 +70,17 @@ The data comes from the link index (`graph()`), and the layout is a d3-force sim
   - Handwritten pages get their paper as fine lines.
   - Rich-text notes are not included (export them as Markdown).
 
+## PhonePad
+
+Write with your phone as a wireless tablet, no app or account needed. Open a handwritten page, click **Connect phone** (the phone icon in the toolbar) and scan the QR code. Your phone must be on the same Wi-Fi as your computer.
+
+- Write with a finger or stylus. The ink appears inside the blue **PhonePad** frame, in the pen colour and thickness picked on the computer.
+- Pinch with two fingers on the phone to zoom in and write smaller; drag with two fingers to move the frame.
+- Eraser, undo, redo and clear (tap twice) are on the phone. Undo is shared with the computer.
+- Phone handwriting is ordinary ink: it saves, undoes and exports like anything else.
+
+Details, tips and how it works: [PhonePad](PHONEPAD.md).
+
 ## AI Tutor
 
 Lasso some handwritten work and press ✨ *Ask AI*. The first time, Inkling asks for permission before anything is sent. Which AI answers, and what it costs (nothing), is explained in [AI providers](AI.md).
@@ -95,6 +106,7 @@ Something wrong? See [SUPPORT.md](../SUPPORT.md).
 
 What Inkling doesn't do yet, or does with caveats. Open work is listed in the [roadmap](ROADMAP.md).
 
+- PhonePad has only been tested in automated tests, not yet on real phones. It needs both devices on the same network (guest and some school networks block this), and the connection on the local network isn't encrypted. See [PhonePad](PHONEPAD.md#known-limitations).
 - The cloud AI's free allowance is small: about 110 typical interactions a day for everyone together (measured; see [Cloud beta results](AI.md#cloud-beta-results)). It is shared through one Cloudflare account and resets at midnight UTC, which is the afternoon or evening in the Americas.
 - **Permission for the cloud AI is per computer account, not per person, and is not age-checked.** One *Allow* covers everyone who uses Inkling on that computer account. Inkling doesn't ask for ages, and clicking *Allow* doesn't verify a parent's or guardian's consent; the notice says so. A process for verifiable parental consent has not been decided or built (see [PRIVACY.md](PRIVACY.md#children-and-students)).
 - Existing installations that allowed the cloud AI under an earlier version of the notice are asked again (once) before anything more is sent, because the notice now lists more of what is sent.

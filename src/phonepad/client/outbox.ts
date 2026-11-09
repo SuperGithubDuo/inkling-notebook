@@ -29,6 +29,16 @@ export class Outbox {
     return this.items.map((q) => q.message)
   }
 
+  /** Up to `max` messages not yet sent on this connection, oldest first (pacing a resend). */
+  unsent(sent: WeakSet<object>, max: number): object[] {
+    const out: object[] = []
+    for (const q of this.items) {
+      if (out.length >= max) break
+      if (!sent.has(q.message)) out.push(q.message)
+    }
+    return out
+  }
+
   has(id: string): boolean {
     return this.items.some((q) => q.id === id)
   }
