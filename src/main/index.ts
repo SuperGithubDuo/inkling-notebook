@@ -19,6 +19,11 @@ import { autoBackupIfDue, backupsDirFor, createBackup, listBackups, readBackup, 
 import { buildMenu } from './menu'
 import { Updater } from './updater'
 import { FEEDBACK_URL, RELEASES_URL, feedbackLink } from '@shared/product'
+import { networkInterfaces } from 'node:os'
+import phonepadPage from 'virtual:phonepad-page'
+import { phonePadOutgoingSchema } from '@shared/phonepad'
+import { PhonePadServer } from './phonepad/server'
+import { lanAddresses } from './phonepad/network'
 
 /**
  * One fixed data folder, whatever the build: `npm run dev` used to run as
@@ -125,6 +130,18 @@ const ai = new AiService({
     if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.aiEvent, event)
   }
 })
+// PhonePad: the phone's writing page and its WebSocket, started only when the user asks.
+// Acceptance tests drive a simulated phone over loopback; real sessions never listen there.
+const phonepadLoopback = testHooks && process.env.INKLING_PHONEPAD_LOOPBACK === '1'
+const phonepad = new PhonePadServer({
+  html: phonepadPage,
+  addresses: () => (phonepadLoopback ? [{ host: '127.0.0.1', label: 'Test' }] : lanAddresses(networkInterfaces())),
+  emit: (event) => {
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.phonepadEvent, event)
+  },
+  allowLoopback: phonepadLoopback
+})
+
 const aiReady = aiConfig.load().then(() => ai.ensureAllowedProvider())
 
 // Image assets are served from the notebook folder through a read-only scheme.
@@ -639,6 +656,18 @@ function registerIpc(): void {
     }, 100)
     return { restored: true as const }
   })
+  handle(IPC.phonepadStart, z.tuple([z.string().max(64).nullable()]), async (host) => phonepad.start(host ?? undefined))
+  handle(IPC.phonepadStop, z.tuple([]), async () => {
+    await phonepad.stop('disconnected')
+    return phonepad.status()
+  })
+  handle(IPC.phonepadStatus, z.tuple([]), async () => phonepad.status())
+  // Fire-and-forget (pictures of the writing area stream often): same sender check, validated.
+  ipcMain.on(IPC.phonepadSend, (event, raw) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return
+    const parsed = phonePadOutgoingSchema.safeParse(raw)
+    if (parsed.success) phonepad.send(parsed.data)
+  })
   handle(IPC.updateState, z.tuple([]), async () => updater.current)
   handle(IPC.updateCheck, z.tuple([]), async () => updater.check())
   handle(IPC.updateInstall, z.tuple([]), async () => updater.install())
@@ -672,8 +701,11 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   quitRequested = true
+  void phonepad.stop('quit')
 })
 
 app.on('window-all-closed', () => {
+  // No window to write into: end the PhonePad session.
+  void phonepad.stop('disconnected')
   if (process.platform !== 'darwin') app.quit()
 })

@@ -9,3 +9,9 @@ interface ImportMetaEnv {
   /** '1' offers Google Gemini in a packaged build. Unset: no Gemini (public all-ages builds). Development always has it. */
   readonly MAIN_VITE_INKLING_ENABLE_GEMINI?: string
 }
+
+/** The PhonePad phone page as one HTML string (built by scripts/phonepadPage.mjs). */
+declare module 'virtual:phonepad-page' {
+  const html: string
+  export default html
+}

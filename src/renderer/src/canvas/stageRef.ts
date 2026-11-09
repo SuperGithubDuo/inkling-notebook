@@ -2,6 +2,7 @@ import Konva from 'konva'
 import type { PageDoc } from '@shared/schema'
 import { drawPaper } from './paper'
 import type { Rect } from './geometry'
+import type { Camera, Size } from './viewport'
 import { loadPdf } from '@/pdf/pdfjs'
 
 /**
@@ -13,6 +14,10 @@ export interface CanvasHandle {
   world: () => Konva.Group | null
   placeImage: (asset: string) => Promise<void>
   zoom: (action: 'in' | 'out' | 'fit-width' | 'fit-page') => void
+  /** The page shown, its camera and the view size (for PhonePad's writing area). */
+  camera: () => { pageId: string; cam: Camera; view: Size; page: Size } | null
+  /** Moves the view: pan by screen pixels and/or zoom by a factor around a screen point. */
+  navigate: (op: { pan?: [number, number]; zoom?: { factor: number; sx: number; sy: number } }) => void
 }
 
 export const activeCanvas: { handle: CanvasHandle | null } = { handle: null }
@@ -25,7 +30,13 @@ export const activeCanvas: { handle: CanvasHandle | null } = { handle: null }
 /** Konva name of preview-only content that page renders must leave out. */
 export const PREVIEW_NAME = 'inkling-preview'
 
-export async function renderPageRegionPng(page: PageDoc, region: Rect, pixelRatio = 2, pad = 12): Promise<string | null> {
+export async function renderPageRegionPng(
+  page: PageDoc,
+  region: Rect,
+  pixelRatio = 2,
+  pad = 12,
+  format: { type: 'image/png' | 'image/jpeg'; quality?: number } = { type: 'image/png' }
+): Promise<string | null> {
   const world = activeCanvas.handle?.world()
   if (!world) return null
   const r = clipRect(region, page, pad)
@@ -57,7 +68,7 @@ export async function renderPageRegionPng(page: PageDoc, region: Rect, pixelRati
   try {
     const content = layer.toCanvas({ x: r.x, y: r.y, width: r.width, height: r.height, pixelRatio })
     ctx.drawImage(content, 0, 0, out.width, out.height)
-    return out.toDataURL('image/png')
+    return out.toDataURL(format.type, format.quality)
   } finally {
     stage.destroy()
   }

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#f6f6f7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="referrer" content="no-referrer">
+<title>Inkling PhonePad</title>
+<style>/*STYLE*/</style>
+</head>
+<body>
+<main id="app" data-tool="pen" data-conn="connecting">
+  <div id="surface" aria-label="Writing area">
+    <canvas id="ink"></canvas>
+  </div>
+
+  <nav id="dock" aria-label="PhonePad tools">
+    <span id="conn" role="status" aria-live="polite"><i></i><b id="conn-text">Connecting…</b></span>
+    <button type="button" id="tool-pen" class="tool" aria-pressed="true" aria-label="Pen">
+      <svg viewBox="0 0 24 24"><path d="M4 20l1.2-4.4L15.6 5.2a2 2 0 012.8 0l.4.4a2 2 0 010 2.8L8.4 18.8z"/><path d="M13.5 7.3l3.2 3.2"/><circle id="nib" cx="5.6" cy="18.4" r="2.6"/></svg>
+    </button>
+    <button type="button" id="tool-eraser" class="tool" aria-pressed="false" aria-label="Eraser">
+      <svg viewBox="0 0 24 24"><path d="M8.6 19.5L3.9 14.8a2 2 0 010-2.8l8.3-8.3a2 2 0 012.8 0l5 5a2 2 0 010 2.8L12.4 19.5"/><path d="M8.6 19.5H20"/><path d="M7.6 8.6l7.8 7.8"/></svg>
+    </button>
+    <span class="sep" aria-hidden="true"></span>
+    <button type="button" id="undo" aria-label="Undo">
+      <svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg>
+    </button>
+    <button type="button" id="redo" aria-label="Redo">
+      <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/></svg>
+    </button>
+    <span class="sep" aria-hidden="true"></span>
+    <button type="button" id="clear" aria-label="Clear this area">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12"/><path d="M9 7V4h6v3"/></svg>
+      <span class="confirm">Clear area?</span>
+    </button>
+    <button type="button" id="fullscreen" aria-label="Full screen" hidden>
+      <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+    </button>
+  </nav>
+
+  <p id="toast" role="status" aria-live="polite" hidden></p>
+
+  <section id="card" hidden>
+    <h1 id="card-title"></h1>
+    <p id="card-text"></p>
+    <form id="code-form" hidden>
+      <label for="code">Code shown on your computer</label>
+      <input id="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" inputmode="text" maxlength="9" placeholder="ABCD-EFGH">
+      <button type="submit">Connect</button>
+    </form>
+  </section>
+</main>
+<script>/*SCRIPT*/</script>
+</body>
+</html>

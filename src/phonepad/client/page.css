@@ -1,0 +1,106 @@
+/* Inkling's own tokens (src/renderer/src/index.css), so the phone feels like the same app. */
+:root {
+  --paper: #fdfcfa;
+  --shell: #f6f6f7;
+  --line: #e7e7ea;
+  --ink: #1f2430;
+  --ink-2: #4a5060;
+  --ink-3: #8a8f9c;
+  --accent: #2f6be4;
+  --accent-soft: #e6eefc;
+  --ok: #2f9e8f;
+  --wait: #f2a516;
+  --bad: #e5484d;
+  --nib: #1f2430;
+  --shadow: 0 1px 2px rgb(30 36 60 / 0.06), 0 10px 30px -10px rgb(30 36 60 / 0.25);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden; background: var(--shell); color: var(--ink);
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  overscroll-behavior: none; touch-action: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-text-size-adjust: 100%;
+}
+#app { position: fixed; inset: 0; }
+
+/* The paper fills the screen; the dock floats over its edge. */
+#surface { position: absolute; inset: 0; background: var(--paper); touch-action: none; }
+#ink { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+#dock {
+  position: absolute; z-index: 2; display: flex; align-items: center; gap: 2px; padding: 6px;
+  background: rgb(255 255 255 / 0.95); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+/* Landscape: a rail along the left edge. Portrait: a dock at the bottom, in thumb reach. */
+@media (orientation: landscape) {
+  #dock { left: calc(10px + var(--safe-l)); top: 50%; transform: translateY(-50%); flex-direction: column; max-height: calc(100% - 20px); }
+  .sep { width: 24px; height: 1px; margin: 4px 0; }
+  #conn { flex-direction: column; }
+  #conn b { display: none; }
+  #clear .confirm { left: calc(100% + 12px); top: 50%; transform: translateY(-50%); }
+  #toast { left: calc(86px + var(--safe-l)); }
+}
+@media (orientation: portrait) {
+  #dock { left: 50%; bottom: calc(14px + var(--safe-b)); transform: translateX(-50%); max-width: calc(100% - 20px); }
+  .sep { width: 1px; height: 24px; margin: 0 4px; }
+  #clear .confirm { bottom: calc(100% + 12px); left: 50%; transform: translateX(-50%); }
+  #toast { left: 50%; transform: translateX(-50%); }
+}
+.sep { background: var(--line); flex: none; }
+
+#dock button {
+  position: relative; width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+  border: 0; border-radius: 15px; background: transparent; color: var(--ink-2); padding: 0; cursor: pointer;
+}
+#dock button:active { background: #eef0f4; }
+#dock button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+#dock button:disabled { opacity: 0.35; }
+#dock button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#dock svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* The pen's nib carries the ink colour picked on the computer. */
+#nib { fill: var(--nib); stroke: #fff; stroke-width: 1.4; }
+
+#clear .confirm {
+  position: absolute; display: none; white-space: nowrap; padding: 6px 10px; border-radius: 10px;
+  background: var(--bad); color: #fff; font-size: 13px; font-weight: 600; pointer-events: none;
+}
+#clear.arm { background: #fdecec; color: var(--bad); }
+#clear.arm .confirm { display: block; }
+
+#conn { display: flex; align-items: center; gap: 7px; padding: 0 10px 0 8px; height: 44px; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+#conn i { width: 9px; height: 9px; border-radius: 50%; background: var(--wait); box-shadow: 0 0 0 3px rgb(242 165 22 / 0.18); flex: none; }
+[data-conn="live"] #conn i { background: var(--ok); box-shadow: 0 0 0 3px rgb(47 158 143 / 0.18); }
+[data-conn="lost"] #conn i, [data-conn="ended"] #conn i { background: var(--bad); box-shadow: 0 0 0 3px rgb(229 72 77 / 0.18); }
+@media (prefers-reduced-motion: no-preference) {
+  [data-conn="connecting"] #conn i, [data-conn="lost"] #conn i { animation: pulse 1.2s ease-in-out infinite; }
+}
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+#toast {
+  position: absolute; z-index: 3; top: calc(12px + var(--safe-t)); margin: 0; max-width: min(420px, calc(100% - 120px));
+  padding: 8px 14px; border-radius: 14px; background: #262a33; color: #fff; font-size: 13.5px; box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+/* Full-screen states: pairing, errors, no page open. */
+#card {
+  position: absolute; z-index: 4; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
+  padding: max(28px, var(--safe-t)) max(28px, var(--safe-r)) max(28px, var(--safe-b)) max(28px, var(--safe-l));
+  background: rgb(246 246 247 / 0.97);
+}
+#card > * { max-width: 460px; width: 100%; margin-left: auto; margin-right: auto; }
+#card h1 { margin: 0 0 6px; font-size: 21px; font-weight: 600; letter-spacing: -0.01em; }
+#card p { margin: 0; color: var(--ink-2); }
+#code-form { margin-top: 20px; display: grid; gap: 8px; }
+#code-form label { font-size: 13px; color: var(--ink-3); }
+#code-form input {
+  height: 52px; border: 1px solid var(--line); border-radius: 14px; padding: 0 16px; background: #fff; color: var(--ink);
+  font: 600 22px/1 system-ui, -apple-system, sans-serif; letter-spacing: 0.12em; -webkit-user-select: text; user-select: text;
+}
+#code-form input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+#code-form button { height: 48px; border: 0; border-radius: 14px; background: var(--accent); color: #fff; font: 600 16px/1 system-ui, -apple-system, sans-serif; }

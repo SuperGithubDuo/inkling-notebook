@@ -58,6 +58,17 @@ const api: InklingApi = {
       return () => ipcRenderer.removeListener(IPC.updateChanged, listener)
     }
   },
+  phonepad: {
+    start: (host) => ipcRenderer.invoke(IPC.phonepadStart, host ?? null),
+    stop: () => ipcRenderer.invoke(IPC.phonepadStop),
+    status: () => ipcRenderer.invoke(IPC.phonepadStatus),
+    send: (message) => ipcRenderer.send(IPC.phonepadSend, message),
+    onEvent: (handler) => {
+      const listener = (_e: unknown, event: Parameters<typeof handler>[0]): void => handler(event)
+      ipcRenderer.on(IPC.phonepadEvent, listener)
+      return () => ipcRenderer.removeListener(IPC.phonepadEvent, listener)
+    }
+  },
   onCommand: (handler) => {
     const listener = (_e: unknown, command: Parameters<typeof handler>[0]): void => handler(command)
     ipcRenderer.on(IPC.appCommand, listener)

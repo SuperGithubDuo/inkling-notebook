@@ -1,5 +1,6 @@
 import type { Library, NoteDoc, PageDoc } from './schema'
 import type { Connections, GraphData, SearchHit } from './search'
+import type { PhonePadEvent, PhonePadOutgoing, PhonePadStatus } from './phonepad'
 import type { AiEvent, AiModelId, AiProviderId, AiRequest, AiStartResult, AiStatus, AiTestResult, AiError, ModelAvailability } from './ai'
 
 /** Outcome of a save. `conflict` means the file changed on disk since we last
@@ -139,6 +140,19 @@ export interface InklingApi {
     /** Subscribes to streamed answers; returns an unsubscribe function. */
     onEvent(handler: (event: AiEvent) => void): () => void
   }
+  /**
+   * PhonePad: a phone on the same Wi-Fi as a writing tablet. The phone talks
+   * only to the main process, which forwards validated ink here.
+   */
+  phonepad: {
+    /** Starts a session (or restarts it on another of this computer's addresses) and returns the pairing code. */
+    start(host?: string): Promise<PhonePadStatus>
+    stop(): Promise<PhonePadStatus>
+    status(): Promise<PhonePadStatus>
+    /** Page status and the picture of the writing area, for the phone. */
+    send(message: PhonePadOutgoing): void
+    onEvent(handler: (event: PhonePadEvent) => void): () => void
+  }
   /** Main asks the renderer to flush pending saves before the window closes. */
   onFlushRequest(handler: () => Promise<FlushResult>): void
 }
@@ -186,6 +200,11 @@ export const IPC = {
   updateCheck: 'update:check',
   updateInstall: 'update:install',
   updateChanged: 'update:changed',
+  phonepadStart: 'phonepad:start',
+  phonepadStop: 'phonepad:stop',
+  phonepadStatus: 'phonepad:status',
+  phonepadSend: 'phonepad:send',
+  phonepadEvent: 'phonepad:event',
   flushRequest: 'app:flush-request',
   flushDone: 'app:flush-done'
 } as const

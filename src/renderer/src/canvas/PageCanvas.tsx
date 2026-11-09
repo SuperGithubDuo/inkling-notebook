@@ -19,20 +19,22 @@ import { useStore, type ShapeTool } from '@/store/store'
 import type { CanvasCommand } from './commands'
 import { selectionBounds } from './commands'
 import { MarkupPreview } from '@/ai/MarkupPreview'
-import { eraserHits, lassoSelects, objectAt, pointInRect, textBounds, TEXT_LINE_HEIGHT, type Vec } from './geometry'
+import { lassoSelects, objectAt, pointInRect, textBounds, TEXT_LINE_HEIGHT, type Vec } from './geometry'
 import { outlinePath } from './ink'
 import { paperStyle } from './paper'
 import { activeCanvas } from './stageRef'
 import { FONT_FAMILY, TEXT_DEFAULT_SIZE, TEXT_DEFAULT_WIDTH } from './text'
 import { ImageNode, ObjectNode, ShapeNode, StrokeNode } from './nodes'
 import { isLineLike, paintShape, shapePathData } from './shapes'
-import { cutRuns, densify } from './eraser'
+import { densify } from './eraser'
+import { eraseCommands, erasePieces, eraseSegment, simplify } from './strokeOps'
 import { assetSize } from './assets'
 import { clamp, fitPage, fitWidth, panBy, screenToPage, zoomAt, type Camera, type Size } from './viewport'
 import { SelectionToolbar } from './SelectionToolbar'
 import { ZoomControls } from './ZoomControls'
 import { BacklinksPill } from '@/notes/Connections'
 import { PdfLayer } from '@/pdf/PdfLayer'
+import { drawPhoneLive, phoneLive } from '@/phonepad/live'
 
 const EMPTY: ReadonlySet<string> = new Set()
 const HIGHLIGHTER_OPACITY = 0.45
@@ -375,12 +377,37 @@ export function PageCanvas({ pageId }: { pageId: string }) {
     [exec, page.notebookId, page.width, page.height, view, setSelection]
   )
 
+  // PhonePad: where the phone writes depends on what this view shows.
+  const navigate = useCallback(
+    (op: { pan?: [number, number]; zoom?: { factor: number; sx: number; sy: number } }) => {
+      let c = camRef.current
+      if (!c) return
+      if (op.zoom) c = zoomAt(c, op.zoom.factor, op.zoom.sx, op.zoom.sy, pageSize, view)
+      if (op.pan) c = panBy(c, op.pan[0], op.pan[1], pageSize, view)
+      setCam(c)
+    },
+    [pageSize, view, setCam]
+  )
+
   useEffect(() => {
-    activeCanvas.handle = { world: () => worldRef.current, placeImage, zoom: zoomAction }
+    activeCanvas.handle = {
+      world: () => worldRef.current,
+      placeImage,
+      zoom: zoomAction,
+      camera: () => (camRef.current && view.width ? { pageId, cam: camRef.current, view, page: pageSize } : null),
+      navigate
+    }
+    phoneLive.cameraChanged()
     return () => {
       activeCanvas.handle = null
+      phoneLive.cameraChanged()
     }
-  }, [placeImage, zoomAction])
+  }, [placeImage, zoomAction, navigate, pageId, view, pageSize])
+
+  useEffect(() => phoneLive.cameraChanged(), [cam])
+
+  // Ink arriving from the phone redraws the live layer only.
+  useEffect(() => phoneLive.subscribe(() => liveShape.current?.getLayer()?.batchDraw()), [])
 
   async function insertImageBytes(file: File, at?: Vec): Promise<void> {
     const result = await window.inkling.saveImageBytes(page.notebookId, new Uint8Array(await file.arrayBuffer()))
@@ -615,54 +642,16 @@ export function PageCanvas({ pageId }: { pageId: string }) {
   function eraseAlong(a: Point, b: Point): void {
     const g = gesture.current
     if (g?.kind !== 'erase') return
-    const c = camRef.current!
     // Eraser size is in screen pixels so it feels the same at every zoom.
-    const radius = useStore.getState().eraserSize / c.scale
-    let changed = false
-    for (const o of useStore.getState().pages[pageId]!.objects) {
-      if (g.hits.has(o.id) && !g.pieces.has(o.id)) continue
-      if (g.precise && o.type === 'stroke') {
-        const runs = g.pieces.get(o.id) ?? [densify(o.points, Math.max(0.75, radius / 3))]
-        const cut = cutRuns(runs, a, b, radius + o.size * 0.35)
-        if (cut) {
-          g.pieces.set(o.id, cut)
-          g.hits.add(o.id)
-          changed = true
-        }
-      } else if (!g.hits.has(o.id) && eraserHits(o, a, b, radius)) {
-        g.hits.add(o.id)
-        changed = true
-      }
-    }
-    if (changed) {
-      const objects = useStore.getState().pages[pageId]!.objects
-      const extra: StrokeObject[] = []
-      for (const [id, runs] of g.pieces) {
-        const src = objects.find((o) => o.id === id) as StrokeObject | undefined
-        if (src) runs.forEach((points, i) => extra.push({ ...src, id: `${id}-p${i}`, points }))
-      }
-      setErasePreview({ hidden: new Set(g.hits), extra })
-    }
+    const radius = useStore.getState().eraserSize / camRef.current!.scale
+    const objects = useStore.getState().pages[pageId]!.objects
+    if (eraseSegment(g, objects, a, b, radius)) setErasePreview({ hidden: new Set(g.hits), extra: erasePieces(g, objects) })
   }
 
   function finishErase(g: Extract<Gesture, { kind: 'erase' }>): void {
     setErasePreview({ hidden: EMPTY, extra: [] })
     if (!g.hits.size) return
-    const objects = useStore.getState().pages[pageId]!.objects
-    const commands: CanvasCommand[] = []
-    // Work from the top layer down so earlier indices stay valid.
-    const hit = objects.map((o, index) => ({ o, index })).filter(({ o }) => g.hits.has(o.id))
-    for (const { o, index } of hit.reverse()) {
-      commands.push({ type: 'deleteObjects', ids: [o.id] })
-      const runs = g.pieces.get(o.id)
-      if (runs && o.type === 'stroke') {
-        runs.forEach((points, i) => {
-          const { color, size, opacity, tool, hasPressure } = o
-          commands.push({ type: 'createStroke', index: index + i, stroke: { color, size, opacity, tool, hasPressure, points: simplify(points) } })
-        })
-      }
-    }
-    exec(commands, 'Erase')
+    exec(eraseCommands(g, useStore.getState().pages[pageId]!.objects), 'Erase')
   }
 
   function onPointerUp(e: React.PointerEvent<HTMLDivElement>): void {
@@ -850,7 +839,10 @@ export function PageCanvas({ pageId }: { pageId: string }) {
                   ref={liveShape}
                   listening={false}
                   perfectDrawEnabled={false}
-                  sceneFunc={(ctx) => drawLive(ctx._context, live.current, cam.scale)}
+                  sceneFunc={(ctx) => {
+                    drawPhoneLive(ctx._context, pageId, cam.scale)
+                    drawLive(ctx._context, live.current, cam.scale)
+                  }}
                 />
               </Group>
             </Layer>
@@ -989,16 +981,4 @@ function drawLive(c: CanvasRenderingContext2D, l: Live, scale: number): void {
     paintShape(c, new Path2D(shapePathData(l.shape, l.w, l.h, l.strokeWidth)), { ...l, fillOpacity: 0.18 })
   }
   c.restore()
-}
-
-/** Drops points closer than 0.4 page units apart: smaller files, same look. */
-function simplify(points: Point[]): Point[] {
-  const round = (v: number): number => Math.round(v * 100) / 100
-  const out: Point[] = []
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i]!
-    const q = out[out.length - 1]
-    if (!q || i === points.length - 1 || Math.hypot(p[0] - q[0], p[1] - q[1]) >= 0.4) out.push(p)
-  }
-  return out.map((p) => (p.length === 3 ? [round(p[0]), round(p[1]), round(p[2])] : [round(p[0]), round(p[1])]) as Point)
 }

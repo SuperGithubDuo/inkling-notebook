@@ -16,6 +16,8 @@ import { TUTOR_INPUT_ID, openTutorChat } from './ai/tutorStore'
 import { ConsentDialog } from './ai/ConsentDialog'
 import { NoteEditor } from './notes/NoteEditor'
 import { AppDialogs } from './app/AppDialogs'
+import { installPhonePad } from './phonepad/install'
+import { PhonePadDialog } from './phonepad/PhonePadDialog'
 
 
 export function App() {
@@ -31,6 +33,7 @@ export function App() {
   const openSettings = useCallback(() => useAi.getState().openSettings(true), [])
 
   useShortcuts()
+  useEffect(() => installPhonePad(), [])
   useEffect(() => {
     // Wait for the UI font so canvas text is measured with the right metrics.
     void Promise.all([document.fonts.load('16px Inter'), document.fonts.load('500 16px Caveat')]).finally(() => useStore.getState().init())
@@ -81,6 +84,7 @@ export function App() {
       {settings && <SettingsDialog onClose={() => useAi.getState().openSettings(false)} />}
       <ConsentDialog />
       <AppDialogs />
+      <PhonePadDialog />
       {searchOpen && <SearchPalette onClose={() => useStore.getState().setSearchOpen(false)} />}
     </div>
   )

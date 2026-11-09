@@ -35,6 +35,7 @@ import { NotebookIcon } from './NotebookIcon'
 import { useApp } from '@/app/appStore'
 import { BookOpen, Info, MessageSquare } from 'lucide-react'
 import { ImageButton, ShapePicker } from './ToolControls'
+import { PhonePadButton } from '@/phonepad/PhonePadDialog'
 import { NoteToolbar } from '@/notes/NoteToolbar'
 import { exportActiveNoteMarkdown, importMarkdownNote } from '@/notes/noteActions'
 import { exportActiveNotebookPdf, importPdfIntoNotebook } from '@/pdf/pdfActions'
@@ -157,6 +158,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
             <Type size={19} strokeWidth={1.8} />
           </IconButton>
           <ImageButton />
+          <PhonePadButton />
           <IconButton label="Audio recording — not yet available" disabled className="@max-[720px]:hidden">
             <Mic size={19} strokeWidth={1.8} />
           </IconButton>
