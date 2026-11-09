@@ -21,6 +21,7 @@ This is **v0.1.5**: a standalone, independently runnable prototype that lives in
 | Ink | One continuous noise-gated One Euro filter for cursor and live ink, noise-scaled stabilizer, noise-matched zero-lag refinement of each finished stroke (glitch removal + Whittaker smoother), pen-down seeding, spike rejection and stroke splitting on confirmed jumps, distance-based resampling, raw positions kept beside smoothed ones, perfect-freehand rendering (same ink library as Inkling) |
 | Mapping | Page-normalized coordinates; automatic writing region fitted to your hand so every page edge and corner is reachable with your palm in view (locked for the session); mapping frozen from pinch start to pen-up, setting changes applied at the next pen-up (v0.1.5); writing size Small / Medium / Large / Custom; optional two-pinch calibration that keeps the page's aspect ratio (equal x and y gain, v0.1.5); letterboxed page that keeps geometry on resize |
 | Writing Assist (optional) | Steady writing size when you lean in or back (distance-compensated writing plane from MediaPipe's 3D landmarks); toggleable baseline, x-height, uppercase and line-spacing guides with adjustable line spacing (v0.1.5); *Tidy lines* straightens slightly tilted lines as rigid wholes and is fully reversible (*Restore original*, undo) |
+| Ghost Whiteboard | Optional view: the webcam, faint and grey, behind a translucent whiteboard, aligned so your hand appears under the cursor and ink; *Webcam* visibility slider (3–50 %, default 12 % = an 88 % opaque board); camera on/off; guides. Reuses the tracking camera stream; display only, never recorded or exported |
 | Editing | Pen colour and thickness, undo/redo, clear (undoable), JSON export/import with validation, PNG export |
 | Mouse mode | Mouse drives the same engine as the webcam (left button = pinch) for development and testing without a camera |
 | UI | Toolbar, camera panel with status, settings, onboarding, status pill, optional developer diagnostics (tracking FPS, inference time, frame interval, capture→pen-update latency, skipped frames, hand orientation quality, 3D share of the pinch, gesture state, pinch ratio/baseline/noise, trimmed points) Smart Ink counters (glitch frames dropped, fast frames released, gaps bridged, strokes split, ink suspended, tracking residual), a v0.1.4-pipeline switch for live A/B testing, and a trace recorder (landmarks + handedness + per-frame measurements and guard verdicts + pen events + *Mark glitch* labels + strokes, never video) |
@@ -70,6 +71,8 @@ Camera access requires a secure origin; `localhost` counts, so `dev` and `previe
 
 Tips: good front lighting helps more than anything else. Keep your palm roughly facing the camera. If you have to stretch to reach the page edges, raise *Writing sensitivity*. If the pen goes down too easily or not easily enough, adjust *Pen-down sensitivity*; if strokes break while you write, lower *Pen-up sensitivity*, and if the pen is slow to lift, raise it. *Set writing area* lets you pinch at two corners to choose where in the camera view you write.
 
+**Ghost Whiteboard.** Click *Ghost Whiteboard* in the toolbar. The page becomes a translucent board with you faintly visible behind it, as if writing on glass; the control bar at the top turns the camera on or off, sets how much of the webcam shows through (*Webcam*, 3–50 %), and toggles guides. Everything else — pinch writing, mouse mode, Natural Writing / Writing Assist, undo, export — works exactly as in the normal view. Click the button again to return.
+
 **Mouse mode.** Switch to *Mouse* in the toolbar. Hold the left button to draw. Everything else (smoothing, undo, export) behaves exactly as with the webcam.
 
 **Shortcuts.** `Ctrl/⌘+Z` undo, `Ctrl/⌘+Shift+Z` or `Ctrl/⌘+Y` redo, `Esc` closes settings or cancels calibration.
@@ -82,7 +85,7 @@ src/
   gestures/     pinchDetector.ts (hysteresis) · gestureState.ts (state machine)
   strokes/      types.ts (data model) · coordinates.ts · writingPlane.ts (hand-fitted region, steady scale) · continuity.ts (v0.1.5 stroke protection) · layout.ts (guides, Tidy lines) · smoothing.ts · strokeEngine.ts · documentStore.ts (undo/redo) · serialization.ts
   input/        handFrameProcessor.ts (landmarks → engine, pure) · webcamInput.ts (camera + tracker + loop) · mouseInput.ts
-  canvas/       renderer.ts (Canvas 2D, two layers)
+  canvas/       renderer.ts (Canvas 2D, two layers; translucent board for Ghost Whiteboard) · ghost.ts (webcam/board alignment)
   core/         wispController.ts (wiring) · settings.ts · emitter.ts
   integration/  types.ts (public events) · inklingAdapter.ts (sketch, not wired)
   replay/       trace.ts (landmark traces, recorder) · hand3d.ts (3D hand + camera) · synth.ts (synthetic hands + noise model) · scenarios.ts · replay.ts (pipeline replay + metrics) · font.ts · layout.ts · layoutScenes.ts · boundary.ts (v0.1.4 layout harness) · ab.ts (v0.1.5 A/B scenarios + metrics)
@@ -115,6 +118,22 @@ Key boundaries:
 - **One engine for every input.** Webcam and mouse both call `StrokeEngine.input(sample, down)`. There is no second drawing path.
 - **Inference is separate from rendering and React.** The tracking loop runs on `requestVideoFrameCallback` (one inference per new camera frame; `requestAnimationFrame` + `currentTime` check as fallback). Strokes reach the canvas through engine events; the canvas redraws on the next animation frame only when something changed. React only hears low-frequency events (gesture state, stroke start/end) and polls diagnostics 4×/s.
 - **Editing is separate from rendering.** `DocumentStore` holds the document and an operation history; the renderer just draws whatever document it's given.
+
+## Ghost Whiteboard (display mode)
+
+**Layers, bottom to top:** (1) the webcam in grey (`components/GhostLayer.tsx`), (2) the whiteboard drawn translucent on the ink canvas, with a light veil around it, (3) fully opaque ink on the same canvas, (4) the live stroke and cursor on the overlay canvas, (5) the controls. Guides are drawn on the board just under the ink, so they never tint it.
+
+**Same camera, no extra work.** The webcam layer is a second `<video>` that shows the `MediaStream` already attached to the tracking video, so the camera is opened once and nothing extra is inferred. When that stream stops (camera off, denied, unplugged), the layer goes blank and the board is opaque again; the whiteboard keeps working with the webcam or the mouse.
+
+**Aligned with the ink.** Every animation frame the video is placed so that the camera's writing region — the exact part of the view the engine maps to the page (frozen during a stroke, following calibration, writing size and Writing Assist) — covers the board exactly, mirrored like the preview (`canvas/ghost.ts`). The hand behind the board is therefore under its cursor and ink everywhere, edges and corners included. Only CSS changes, and only when the geometry does.
+
+**Transparency.** One control: *Webcam* visibility v (3–50 %, saved in settings). The board is drawn at opacity 1 − v, so the default 12 % gives an 88 % opaque board; ink, cursor and guides are never made transparent.
+
+**Privacy and export.** Display only: no frame is captured, stored, uploaded or exported. PNG export redraws the strokes offscreen on an opaque page; JSON contains strokes only.
+
+**Checked** (`tests/ghost.test.ts`: alignment for 4 mappings × mirror on/off × 3 screen sizes at 15 points incl. corners, opacity, settings; headless Chrome with a fake camera at 1× and 2×): opaque white board with the camera off; webcam faint and grey at 12 % (mean darkness 12/255) and stronger at 40 % (42/255); ink pixels exactly the pen colour at both; strokes reach x and y = 0 and 1; PNG export pure white background + ink only; JSON strokes only; undo/redo; resize; camera stopped → opaque again; camera denied → message, mouse writing works; 61 fps with and without the webcam layer.
+
+**Limitation.** The alignment is exact for the writing region; it does not correct for the hand's depth (the image of a hand nearer the camera is larger), so near the edges the background hand and the ink can differ by a few millimetres of physical motion. Real-webcam look and feel (lighting, how visible 12 % is on your camera) is untested here: the camera model could not be downloaded in the test environment, so a fake camera stream stood in for it.
 
 ## v0.1.5: Smart Ink — stroke integrity and steady mapping
 
@@ -535,7 +554,7 @@ Nothing in Inkling has been changed for this yet.
 
 ## Testing
 
-`npm test` runs 390 unit tests (v0.1.5 adds 99: the continuity guard — ordinary, fast, reversing, glitching, relocating, swapping, gapping and suspended-then-steady motion, distance independence; mapping frozen for a stroke and setting changes deferred; aspect-true calibration; A/B guarantees on normal and adversarial traces; 64 bit-exact v0.1.4 replays; trace v4; recording → replay fidelity through the real webcam loop; switching pipelines mid-stroke; guides and settings; wisp-motion validation, manifests, splits, leakage, features, labels and baselines. v0.1.4 added 72 gesture-golden cases and 22 boundary/plane/layout tests; earlier: 197 (v0.1.3 adds 21: 3D ratio invariance and fallbacks, orientation quality and blending, live-ink pause and identical decisions, glitch confirmation, quadratic onset, robust noise level, fast-loop refinement, orientation scenarios, trace v3, settings)). They cover:
+`npm test` runs 419 unit tests (Ghost Whiteboard adds 29 alignment/opacity/settings tests; v0.1.5 adds 99: the continuity guard — ordinary, fast, reversing, glitching, relocating, swapping, gapping and suspended-then-steady motion, distance independence; mapping frozen for a stroke and setting changes deferred; aspect-true calibration; A/B guarantees on normal and adversarial traces; 64 bit-exact v0.1.4 replays; trace v4; recording → replay fidelity through the real webcam loop; switching pipelines mid-stroke; guides and settings; wisp-motion validation, manifests, splits, leakage, features, labels and baselines. v0.1.4 added 72 gesture-golden cases and 22 boundary/plane/layout tests; earlier: 197 (v0.1.3 adds 21: 3D ratio invariance and fallbacks, orientation quality and blending, live-ink pause and identical decisions, glitch confirmation, quadratic onset, robust noise level, fast-loop refinement, orientation scenarios, trace v3, settings)). They cover:
 - **Gestures:** pinch thresholds and asymmetry; deliberate pen-down (drifting fingers don't start ink); pen-up cases (rapid, slow, small and fast openings, noisy measurements, re-pinch); hinge-fit trimming (quick release trims nothing, slow release trims the ramp); tracking gaps before and during writing.
 - **Smoothing:** the Whittaker solver against a dense reference; glitch removal; noise estimation; noise-matched refinement (straightens noisy ticks without shortening them, keeps loops round); the noise-gated filter.
 - **Ink and data:** the midpoint and mirroring; the continuous filter and seeding; pinch depth weight; trace v2 recording and parsing; serialization round-trips and invalid input; settings migration; undo/redo; the Inkling adapter.

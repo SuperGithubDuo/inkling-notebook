@@ -30,6 +30,10 @@ export interface WispSettings {
   guideXHeight: boolean
   guideCapHeight: boolean
   guideLineSpacing: boolean
+  /** Ghost Whiteboard (display only): 'standard' page, or the page as translucent glass over the webcam. */
+  viewMode: 'standard' | 'ghost'
+  /** Ghost Whiteboard: how much of the webcam shows through the board (0.03–0.5; board opacity = 1 − this). */
+  ghostVisibility: number
   /** v0.1.5: distance between guide lines relative to the writing size (0.6–2; 1 = normal). */
   lineSpacing: number
   /**
@@ -72,6 +76,8 @@ export const DEFAULT_SETTINGS: WispSettings = {
   guideXHeight: true,
   guideCapHeight: false,
   guideLineSpacing: false,
+  viewMode: 'standard',
+  ghostVisibility: 0.12,
   lineSpacing: 1,
   strokeProtection: true,
   legacyPipeline: false,
@@ -120,6 +126,8 @@ export function sanitizeSettings(raw: unknown): WispSettings {
     guideXHeight: bool(r.guideXHeight, d.guideXHeight),
     guideCapHeight: bool(r.guideCapHeight, d.guideCapHeight),
     guideLineSpacing: bool(r.guideLineSpacing, d.guideLineSpacing),
+    viewMode: r.viewMode === 'ghost' ? 'ghost' : 'standard',
+    ghostVisibility: num(r.ghostVisibility, 0.03, 0.5, d.ghostVisibility),
     lineSpacing: num(r.lineSpacing, 0.6, 2, d.lineSpacing),
     strokeProtection: bool(r.strokeProtection, d.strokeProtection),
     legacyPipeline: bool(r.legacyPipeline, d.legacyPipeline),

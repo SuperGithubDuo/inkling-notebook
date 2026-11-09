@@ -10,6 +10,8 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { Onboarding, hasSeenOnboarding, markOnboardingSeen } from './components/Onboarding'
 import { StatusPill } from './components/StatusPill'
 import { Toast, type ToastMsg } from './components/Toast'
+import { GhostLayer } from './components/GhostLayer'
+import { GhostControls } from './components/GhostControls'
 
 const INITIAL_PEN: PenStyle = { color: '#1f2430', width: 4 }
 const OFF_STATUS: WebcamStatus = { camera: 'off', tracker: 'idle', error: null, delegate: null, modelSource: null }
@@ -138,6 +140,7 @@ export function App() {
   }
 
   const pointCount = doc.strokes.reduce((n, s) => n + s.points.length, 0)
+  const ghost = settings.viewMode === 'ghost'
 
   return (
     <div className="app">
@@ -170,10 +173,23 @@ export function App() {
           const n = ctl.restoreOriginal()
           setToast({ kind: 'ok', text: `Restored ${n} stroke${n === 1 ? '' : 's'} to exactly where you wrote them.` })
         }}
+        ghost={ghost}
+        onGhost={() => updateSettings({ viewMode: ghost ? 'standard' : 'ghost' })}
       />
       <div className="workspace">
-        <main className="stage">
+        <main className={`stage ${ghost ? 'is-ghost' : ''}`}>
+          {ghost && <GhostLayer ctl={ctl} source={video} visibility={settings.ghostVisibility} mirror={settings.mirror} />}
           <div ref={canvasHost} className={`canvas-host ${mode === 'mouse' ? 'is-mouse' : ''}`} />
+          {ghost && (
+            <GhostControls
+              status={status}
+              visibility={settings.ghostVisibility}
+              guides={settings.showGuides}
+              onVisibility={(v) => updateSettings({ ghostVisibility: v })}
+              onGuides={(v) => updateSettings({ showGuides: v })}
+              onCamera={(on) => (on ? startWebcam() : ctl.stopWebcam())}
+            />
+          )}
           <StatusPill mode={mode} status={status} gesture={gesture} writing={writing} />
           {showSettings && <SettingsPanel settings={settings} onChange={updateSettings} onClose={() => setShowSettings(false)} />}
         </main>

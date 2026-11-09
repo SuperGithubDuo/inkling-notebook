@@ -75,6 +75,9 @@ export class CanvasRenderer {
   private cursorColor = '#1f2430'
   private cursorWidth = 4
   private guides: GuideOverlay = null
+  /** Ghost Whiteboard: page opacity (1 = normal opaque page) and whether the area around the page is veiled. */
+  private boardAlpha = 1
+  private ghost = false
   private _fit: PageFit = { left: 0, top: 0, width: 1, height: 1 }
   private cssW = 1
   private cssH = 1
@@ -128,6 +131,20 @@ export class CanvasRenderer {
   setCursor(c: Partial<CursorState>): void {
     this.cursor = { ...this.cursor, ...c }
     this.overlayDirty = true
+    this.schedule()
+  }
+
+  /**
+   * Ghost Whiteboard: draw the page at `opacity` (the webcam shows through
+   * it) and veil the area around the page. Ink, guides and cursor stay fully
+   * opaque. Display only: exports never include it.
+   */
+  setBoard(opacity: number, ghost: boolean): void {
+    const a = Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1
+    if (a === this.boardAlpha && ghost === this.ghost) return
+    this.boardAlpha = a
+    this.ghost = ghost
+    this.inkDirty = true
     this.schedule()
   }
 
@@ -245,17 +262,39 @@ export class CanvasRenderer {
     const doc = this.doc
     if (!doc) return
     const f = this._fit
-    // Page with a soft shadow, like a sheet on Inkling's shell.
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
+    if (this.ghost) {
+      // Ghost Whiteboard: veil everything around the board, so the board is the main surface.
+      ctx.save()
+      ctx.fillStyle = 'rgba(246, 246, 247, 0.94)'
+      ctx.beginPath()
+      ctx.rect(0, 0, this.cssW, this.cssH)
+      ctx.rect(f.left, f.top, f.width, f.height)
+      ctx.fill('evenodd')
+      ctx.restore()
+    }
     ctx.save()
-    ctx.shadowColor = 'rgba(30, 36, 60, 0.10)'
-    ctx.shadowBlur = 24
-    ctx.shadowOffsetY = 6
+    if (this.boardAlpha >= 1) {
+      // Page with a soft shadow, like a sheet on Inkling's shell.
+      ctx.shadowColor = 'rgba(30, 36, 60, 0.10)'
+      ctx.shadowBlur = 24
+      ctx.shadowOffsetY = 6
+    }
+    // A translucent board gets no shadow (it would show through as a grey tint).
+    ctx.globalAlpha = this.boardAlpha
     ctx.fillStyle = doc.canvas.background
     ctx.beginPath()
     ctx.roundRect(f.left, f.top, f.width, f.height, PAGE_RADIUS)
     ctx.fill()
     ctx.restore()
+    if (this.boardAlpha < 1) {
+      // The board's edge, so all four edges stay visible over the webcam.
+      ctx.save()
+      ctx.strokeStyle = 'rgba(30, 36, 60, 0.18)'
+      ctx.lineWidth = 1
+      ctx.strokeRect(f.left - 0.5, f.top - 0.5, f.width + 1, f.height + 1)
+      ctx.restore()
+    }
     ctx.save()
     // v0.1.4: clip ink to the page RECTANGLE. v0.1–v0.1.3 clipped to the
     // rounded page shape (10 px radius), which hid ink drawn into the corners.

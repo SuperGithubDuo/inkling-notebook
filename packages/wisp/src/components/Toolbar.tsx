@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { useDismiss } from './useDismiss'
-import { AlignLeft, Download, FileJson, Hand, HelpCircle, Image, MousePointer2, Redo2, RotateCcw, Settings2, Trash2, Undo2, Upload } from 'lucide-react'
+import { AlignLeft, Download, FileJson, Ghost, Hand, HelpCircle, Image, MousePointer2, Redo2, RotateCcw, Settings2, Trash2, Undo2, Upload } from 'lucide-react'
 import type { PenStyle } from '../strokes/types'
 
 const COLORS = ['#1f2430', '#2f6be4', '#e5484d', '#1f9d63', '#6d63f0', '#e8870e']
@@ -29,6 +29,9 @@ interface Props {
   canRestore: boolean
   onTidy(): void
   onRestore(): void
+  /** Ghost Whiteboard view (display only). */
+  ghost: boolean
+  onGhost(): void
 }
 
 export function Toolbar(p: Props) {
@@ -163,6 +166,9 @@ export function Toolbar(p: Props) {
             </div>
           )}
         </div>
+        <button className={`btn sm ${p.ghost ? 'on' : 'ghost'}`} onClick={p.onGhost} aria-pressed={p.ghost} title="Ghost Whiteboard: write on a translucent board with yourself faintly visible behind it">
+          <Ghost size={15} /> <span className="label-wide">Ghost Whiteboard</span>
+        </button>
         <button className={`icon ${p.settingsOpen ? 'active' : ''}`} onClick={p.onSettings} title="Settings" aria-label="Settings">
           <Settings2 size={17} />
         </button>

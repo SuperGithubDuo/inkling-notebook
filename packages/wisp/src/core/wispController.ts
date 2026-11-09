@@ -18,6 +18,7 @@ import { StrokeEngine } from '../strokes/strokeEngine'
 import { createDocument, type PenStyle } from '../strokes/types'
 import { guideLines, restoreOriginal, tidyLines, type TidyReport } from '../strokes/layout'
 import type { WispSettings } from './settings'
+import type { PageFit } from '../strokes/coordinates'
 
 export type InputMode = 'webcam' | 'mouse'
 
@@ -78,6 +79,16 @@ export class WispController {
     })
     if (this._mode === 'mouse') this.mouse.attach()
     this.applyGuides()
+  }
+
+  /** Where the page sits in the canvas host (CSS px), for the Ghost Whiteboard webcam layer. */
+  get pageFit(): PageFit | null {
+    return this.renderer?.fit ?? null
+  }
+
+  /** Ghost Whiteboard board opacity (1 = opaque page); display only. */
+  setBoard(opacity: number, ghost: boolean): void {
+    this.renderer?.setBoard(opacity, ghost)
   }
 
   /** Guides follow the writing scale, so ruled lines match the size the mapping produces. */

@@ -134,6 +134,25 @@ h1, h2, h3, p { margin: 0; }
 .workspace { display: grid; grid-template-columns: 1fr 320px; min-height: 0; }
 .stage { position: relative; min-width: 0; min-height: 0; }
 .canvas-host { position: absolute; inset: 0; overflow: hidden; }
+
+/* ── Ghost Whiteboard ────────────────────────────────── */
+/* Layers, bottom to top: webcam (grey) → translucent board + veil (ink canvas) → ink → cursor (overlay canvas) → controls. */
+.stage.is-ghost { background: #2b2e35; }
+.ghost-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.ghost-layer video { position: absolute; display: block; max-width: none; filter: grayscale(1) contrast(1.05) brightness(1.05); }
+.ghost-controls {
+  position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 5;
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 6px;
+  background: rgb(255 255 255 / 0.96); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--shadow-float);
+  white-space: nowrap;
+}
+.ghost-controls .btn { border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; }
+.ghost-slider { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-weight: 500; }
+.ghost-slider input { width: 120px; accent-color: var(--accent); }
+.ghost-slider .value { width: 34px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+.ghost-slider.disabled { opacity: 0.5; }
+.ghost-note { color: var(--warn); font-size: 12px; padding-right: 6px; }
+.btn.on { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent-strong); }
 .canvas-host.is-mouse canvas { cursor: none; }
 
 .status-pill {
