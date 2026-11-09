@@ -11,6 +11,7 @@ import { effectiveRegion } from '../input/handFrameProcessor'
 import type { NormPoint, Stroke } from '../strokes/types'
 import { unpackLandmarks, type LandmarkTrace } from './trace'
 import type { GestureConfig } from '../gestures/gestureState'
+import { sanitizeSettings } from '../core/settings'
 
 export interface ReplayConfig {
   processor?: Partial<ProcessorConfig>
@@ -30,6 +31,34 @@ export const REPLAY_PROCESSOR: ProcessorConfig = {
   // v0.1.4 layout scenarios use the hand-fitted region (replay/layout.ts).
   regionFit: 'centred',
   pageAspect: 1.6
+}
+
+/**
+ * Replay settings for a RECORDED trace: the WISP settings saved in the file
+ * (mirroring, calibrated area, hand-fitted area, writing size, Writing Assist,
+ * pen point, pinch settings, smoothing), so the replay maps and draws ink the
+ * way the writer saw it. Traces without settings get WISP's defaults (not the
+ * synthetic-scenario defaults in REPLAY_PROCESSOR). `smartInk` follows the
+ * recorded pipeline unless the caller overrides it.
+ */
+export function configFromTrace(trace: LandmarkTrace): ReplayConfig {
+  const s = sanitizeSettings(trace.settings ?? {})
+  return {
+    processor: {
+      mirror: s.mirror,
+      writingSensitivity: s.writingSensitivity,
+      pinchSensitivity: s.pinchSensitivity,
+      releaseSensitivity: s.releaseSensitivity,
+      penPoint: s.penPoint,
+      pinchMetric: s.pinchMetric,
+      region: s.region,
+      regionFit: 'hand',
+      keepScale: s.writingMode === 'assist',
+      smartInk: !s.legacyPipeline,
+      strokeProtection: s.strokeProtection
+    },
+    engine: { smoothing: s.smoothing, stabilizer: s.stabilizer, refine: s.refine }
+  }
 }
 
 export interface ReplayResult {

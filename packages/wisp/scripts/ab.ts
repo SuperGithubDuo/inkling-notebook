@@ -13,7 +13,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { AB_CASES, PIPELINES, inkDifference, runAb, PAGE_H, PAGE_W, type AbMetrics } from '../src/replay/ab'
 import { parseTrace } from '../src/replay/trace'
-import { replay, truthStrokes, REPLAY_PROCESSOR, type ReplayResult, type StrokeTruth } from '../src/replay/replay'
+import { configFromTrace, replay, truthStrokes, REPLAY_PROCESSOR, type ReplayResult, type StrokeTruth } from '../src/replay/replay'
 
 const args = process.argv.slice(2)
 const opt = (n: string) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined)
@@ -64,7 +64,9 @@ if (files.length) {
   const rows: Array<{ heading: string; panels: Panel[] }> = []
   for (const file of files) {
     const trace = parseTrace(JSON.parse(readFileSync(file, 'utf8')))
-    const res = Object.fromEntries(P.map((p) => [p, replay(trace, PIPELINES[p])])) as Record<(typeof P)[number], ReplayResult>
+    // Both pipelines with the settings recorded in the file (mapping, mirroring, Writing Assist, smoothing).
+    const rec = configFromTrace(trace)
+    const res = Object.fromEntries(P.map((p) => [p, replay(trace, { ...rec, processor: { ...rec.processor, ...PIPELINES[p].processor } })])) as Record<(typeof P)[number], ReplayResult>
     const diff = inkDifference(res['v0.1.4'], res['v0.1.5'])
     const longest = (r: ReplayResult) => Math.max(0, ...r.strokes.flatMap((s) => s.points.slice(1).map((q, i) => Math.hypot((q.x - s.points[i]!.x) * PAGE_W, (q.y - s.points[i]!.y) * PAGE_H))))
     const delay = (r: ReplayResult) => {
@@ -72,7 +74,8 @@ if (files.length) {
       return d.length ? d.reduce((a, q) => a + ((q.at ?? q.t) - q.t), 0) / d.length : 0
     }
     const marks = (trace.events ?? []).filter((e) => e.type === 'mark').length
-    console.log(`${file} (${trace.frames.length} frames${marks ? `, ${marks} "Mark glitch" presses` : ''})`)
+    const st = trace.settings as Record<string, unknown> | undefined
+    console.log(`${file} (${trace.frames.length} frames${marks ? `, ${marks} "Mark glitch" presses` : ''}; recorded with ${st ? `WISP ${String(st.version ?? '?')}, ${st.legacyPipeline ? 'v0.1.4 pipeline' : 'Smart Ink'}, ${st.writingMode === 'assist' ? 'Writing Assist' : 'Natural Writing'}${st.region ? ', calibrated area' : ''}` : 'no saved settings: WISP defaults'})`)
     console.log('  pipeline  strokes  longest segment px  added delay ms  ms/frame')
     for (const p of P) console.log(`  ${p}    ${String(res[p].strokes.length).padStart(7)}  ${longest(res[p]).toFixed(0).padStart(18)}  ${delay(res[p]).toFixed(2).padStart(14)}  ${res[p].msPerFrame.toFixed(3)}`)
     console.log(`  ink only in v0.1.4 (removed by Smart Ink): ${diff.onlyA.toFixed(0)} px · ink only in v0.1.5: ${diff.onlyB.toFixed(0)} px`)

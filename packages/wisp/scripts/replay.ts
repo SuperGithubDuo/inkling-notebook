@@ -19,6 +19,7 @@ import { replay, score, truthStrokes, wobble, type ReplayConfig, type ReplayResu
 import { SCENARIOS, setFps, setNoiseProfile, setNoiseScale, setWorldNoise, type NoiseProfile } from '../src/replay/scenarios'
 import { parseTrace } from '../src/replay/trace'
 import { DEFAULT_SETTINGS } from '../src/core/settings'
+import { configFromTrace } from '../src/replay/replay'
 
 const args = process.argv.slice(2)
 const opt = (name: string): string | undefined => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)
@@ -39,13 +40,14 @@ setWorldNoise(Number(opt('--world-noise') ?? 1))
 const PAGE_PX = 1600
 const px = (v: number, w = 6) => (v * PAGE_PX).toFixed(1).padStart(w)
 
-function configsFor(): Array<{ label: string; cfg: ReplayConfig }> {
+function configsFor(recorded?: ReplayConfig): Array<{ label: string; cfg: ReplayConfig }> {
   const d = DEFAULT_SETTINGS as unknown as Record<string, unknown>
-  const base: ReplayConfig = {
+  // A recorded trace replays with the settings saved in it (v0.1.5); synthetic scenarios with the defaults.
+  const base: ReplayConfig = recorded ?? {
     processor: { penPoint: d.penPoint as never, pinchSensitivity: d.pinchSensitivity as number, releaseSensitivity: d.releaseSensitivity as number },
     engine: { smoothing: d.smoothing as number, stabilizer: d.stabilizer as number, refine: d.refine as boolean }
   }
-  if (!compare) return [{ label: 'defaults', cfg: base }]
+  if (!compare) return [{ label: recorded ? 'recorded settings' : 'defaults', cfg: base }]
   const [key, values] = compare.split('=') as [string, string]
   return values.split(',').map((v) => {
     const val = v === 'true' ? true : v === 'false' ? false : Number.isNaN(Number(v)) ? v : Number(v)
@@ -101,7 +103,7 @@ if (file) {
   console.log(`${file}: ${frames} frames, ${dur.toFixed(1)} s, ${(frames / Math.max(dur, 1e-3)).toFixed(1)} fps${trace.note ? ` — ${trace.note}` : ''}\n`)
   console.log('config'.padEnd(26), 'strokes', 'wobble px', 'points', 'ms/frame')
   const panels: Panel[] = []
-  for (const { label, cfg } of configsFor()) {
+  for (const { label, cfg } of configsFor(configFromTrace(trace))) {
     const r = replay(trace, cfg)
     const w = r.strokes.length ? r.strokes.reduce((s, k) => s + wobble(k.points), 0) / r.strokes.length : 0
     console.log(label.padEnd(26), String(r.strokes.length).padStart(7), px(w, 9), String(r.strokes.reduce((s, k) => s + k.points.length, 0)).padStart(6), r.msPerFrame.toFixed(3).padStart(8))

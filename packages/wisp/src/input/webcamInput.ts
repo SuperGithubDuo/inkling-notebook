@@ -22,7 +22,7 @@ import { HandTracker, TrackerError } from '../tracking/handTracker'
 import type { Landmark } from '../tracking/landmarks'
 import { HandFrameProcessor, type ProcessorConfig } from './handFrameProcessor'
 import type { GestureState } from '../gestures/gestureState'
-import { TraceRecorder } from '../replay/trace'
+import { TraceRecorder, packLandmarks, unpackLandmarks } from '../replay/trace'
 
 export type CameraState = 'off' | 'starting' | 'on' | 'error'
 export type TrackerState = 'idle' | 'loading' | 'ready' | 'error'
@@ -321,7 +321,10 @@ export class WebcamInput {
     const cam = this.camera
     if (!tracker || !cam || this.video.readyState < 2) return
     const now = performance.now()
-    const t = captureTime !== undefined && captureTime > 0 && captureTime <= now && now - captureTime < 500 && captureTime > this.lastFrameT ? captureTime : Math.max(now, this.lastFrameT + 0.1)
+    const t0 = captureTime !== undefined && captureTime > 0 && captureTime <= now && now - captureTime < 500 && captureTime > this.lastFrameT ? captureTime : Math.max(now, this.lastFrameT + 0.1)
+    // v0.1.5: process exactly what a trace records (time to 0.1 ms, landmarks to 1e-5, confidence
+    // to 1e-3), so a recorded trace replays to the very same strokes. Sub-pixel; no effect on behaviour.
+    const t = Math.max(Math.round(t0 * 10) / 10, Math.round((this.lastFrameT + 0.1) * 10) / 10)
     let result
     try {
       result = tracker.detect(this.video, t)
@@ -330,6 +333,7 @@ export class WebcamInput {
       console.warn('[wisp] inference failed', err)
       result = { landmarks: null, world: null, confidence: 0, handedness: null, inferenceMs: 0 }
     }
+    result = { ...result, landmarks: unpackLandmarks(packLandmarks(result.landmarks)), world: unpackLandmarks(packLandmarks(result.world)), confidence: Math.round(result.confidence * 1000) / 1000 }
     const videoAspect = (this.video.videoWidth || cam.width) / (this.video.videoHeight || cam.height)
     const out = this.processor.process({ t, landmarks: result.landmarks, world: result.world, confidence: result.confidence, videoAspect, handedness: result.handedness })
     const done = performance.now()
@@ -342,7 +346,7 @@ export class WebcamInput {
     const d = this.diagnostics
     d.fps = this.frameTimes.length
     if (interval > 0 && interval < 1000) d.frameIntervalMs = d.frameIntervalMs === 0 ? interval : d.frameIntervalMs * 0.9 + interval * 0.1
-    const age = captureTime !== undefined && t === captureTime ? done - captureTime : null
+    const age = captureTime !== undefined && t0 === captureTime ? done - captureTime : null
     d.frameAgeMs = age === null ? null : d.frameAgeMs === null ? age : d.frameAgeMs * 0.9 + age * 0.1
     d.weight3D = result.landmarks ? this.processor.weight3D : null
     d.quality = out.pose?.quality ?? null

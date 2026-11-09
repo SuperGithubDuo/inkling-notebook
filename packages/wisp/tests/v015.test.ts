@@ -3,14 +3,15 @@
  * calibration, A/B guarantees and the wisp-motion research tooling.
  * All replay inputs are SYNTHETIC (modelled hand and noise).
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import fixture from './fixtures/pipeline-v014.json'
 import { ContinuityGuard, type MotionFrame } from '../src/strokes/continuity'
 import { HandFrameProcessor, effectiveRegion } from '../src/input/handFrameProcessor'
 import { StrokeEngine } from '../src/strokes/strokeEngine'
 import { fitAspect } from '../src/strokes/writingPlane'
 import { guideLines } from '../src/strokes/layout'
-import { replay, REPLAY_PROCESSOR } from '../src/replay/replay'
+import { configFromTrace, replay, REPLAY_PROCESSOR } from '../src/replay/replay'
+import { WebcamInput } from '../src/input/webcamInput'
 import { SCENARIOS, setNoiseProfile } from '../src/replay/scenarios'
 import { synthesize, writeStrokes, line, WEBCAM_NOISE, NO_NOISE } from '../src/replay/synth'
 import { packLandmarks, parseTrace, unpackLandmarks, TraceRecorder, type LandmarkTrace } from '../src/replay/trace'
@@ -394,5 +395,84 @@ describe('Smart Ink keeps webcam noise from becoming false alarms', () => {
     }
     setNoiseProfile('model')
     void WEBCAM_NOISE
+  })
+})
+
+// ── Recording → replay fidelity (the path real-webcam testing depends on) ──
+
+describe('recorded traces replay exactly as they were drawn', () => {
+  /** Drives the real WebcamInput loop with a stand-in tracker, presses Mark glitch, saves like the Stop & save button. */
+  function record(settings: Partial<typeof DEFAULT_SETTINGS>) {
+    const { trace: src } = synthesize(writeStrokes([{ path: line({ x: 0.3, y: 0.45 }, { x: 0.6, y: 0.45 }), duration: 1.5 }, { path: line({ x: 0.3, y: 0.55 }, { x: 0.6, y: 0.55 }), duration: 1.5 }]), { seed: 5, noise: WEBCAM_NOISE })
+    src.frames.forEach((f, i) => { if (f.lm && i >= 40 && i < 44) f.lm = f.lm.map((v, j) => (j % 3 === 1 ? v + 0.25 : v)) }) // a tracking jump
+    const s = { ...DEFAULT_SETTINGS, ...settings }
+    const engine = new StrokeEngine()
+    const cam = new WebcamInput({ videoWidth: 1280, videoHeight: 720, readyState: 4 } as unknown as HTMLVideoElement, engine, { mirror: s.mirror, writingSensitivity: s.writingSensitivity, pinchSensitivity: s.pinchSensitivity, releaseSensitivity: s.releaseSensitivity, penPoint: s.penPoint, pinchMetric: s.pinchMetric, region: s.region, keepScale: s.writingMode === 'assist', smartInk: !s.legacyPipeline, strokeProtection: s.strokeProtection, pageAspect: 1.6 })
+    let k = 0
+    const w = cam as unknown as { tracker: unknown; camera: unknown; onFrame(t: number): void }
+    // Like a real camera: full-precision landmarks and capture times with sub-0.1 ms fractions.
+    const jitter = (lm: ReturnType<typeof unpackLandmarks>) => lm?.map((p, i) => ({ x: p.x + 3.3e-7 * ((i % 5) - 2), y: p.y - 2.7e-7 * ((i % 3) - 1), z: p.z + 1.1e-7 })) ?? null
+    w.tracker = { detect: () => ({ landmarks: jitter(unpackLandmarks(src.frames[k]!.lm)), world: jitter(unpackLandmarks(src.frames[k]!.w ?? null)), confidence: src.frames[k]!.c + 0.00037, handedness: src.frames[k]!.lm ? 'Right' : null, inferenceMs: 8 }) }
+    w.camera = { width: 1280, height: 720 }
+    let cur = 0
+    const spy = vi.spyOn(performance, 'now').mockImplementation(() => cur + 6.13)
+    cam.recorder.start()
+    for (k = 0; k < src.frames.length; k++) {
+      cur = src.frames[k]!.t + 0.0372
+      w.onFrame(cur)
+      if (k === 55) cam.markGlitch()
+    }
+    spy.mockRestore()
+    cam.processor.reset(src.frames.at(-1)!.t + 50)
+    return parseTrace(JSON.parse(JSON.stringify(cam.recorder.stop(undefined, { ...s, version: '0.1.5' }, { wispVersion: '0.1.5' }))))
+  }
+  for (const [name, settings] of [
+    ['Smart Ink, defaults', {}],
+    ['v0.1.4 pipeline', { legacyPipeline: true }],
+    ['calibrated area, Large', { region: { x0: 0.2, y0: 0.3, x1: 0.85, y1: 0.7 }, writingSensitivity: 1.25 }],
+    ['Writing Assist', { writingMode: 'assist' as const }]
+  ] as const) {
+    it(`${name}: v4 file with handedness, guard verdicts and the glitch mark; replay = live strokes`, () => {
+      const t = record(settings)
+      expect(t.version).toBe(4)
+      expect(t.frames.filter((f) => f.h === 'Right').length).toBeGreaterThan(100)
+      expect(t.events?.filter((e) => e.type === 'mark')).toHaveLength(1)
+      if (!('legacyPipeline' in settings)) expect(t.frames.some((f) => f.d?.g === 'suspend' || f.d?.g === 'hold')).toBe(true)
+      const r = replay(t, configFromTrace(t))
+      expect(r.strokes.map((x) => x.points)).toEqual(t.strokes!.map((x) => x.points))
+    })
+  }
+  it('switching pipelines mid-stroke ends the stroke and leaves no frozen mapping behind', () => {
+    const { trace } = synthesize(writeStrokes([{ path: line({ x: 0.35, y: 0.5 }, { x: 0.6, y: 0.5 }), duration: 1.5 }]), { seed: 2, noise: NO_NOISE })
+    const engine = new StrokeEngine()
+    const p = new HandFrameProcessor(engine, REPLAY_PROCESSOR)
+    let switched = false
+    for (const f of trace.frames) {
+      const o = p.process({ t: f.t, landmarks: unpackLandmarks(f.lm), world: unpackLandmarks(f.w ?? null), confidence: f.c, videoAspect: trace.videoAspect })
+      if (!switched && o.gesture === 'writing' && (engine.activeStroke?.points.length ?? 0) > 5) {
+        p.configure({ smartInk: false })
+        switched = true
+        expect(engine.activeStroke).toBeNull()
+        // The v0.1.4 path now follows the live (unfrozen) mapping: a new calibration applies at once, as in v0.1.4.
+        p.configure({ region: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 } })
+        const r = p.region(trace.videoAspect)
+        for (const [k, v] of Object.entries({ x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 })) expect(r[k as keyof typeof r]).toBeCloseTo(v, 9)
+      }
+    }
+    expect(switched).toBe(true)
+  })
+})
+
+describe('latency diagnostics', () => {
+  it('Capture → pen update is still reported when the browser gives capture times', () => {
+    const engine = new StrokeEngine()
+    const cam = new WebcamInput({ videoWidth: 1280, videoHeight: 720, readyState: 4 } as unknown as HTMLVideoElement, engine, { ...REPLAY_PROCESSOR, mirror: true, regionFit: 'hand' })
+    const w = cam as unknown as { tracker: unknown; camera: unknown; onFrame(t: number): void }
+    w.tracker = { detect: () => ({ landmarks: null, world: null, confidence: 0, handedness: null, inferenceMs: 5 }) }
+    w.camera = { width: 1280, height: 720 }
+    const spy = vi.spyOn(performance, 'now').mockReturnValue(1012.34)
+    w.onFrame(1000.0371)
+    spy.mockRestore()
+    expect(cam.diagnostics.frameAgeMs).toBeGreaterThan(0)
   })
 })

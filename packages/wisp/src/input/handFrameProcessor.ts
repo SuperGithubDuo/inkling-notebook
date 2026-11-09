@@ -232,6 +232,16 @@ export class HandFrameProcessor {
     const regionChanged = cfg.region !== undefined && cfg.region !== this.cfg.region
     const scaleTurnedOn = cfg.keepScale === true && !this.cfg.keepScale
     const continuityChanged = cfg.continuity !== undefined && cfg.continuity !== this.cfg.continuity
+    const pipelineChanged = cfg.smartInk !== undefined && (cfg.smartInk !== false) !== this.smart
+    // Switching pipelines (A/B) ends any stroke here and drops Smart Ink state, so a
+    // stroke is never drawn half by one pipeline and half by the other, and the
+    // v0.1.4 path never inherits a frozen mapping.
+    if (pipelineChanged) {
+      this.engine.breakContinuity()
+      this.guard.reset()
+      this.frozen = null
+      this.engaged = false
+    }
     this.cfg = { ...this.cfg, ...cfg }
     // A new calibration, or turning the steady size on, defines the reference distance.
     if (regionChanged || scaleTurnedOn) this.setScaleReference()
