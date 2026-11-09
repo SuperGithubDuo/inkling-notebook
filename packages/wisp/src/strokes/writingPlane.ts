@@ -122,6 +122,19 @@ export class ExtentTracker {
     return this.locked ?? PRIOR_EXTENT
   }
 
+  /**
+   * v0.1.5: the running estimate while still measuring (after 5 frames), so
+   * the mapping converges smoothly during hover and `lockNow()` at the first
+   * pinch locks exactly what the cursor was already showing (v0.1.4 jumped
+   * from the prior to the measured extent at the first pen-down).
+   */
+  get provisional(): HandExtent {
+    if (this.locked) return this.locked
+    if (this.n < 5) return PRIOR_EXTENT
+    const m = (k: keyof HandExtent) => (this.sum[k] / this.n) * 1.1
+    return { up: m('up'), down: m('down'), left: m('left'), right: m('right') }
+  }
+
   /** Lock now: with the measured average if there are at least 5 frames, else the prior. */
   lockNow(): void {
     if (this.locked) return
@@ -284,6 +297,22 @@ export class ScaleTracker {
     this.refNormal = null
     this.skipped = 0
   }
+}
+
+/** Largest rectangle with the page's pixel aspect ratio centred inside `r` (view space). */
+export function fitAspect(r: WritingRegion, videoAspect: number, pageAspect: number): WritingRegion {
+  const w0 = r.x1 - r.x0
+  const h0 = r.y1 - r.y0
+  if (!(w0 > 0) || !(h0 > 0) || !(videoAspect > 0) || !(pageAspect > 0)) return r
+  let h = h0
+  let w = (pageAspect * h) / videoAspect
+  if (w > w0) {
+    w = w0
+    h = (w * videoAspect) / pageAspect
+  }
+  const cx = (r.x0 + r.x1) / 2
+  const cy = (r.y0 + r.y1) / 2
+  return { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 }
 }
 
 /**

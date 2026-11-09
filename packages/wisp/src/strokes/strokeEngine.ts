@@ -262,6 +262,17 @@ export class StrokeEngine implements WispInputEvents {
     return s
   }
 
+  /**
+   * Continuity break (v0.1.5): ends the active stroke where it is and restarts
+   * the filters, so nothing — not even smoothing — connects the positions on
+   * either side. Used by the continuity guard at confirmed tracking jumps and
+   * unbridgeable tracking gaps.
+   */
+  breakContinuity(): void {
+    if (this.active) this.end('discontinuity')
+    this.restartFilters()
+  }
+
   /** Called when the input source can no longer see/locate the pointer. */
   hideCursor(t: number): void {
     // Tracking is gone: the next position starts fresh (no smoothing across the gap).

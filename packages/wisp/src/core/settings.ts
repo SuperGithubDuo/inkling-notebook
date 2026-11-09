@@ -30,6 +30,18 @@ export interface WispSettings {
   guideXHeight: boolean
   guideCapHeight: boolean
   guideLineSpacing: boolean
+  /** v0.1.5: distance between guide lines relative to the writing size (0.6–2; 1 = normal). */
+  lineSpacing: number
+  /**
+   * v0.1.5 stroke protection: never connect ink across tracking glitches,
+   * jumps or gaps (strokes/continuity.ts). On by default.
+   */
+  strokeProtection: boolean
+  /**
+   * Developer comparison: run the exact v0.1.4 pipeline (no Smart Ink:
+   * no continuity guard, v0.1.4 mapping lock). For A/B testing on a real webcam.
+   */
+  legacyPipeline: boolean
   /** 0–1. One Euro smoothing strength. */
   smoothing: number
   /** 0–1. Stabilizer (lazy-pen radius) for webcam input. */
@@ -60,6 +72,9 @@ export const DEFAULT_SETTINGS: WispSettings = {
   guideXHeight: true,
   guideCapHeight: false,
   guideLineSpacing: false,
+  lineSpacing: 1,
+  strokeProtection: true,
+  legacyPipeline: false,
   smoothing: 0.5,
   stabilizer: 0.25,
   refine: true,
@@ -105,6 +120,9 @@ export function sanitizeSettings(raw: unknown): WispSettings {
     guideXHeight: bool(r.guideXHeight, d.guideXHeight),
     guideCapHeight: bool(r.guideCapHeight, d.guideCapHeight),
     guideLineSpacing: bool(r.guideLineSpacing, d.guideLineSpacing),
+    lineSpacing: num(r.lineSpacing, 0.6, 2, d.lineSpacing),
+    strokeProtection: bool(r.strokeProtection, d.strokeProtection),
+    legacyPipeline: bool(r.legacyPipeline, d.legacyPipeline),
     smoothing: num(r.smoothing, 0, 1, d.smoothing),
     stabilizer: num(r.stabilizer, 0, 1, d.stabilizer),
     refine: bool(r.refine, d.refine),

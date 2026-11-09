@@ -100,9 +100,21 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
           <Toggle label="Lowercase (x-height) line" checked={s.guideXHeight} onChange={(v) => onChange({ guideXHeight: v })} />
           <Toggle label="Uppercase height line" checked={s.guideCapHeight} onChange={(v) => onChange({ guideCapHeight: v })} />
           <Toggle label="Line spacing bands" checked={s.guideLineSpacing} onChange={(v) => onChange({ guideLineSpacing: v })} />
+          <Slider
+            label="Line spacing"
+            hint="Distance between guide lines. Letter guides keep following the writing size."
+            value={s.lineSpacing}
+            min={0.6}
+            max={2}
+            step={0.05}
+            format={times}
+            onChange={(v) => onChange({ lineSpacing: v })}
+          />
           <p className="hint-text">Guides are only a visual aid: they are not saved in exports and never move your strokes.</p>
         </div>
       )}
+      <Toggle label="Stroke protection" checked={s.strokeProtection} onChange={(v) => onChange({ strokeProtection: v })} />
+      <p className="hint-text">Never draws a line across a tracking glitch, a jump or a moment when the hand was lost. Ink pauses for a frame when tracking looks wrong and resumes where your hand really is.</p>
       <Slider
         label="Stroke smoothing"
         hint="Higher: steadier lines but slower to follow quick details. 0 turns it off."
@@ -175,6 +187,12 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
       <Toggle label="Show camera preview" checked={s.showPreview} onChange={(v) => onChange({ showPreview: v })} />
       <Toggle label="Show hand landmarks" checked={s.showLandmarks} onChange={(v) => onChange({ showLandmarks: v })} />
       <Toggle label="Developer diagnostics" checked={s.showDiagnostics} onChange={(v) => onChange({ showDiagnostics: v })} />
+      {s.showDiagnostics && (
+        <div className="sub-toggles">
+          <Toggle label="v0.1.4 pipeline (A/B)" checked={s.legacyPipeline} onChange={(v) => onChange({ legacyPipeline: v })} />
+          <p className="hint-text">For side-by-side testing only: turns off Smart Ink (stroke protection and the v0.1.5 mapping fixes). Gestures are identical either way.</p>
+        </div>
+      )}
 
       <div className="row end">
         <button
@@ -188,7 +206,9 @@ export function SettingsPanel({ settings: s, onChange, onClose }: Props) {
               pinchSensitivity: DEFAULT_SETTINGS.pinchSensitivity,
               releaseSensitivity: DEFAULT_SETTINGS.releaseSensitivity,
               penPoint: DEFAULT_SETTINGS.penPoint,
-              pinchMetric: DEFAULT_SETTINGS.pinchMetric
+              pinchMetric: DEFAULT_SETTINGS.pinchMetric,
+              strokeProtection: DEFAULT_SETTINGS.strokeProtection,
+              legacyPipeline: DEFAULT_SETTINGS.legacyPipeline
             })
           }
         >

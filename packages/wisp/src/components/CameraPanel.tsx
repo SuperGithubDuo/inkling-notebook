@@ -23,7 +23,7 @@ function TraceButton({ ctl, on, settings }: { ctl: WispController; on: boolean; 
   }, [rec, cam])
   if (!cam) return null
   const stop = () => {
-    const trace = cam.recorder.stop(undefined, { ...settings, version: '0.1.4' })
+    const trace = cam.recorder.stop(undefined, { ...settings, version: '0.1.5' }, { wispVersion: '0.1.5' })
     setRec(false)
     if (trace.frames.length === 0) return
     const blob = new Blob([JSON.stringify(trace)], { type: 'application/json' })
@@ -37,9 +37,14 @@ function TraceButton({ ctl, on, settings }: { ctl: WispController; on: boolean; 
   return (
     <div className="trace">
       {rec ? (
-        <button className="btn ghost sm" onClick={stop}>
-          <span className="rec-dot" /> Stop &amp; save trace ({frames} frames)
-        </button>
+        <>
+          <button className="btn ghost sm" onClick={stop}>
+            <span className="rec-dot" /> Stop &amp; save trace ({frames} frames)
+          </button>
+          <button className="btn ghost sm" onClick={() => cam.markGlitch()} title="Press right after WISP draws something you didn't write (a stray line or jump). Saved in the trace as a label for research.">
+            Mark glitch
+          </button>
+        </>
       ) : (
         <button className="btn ghost sm" disabled={!on} onClick={() => (cam.recorder.start(), setFrames(0), setRec(true))}>
           Record landmark trace
@@ -324,6 +329,20 @@ export function CameraPanel(p: Props) {
             <dd>{p.ctl.engine.stats.rejected}</dd>
             <dt>Release-trimmed points</dt>
             <dd>{p.ctl.engine.stats.trimmed}</dd>
+            <dt>Pipeline</dt>
+            <dd>{p.settings.legacyPipeline ? 'v0.1.4 (comparison)' : p.settings.strokeProtection ? 'Smart Ink' : 'Smart Ink, protection off'}</dd>
+            <dt>Glitch frames dropped</dt>
+            <dd>{on && diag ? diag.guard.dropped : '—'}</dd>
+            <dt>Fast frames released</dt>
+            <dd>{on && diag ? diag.guard.released : '—'}</dd>
+            <dt>Gaps bridged</dt>
+            <dd>{on && diag ? diag.guard.bridged : '—'}</dd>
+            <dt>Strokes split (jump/gap)</dt>
+            <dd>{on && diag ? diag.guard.splits : '—'}</dd>
+            <dt>Ink suspended</dt>
+            <dd>{on && diag ? `${diag.guard.suspends}×, ${diag.guard.suppressed} frames` : '—'}</dd>
+            <dt>Tracking residual</dt>
+            <dd>{on && diag ? `${diag.guard.noise.toFixed(3)} palm` : '—'}</dd>
           </dl>
           <TraceButton ctl={p.ctl} on={on} settings={p.settings} />
         </section>

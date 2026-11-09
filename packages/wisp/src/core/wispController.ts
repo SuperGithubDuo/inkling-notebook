@@ -72,6 +72,8 @@ export class WispController {
       pinchMetric: this.settings.pinchMetric,
       region: this.settings.region,
       keepScale: this.settings.writingMode === 'assist',
+      smartInk: !this.settings.legacyPipeline,
+      strokeProtection: this.settings.strokeProtection,
       pageAspect: this.store.document.canvas.width / this.store.document.canvas.height
     })
     if (this._mode === 'mouse') this.mouse.attach()
@@ -80,7 +82,7 @@ export class WispController {
 
   /** Guides follow the writing scale, so ruled lines match the size the mapping produces. */
   private guides() {
-    return guideLines(this.store.document.canvas, this.settings.writingSensitivity)
+    return guideLines(this.store.document.canvas, this.settings.writingSensitivity, undefined, this.settings.lineSpacing)
   }
 
   private applyGuides(): void {
@@ -152,7 +154,9 @@ export class WispController {
       penPoint: s.penPoint,
       pinchMetric: s.pinchMetric,
       region: s.region,
-      keepScale: s.writingMode === 'assist'
+      keepScale: s.writingMode === 'assist',
+      smartInk: !s.legacyPipeline,
+      strokeProtection: s.strokeProtection
     })
     this.applyGuides()
   }

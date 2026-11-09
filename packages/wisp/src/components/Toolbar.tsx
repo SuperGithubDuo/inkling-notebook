@@ -49,7 +49,7 @@ export function Toolbar(p: Props) {
           </svg>
         </span>
         <span className="brand-name">WISP</span>
-        <span className="brand-sub">Inkling lab · v0.1.4</span>
+        <span className="brand-sub">Inkling lab · v0.1.5</span>
       </div>
 
       <div className="segmented" role="tablist" aria-label="Input mode">

@@ -3,7 +3,10 @@
 ## v0.1: reliable stroke capture
 Standalone prototype: webcam hand tracking, pinch-to-write, One Euro smoothing with outlier rejection, vector stroke model with JSON import/export, undo/redo, mouse simulation, unit tests.
 
-## v0.1.4: canvas edges, steady writing size, alignment (this release)
+## v0.1.5: Smart Ink — stroke integrity (this release)
+Reliability-aware continuity guard: no ink is connected across tracking glitches, misplaced fingertips, re-detections, hand swaps or gaps (time-aware tests in palm widths; hold → drop / release / split / suspend). Page mapping frozen from pinch start (fixes the first-stroke jump); setting changes take effect at pen-up; calibrated areas keep the page's aspect ratio. Adjustable guide line spacing. A/B harness (`npm run ab`) on 12 required + 6 adversarial scenarios; `smartInk: false` replays v0.1.4 bit-identically. Trace v4 (handedness, guard verdicts, *Mark glitch*, metadata). wisp-motion research area: validation, versioned manifests, participant splits, features, Task A baselines, model proposal — no model trained. Rejected after measurement: word-level gain hold, per-word baseline evening. Modelled only.
+
+## v0.1.4: canvas edges, steady writing size, alignment
 Hand-fitted writing region so every page edge and corner is reachable with the palm in view; square ink clip; refined points kept on the page (fixes re-import). Writing Assist mode: distance-compensated writing plane from 3D landmarks, writing size presets, toggleable guides, reversible rigid line straightening. v0.1.2 pen-up/pen-down behaviour preserved exactly (golden test). Layout harness with physical-writing scenes. No ML model: the causes are geometric. Modelled only.
 
 ## v0.1.3: hand orientation and pen-up feedback (gesture parts opt-in since v0.1.4)
@@ -16,6 +19,8 @@ Noise-aware pipeline: measured tracking noise gates the live filter and sizes th
 Pen point moved to the thumb–index midpoint; asymmetric, noise-adaptive pinch release with tail trimming; continuous One Euro filter retuned (beta 0.04, dCutoff 0.7 Hz) with pen-down seeding, a jitter stabilizer and zero-lag refinement at pen-up; landmark replay harness and trace recorder. Tuned on modelled noise; awaiting real-webcam testing.
 
 ## v0.2: measure and harden
+- **WISP-Motion data collection** (see `src/wisp-motion/README.md`): ≥ 12 participants × 2 sessions × ~20 min, trace v4 with consent, annotation sidecars for Task A; tablet/stylus references only if Task B is pursued. Train only once the held-out-participant bar can be measured.
+- **Short fast strokes** (lose ~⅓ of their length): decide the fix from real traces.
 - **Real-hardware evaluation.** Record anonymised landmark traces (landmarks only, never video, with consent) on 5–10 laptops and tune pinch thresholds, debounce and smoothing defaults from data. Use the `raw` vs smoothed points already stored to compute jitter and lag.
 - **Tracking in a Web Worker** (MediaPipe supports workers via `ImageBitmap`/`OffscreenCanvas`) if the v0.1.3 latency diagnostics show inference costing frames on real laptops.
 - **Tune 3D vs 2D pinch** on real traces from every orientation (world-landmark noise is currently assumed).

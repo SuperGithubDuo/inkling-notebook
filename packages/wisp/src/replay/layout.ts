@@ -376,8 +376,10 @@ export function notationError(strokes: readonly Stroke[], tags: readonly InkTag[
 // ── Configs and the expected writing region ─────────────────────────────────
 
 export const LAYOUT_CONFIGS: Record<string, ReplayConfig> = {
-  'v0.1.3 (centred region)': { processor: { regionFit: 'centred' } },
-  'Natural (v0.1.4)': { processor: { regionFit: 'hand' } },
+  'v0.1.3 (centred region)': { processor: { regionFit: 'centred', smartInk: false } },
+  'Natural (v0.1.4)': { processor: { regionFit: 'hand', smartInk: false } },
+  'Writing Assist (v0.1.4)': { processor: { regionFit: 'hand', keepScale: true, smartInk: false } },
+  'Natural': { processor: { regionFit: 'hand' } },
   'Writing Assist': { processor: { regionFit: 'hand', keepScale: true } }
 }
 

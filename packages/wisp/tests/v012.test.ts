@@ -172,7 +172,7 @@ describe('trace v2 diagnostics', () => {
     rec.addStroke({ id: 's1', points: [{ x: 0.4, y: 0.5, t: 20 }], color: '#000000', width: 4, source: 'webcam', startedAt: 20, endedAt: 20 })
     rec.addEvent({ t: 30, type: 'pen-up', reason: 'released' })
     const t = rec.stop('note', { smoothing: 0.5 })
-    expect(t.version).toBe(3)
+    expect(t.version).toBe(4) // v0.1.5 records trace v4 (a superset of v3)
     expect(t.frames[0]!.d).toMatchObject({ mid: [0.4, 0.5], s: 'hover', rs: 0.79 })
     expect(t.events).toHaveLength(2)
     expect(t.strokes).toHaveLength(1)

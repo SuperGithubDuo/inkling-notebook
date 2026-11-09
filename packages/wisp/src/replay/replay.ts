@@ -34,8 +34,8 @@ export const REPLAY_PROCESSOR: ProcessorConfig = {
 
 export interface ReplayResult {
   strokes: Stroke[]
-  /** Cursor positions as emitted (page space). */
-  cursor: Array<{ t: number; x: number; y: number; down: boolean }>
+  /** Cursor positions as emitted (page space). `at`: time of the frame during which it was emitted (v0.1.5; > t when a frame was held). */
+  cursor: Array<{ t: number; x: number; y: number; down: boolean; at?: number }>
   config: ProcessorConfig
   /** Mean pipeline time per frame (ms), excluding hand tracking. */
   msPerFrame: number
@@ -55,8 +55,8 @@ export function replay(trace: LandmarkTrace, cfg: ReplayConfig = {}): ReplayResu
     strokes.push({ ...e.stroke, points: e.stroke.points.slice() })
     endDecisions.push(now)
   })
-  engine.onCursor((c) => cursor.push({ t: c.t, x: c.x, y: c.y, down: c.down }))
-  const frames = trace.frames.map((f) => ({ t: f.t, landmarks: unpackLandmarks(f.lm), world: unpackLandmarks(f.w ?? null), confidence: f.c }))
+  engine.onCursor((c) => cursor.push({ t: c.t, x: c.x, y: c.y, down: c.down, at: now }))
+  const frames = trace.frames.map((f) => ({ t: f.t, landmarks: unpackLandmarks(f.lm), world: unpackLandmarks(f.w ?? null), confidence: f.c, handedness: f.h ?? null }))
   const t0 = performance.now()
   for (const f of frames) {
     now = f.t

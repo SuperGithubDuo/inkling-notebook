@@ -57,6 +57,8 @@ export interface WebcamDiagnostics {
   /** Frames the browser delivered that were never processed (inference too slow). */
   droppedFrames: number
   frames: number
+  /** v0.1.5 stroke protection counters and measured tracking residual (palm widths). */
+  guard: { dropped: number; released: number; bridged: number; splits: number; suspends: number; suppressed: number; noise: number }
 }
 
 export interface WebcamOverlay {
@@ -89,7 +91,7 @@ type FrameVideo = HTMLVideoElement & {
 export class WebcamInput {
   readonly events = new Emitter<WebcamEvents>()
   readonly processor: HandFrameProcessor
-  readonly diagnostics: WebcamDiagnostics = { fps: 0, inferenceMs: 0, handDetected: false, gesture: 'no-hand', pinchRatio: null, pinchBaseline: null, pinchNoise: 0, weight3D: null, quality: null, frameIntervalMs: 0, frameAgeMs: null, droppedFrames: 0, frames: 0 }
+  readonly diagnostics: WebcamDiagnostics = { fps: 0, inferenceMs: 0, handDetected: false, gesture: 'no-hand', pinchRatio: null, pinchBaseline: null, pinchNoise: 0, weight3D: null, quality: null, frameIntervalMs: 0, frameAgeMs: null, droppedFrames: 0, frames: 0, guard: { dropped: 0, released: 0, bridged: 0, splits: 0, suspends: 0, suppressed: 0, noise: 0 } }
   /** Landmark-only trace recorder for the replay harness (never video). */
   readonly recorder = new TraceRecorder()
   readonly overlay: WebcamOverlay = { landmarks: null, viewPoint: null, region: null, mirror: true }
@@ -126,7 +128,7 @@ export class WebcamInput {
       engine.events.on('cursorHidden', () => (this.lastCursor = null)),
       engine.onStrokeStart((e) => this.recorder.addEvent({ t: e.stroke.startedAt, type: 'pen-down' })),
       engine.onStrokeEnd((e) => {
-        this.recorder.addEvent({ t: e.stroke.endedAt, type: 'pen-up', reason: e.reason })
+        this.recorder.addEvent({ t: e.stroke.endedAt, type: e.reason === 'discontinuity' ? 'split' : 'pen-up', reason: e.reason })
         this.recorder.addStroke(e.stroke)
       })
     )
@@ -145,12 +147,17 @@ export class WebcamInput {
     this.overlay.mirror = this.processor.config.mirror
   }
 
-  /** Starts camera and tracking. Safe to call repeatedly; concurrent calls collapse. */
+  /** Flags a tracking error that just happened in the trace being recorded (weak label for wisp-motion). */
+  markGlitch(): void {
+    this.recorder.mark(this.lastFrameT || performance.now())
+  }
+
   /** Measure the hand again for the automatic writing area ("Fit writing area"). */
   refit(): void {
     this.processor.refit()
   }
 
+  /** Starts camera and tracking. Safe to call repeatedly; concurrent calls collapse. */
   async start(): Promise<void> {
     // A new camera session: the hand may be at a different distance, so measure it again.
     this.processor.refit()
@@ -324,7 +331,7 @@ export class WebcamInput {
       result = { landmarks: null, world: null, confidence: 0, handedness: null, inferenceMs: 0 }
     }
     const videoAspect = (this.video.videoWidth || cam.width) / (this.video.videoHeight || cam.height)
-    const out = this.processor.process({ t, landmarks: result.landmarks, world: result.world, confidence: result.confidence, videoAspect })
+    const out = this.processor.process({ t, landmarks: result.landmarks, world: result.world, confidence: result.confidence, videoAspect, handedness: result.handedness })
     const done = performance.now()
 
     // Diagnostics (cheap, read by the UI on its own timer).
@@ -346,6 +353,8 @@ export class WebcamInput {
     d.pinchBaseline = this.processor.gestures.writingBaseline
     d.pinchNoise = this.processor.gestures.ratioNoise
     d.frames++
+    const gs = this.processor.guard.stats
+    d.guard = { dropped: gs.dropped, released: gs.released, bridged: gs.bridged, splits: gs.splits, suspends: gs.suspends, suppressed: gs.suppressed, noise: this.processor.guard.noise }
     if (this.recorder.recording) {
       const g = this.processor.gestures
       const c = this.lastCursor
@@ -364,8 +373,9 @@ export class WebcamInput {
         rs: out.pinchRatio,
         b: g.writingBaseline,
         v: g.openingVelocity,
-        s: out.gesture
-      }, result.world)
+        s: out.gesture,
+        g: out.guard
+      }, result.world, result.handedness)
     }
     this.overlay.landmarks = result.landmarks
     this.overlay.viewPoint = out.viewPoint

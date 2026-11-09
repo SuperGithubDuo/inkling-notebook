@@ -308,15 +308,17 @@ export interface GuideLines {
 
 /**
  * Ruled guides for a page: baseline every `pitch` px, a dashed x-height line
- * 0.33 pitch above it and a cap-height line 0.6 pitch above it (descenders
- * then have 0.27 pitch below the baseline before the next line's caps). The
- * pitch follows the writing scale, so guides match the letter size the
- * mapping produces.
+ * and a cap-height line above it. The letter guides follow the writing scale
+ * (so they match the letter size the mapping produces); `lineSpacing`
+ * (v0.1.5, 0.6–2) only changes the distance between lines, never the
+ * x-height or cap height.
  */
-export function guideLines(page: CanvasMeta, writingScale: number, basePitch = 125): GuideLines {
-  const pitch = Math.max(40, Math.round(basePitch * (Number.isFinite(writingScale) && writingScale > 0 ? writingScale : 1)))
+export function guideLines(page: CanvasMeta, writingScale: number, basePitch = 125, lineSpacing = 1): GuideLines {
+  const sp = Number.isFinite(lineSpacing) && lineSpacing > 0 ? Math.min(2, Math.max(0.6, lineSpacing)) : 1
+  const pitch = Math.max(40, Math.round(basePitch * sp * (Number.isFinite(writingScale) && writingScale > 0 ? writingScale : 1)))
   const first = Math.round(pitch * 0.85)
   const baselines: number[] = []
   for (let y = first; y < page.height - pitch * 0.15; y += pitch) baselines.push(y)
-  return { baselines, xHeight: Math.round(pitch * 0.33), capHeight: Math.round(pitch * 0.6), pitch }
+  const letter = pitch / sp
+  return { baselines, xHeight: Math.round(letter * 0.33), capHeight: Math.round(letter * 0.6), pitch }
 }

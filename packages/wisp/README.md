@@ -2,7 +2,7 @@
 
 WISP lets you write in the air with your finger, using an ordinary laptop webcam. Pinch your thumb and index finger together to put the pen down, move, and open your fingers to lift it. Strokes are captured as structured vector data, ready to become an input mode inside Inkling Notebook.
 
-This is **v0.1.4**: a standalone, independently runnable prototype that lives inside the Inkling repository but has no dependency on Inkling's app code, and Inkling has none on it.
+This is **v0.1.5**: a standalone, independently runnable prototype that lives inside the Inkling repository but has no dependency on Inkling's app code, and Inkling has none on it.
 
 ## Goals
 
@@ -10,20 +10,21 @@ This is **v0.1.4**: a standalone, independently runnable prototype that lives in
 - Reliable stroke capture first: smooth, low-latency ink with clean stroke boundaries. Handwriting recognition comes later.
 - Everything runs locally in the browser. No backend, account, paid API or cloud inference. Camera frames are never recorded, stored or uploaded.
 
-## What works (v0.1.4)
+## What works (v0.1.5)
 
 | Area | Implemented |
 |---|---|
 | Tracking | Webcam permission and preview, MediaPipe Tasks Vision Hand Landmarker (21 landmarks, one hand), GPU delegate with CPU fallback, one inference per new video frame, mirroring, landmark overlay, tracker status (loading / ready / unavailable) |
 | Pen point | Virtual pen between the thumb and index fingertips (default), or the index fingertip |
 | Gestures | Orientation-aware pinch measurement (2D image ratio blended with a 3D ratio from MediaPipe world landmarks as the hand turns), tracking-quality indicator, early pen-up feedback (live ink pauses at the first sign of opening), glitch-resistant release; asymmetric pinch detection: deliberate pen-down (a real closing motion that has settled), fast pen-up (relative to your own pinch, velocity-aware, noise-adaptive), release-onset trimming by a hinge fit, re-arm protection against flicker, no writing when a hand enters already pinched or fingers merely drift close, tolerance of one-frame tracking gaps |
+| Stroke protection (v0.1.5) | Continuity guard between gestures and ink: never connects ink across tracking glitches, misplaced fingertips, re-detections, hand swaps or tracking gaps; time-aware, palm-width-scaled tests (kinematics, pen-relative-to-palm shape, palm size, orientation, handedness); suspicious frames are held one frame, then dropped, released as legitimate fast movement, or the stroke is split / ink suspended. Zero added latency on ordinary frames |
 | Ink | One continuous noise-gated One Euro filter for cursor and live ink, noise-scaled stabilizer, noise-matched zero-lag refinement of each finished stroke (glitch removal + Whittaker smoother), pen-down seeding, spike rejection and stroke splitting on confirmed jumps, distance-based resampling, raw positions kept beside smoothed ones, perfect-freehand rendering (same ink library as Inkling) |
-| Mapping | Page-normalized coordinates; automatic writing region fitted to your hand so every page edge and corner is reachable with your palm in view (locked for the session); writing size Small / Medium / Large / Custom; optional two-pinch calibration; letterboxed page that keeps geometry on resize |
-| Writing Assist (optional) | Steady writing size when you lean in or back (distance-compensated writing plane from MediaPipe's 3D landmarks); toggleable baseline, x-height, uppercase and line-spacing guides; *Tidy lines* straightens slightly tilted lines as rigid wholes and is fully reversible (*Restore original*, undo) |
+| Mapping | Page-normalized coordinates; automatic writing region fitted to your hand so every page edge and corner is reachable with your palm in view (locked for the session); mapping frozen from pinch start to pen-up, setting changes applied at the next pen-up (v0.1.5); writing size Small / Medium / Large / Custom; optional two-pinch calibration that keeps the page's aspect ratio (equal x and y gain, v0.1.5); letterboxed page that keeps geometry on resize |
+| Writing Assist (optional) | Steady writing size when you lean in or back (distance-compensated writing plane from MediaPipe's 3D landmarks); toggleable baseline, x-height, uppercase and line-spacing guides with adjustable line spacing (v0.1.5); *Tidy lines* straightens slightly tilted lines as rigid wholes and is fully reversible (*Restore original*, undo) |
 | Editing | Pen colour and thickness, undo/redo, clear (undoable), JSON export/import with validation, PNG export |
 | Mouse mode | Mouse drives the same engine as the webcam (left button = pinch) for development and testing without a camera |
-| UI | Toolbar, camera panel with status, settings, onboarding, status pill, optional developer diagnostics (tracking FPS, inference time, frame interval, capture→pen-update latency, skipped frames, hand orientation quality, 3D share of the pinch, gesture state, pinch ratio/baseline/noise, trimmed points) and a trace recorder (landmarks + per-frame measurements + pen events + strokes, never video) |
-| Evaluation | Replay harness (`npm run replay`): 32 synthetic scenarios from a projected 3D hand model (writing, speed, gestures, gentle lifts, 9 hand orientations and distances) with ground truth under two noise profiles, pen-down/pen-up delay, live tail and live jitter metrics, recorded traces from your own webcam, side-by-side setting comparisons, and an HTML page that draws the strokes |
+| UI | Toolbar, camera panel with status, settings, onboarding, status pill, optional developer diagnostics (tracking FPS, inference time, frame interval, capture→pen-update latency, skipped frames, hand orientation quality, 3D share of the pinch, gesture state, pinch ratio/baseline/noise, trimmed points) Smart Ink counters (glitch frames dropped, fast frames released, gaps bridged, strokes split, ink suspended, tracking residual), a v0.1.4-pipeline switch for live A/B testing, and a trace recorder (landmarks + handedness + per-frame measurements and guard verdicts + pen events + *Mark glitch* labels + strokes, never video) |
+| Evaluation | A/B harness (`npm run ab`, v0.1.5): v0.1.4 vs v0.1.5 on identical traces — 12 required scenarios, a calibration case and 6 adversarial traces, or your recorded traces; wisp-motion research tooling (`npm run motion`). Replay harness (`npm run replay`): 32 synthetic scenarios from a projected 3D hand model (writing, speed, gestures, gentle lifts, 9 hand orientations and distances) with ground truth under two noise profiles, pen-down/pen-up delay, live tail and live jitter metrics, recorded traces from your own webcam, side-by-side setting comparisons, and an HTML page that draws the strokes |
 | Integration surface | Typed `onStrokeStart / onStrokeUpdate / onStrokeEnd / onTrackingLost / onGestureChange / onCursor`, each returning an unsubscribe function; a pure WISP → Inkling `createStroke` adapter sketch (not wired in) |
 
 ## Setup
@@ -51,6 +52,8 @@ The MediaPipe WASM runtime is copied from `node_modules` into `public/mediapipe/
 | `npm test` | Unit tests (Vitest) |
 | `npm run typecheck` | Strict TypeScript, no emit |
 | `npm run fetch-model` | Download the Hand Landmarker model into `public/models/` |
+| `npm run ab` | A/B (v0.1.5): v0.1.4 vs v0.1.5 Smart Ink on identical synthetic traces (`--seeds 6`, `--json`, `--html ab.html`), or on recorded traces (`npm run ab -- trace.json --html ab.html`) |
+| `npm run motion` | wisp-motion research CLI: `validate`, `manifest`, `split`, `features`, `baseline`, `synth` (see `src/wisp-motion/README.md`) |
 | `npm run layout` | Layout harness (v0.1.4): letter-size consistency, baseline, tilt, notation geometry and edge reach for each mapping on physical-writing scenes (`--seeds 6`, `--profile model`, `--json`) |
 | `npm run replay` | Replay harness: 13 synthetic scenarios (`--profile webcam|model`, `--noise 1.5`, `--fps 20`, `--compare smoothing=0.3,0.5,0.8`, `--html out.html` to draw the strokes, `--json`), or a recorded trace (`npm run replay -- trace.json --compare releaseSensitivity=0.8,1,1.2 --html out.html`) |
 
@@ -77,14 +80,15 @@ Tips: good front lighting helps more than anything else. Keep your palm roughly 
 src/
   tracking/     camera.ts (getUserMedia + errors) · handTracker.ts (MediaPipe wrapper) · landmarks.ts (pure geometry)
   gestures/     pinchDetector.ts (hysteresis) · gestureState.ts (state machine)
-  strokes/      types.ts (data model) · coordinates.ts · writingPlane.ts (hand-fitted region, steady scale) · layout.ts (guides, Tidy lines) · smoothing.ts · strokeEngine.ts · documentStore.ts (undo/redo) · serialization.ts
+  strokes/      types.ts (data model) · coordinates.ts · writingPlane.ts (hand-fitted region, steady scale) · continuity.ts (v0.1.5 stroke protection) · layout.ts (guides, Tidy lines) · smoothing.ts · strokeEngine.ts · documentStore.ts (undo/redo) · serialization.ts
   input/        handFrameProcessor.ts (landmarks → engine, pure) · webcamInput.ts (camera + tracker + loop) · mouseInput.ts
   canvas/       renderer.ts (Canvas 2D, two layers)
   core/         wispController.ts (wiring) · settings.ts · emitter.ts
   integration/  types.ts (public events) · inklingAdapter.ts (sketch, not wired)
-  replay/       trace.ts (landmark traces, recorder) · hand3d.ts (3D hand + camera) · synth.ts (synthetic hands + noise model) · scenarios.ts · replay.ts (pipeline replay + metrics) · font.ts · layout.ts · layoutScenes.ts · boundary.ts (v0.1.4 layout harness)
+  replay/       trace.ts (landmark traces, recorder) · hand3d.ts (3D hand + camera) · synth.ts (synthetic hands + noise model) · scenarios.ts · replay.ts (pipeline replay + metrics) · font.ts · layout.ts · layoutScenes.ts · boundary.ts (v0.1.4 layout harness) · ab.ts (v0.1.5 A/B scenarios + metrics)
+  wisp-motion/  research only, not used by the app: labels · features · dataset (validation, manifests, group splits) · baselines · synthetic faults · README (protocol + model proposal)
   components/   React UI
-scripts/        replay.ts (npm run replay) · layout.ts (npm run layout) · fetch-model.mjs · copy-wasm.mjs
+scripts/        replay.ts (npm run replay) · layout.ts (npm run layout) · ab.ts (npm run ab) · motion.ts (npm run motion) · fetch-model.mjs · copy-wasm.mjs
 tests/          Vitest suites for all pure logic, including replay-harness regressions
 ```
 
@@ -95,6 +99,7 @@ Data flow:
  camera ──► │ HandTracker ─► HandFrameProcessor ──┐│
             └─────────────────────────────────────┼┘
  mouse ───► MouseInput ───────────────────────────┤
+                                    ContinuityGuard (webcam ink only, v0.1.5)
                                                   ▼
                                 StrokeEngine (filter, gate, resample, events)
                                      │                         │
@@ -110,6 +115,76 @@ Key boundaries:
 - **One engine for every input.** Webcam and mouse both call `StrokeEngine.input(sample, down)`. There is no second drawing path.
 - **Inference is separate from rendering and React.** The tracking loop runs on `requestVideoFrameCallback` (one inference per new camera frame; `requestAnimationFrame` + `currentTime` check as fallback). Strokes reach the canvas through engine events; the canvas redraws on the next animation frame only when something changed. React only hears low-frequency events (gesture state, stroke start/end) and polls diagnostics 4×/s.
 - **Editing is separate from rendering.** `DocumentStore` holds the document and an operation history; the renderer just draws whatever document it's given.
+
+## v0.1.5: Smart Ink — stroke integrity and steady mapping
+
+**Every measurement in this section comes from synthetic traces** (modelled hand, modelled MediaPipe noise, deliberately corrupted landmarks). None is a real-webcam measurement; no webcam traces reached this session. `npm run ab -- your-trace.json --html ab.html` compares both pipelines on your recordings.
+
+Pen-down and pen-up behaviour is unchanged: `tests/gestureGolden.test.ts` still requires v0.1.2's exact decisions on 72 traces, and with Smart Ink on, the ink start and end times on those traces are identical too. `smartInk: false` (or *Developer diagnostics → v0.1.4 pipeline (A/B)*) replays **bit-identically** to the v0.1.4 commit: 444 replays compared point by point and cursor sample by cursor sample, and 64 of them are pinned in `tests/fixtures/pipeline-v014.json`.
+
+### 1. Where the long accidental lines came from (reproduced, not assumed)
+
+| Cause | Reproduction (v0.1.4) | Status |
+|---|---|---|
+| **Re-detection inside the 160 ms "lost" grace.** The gesture keeps a stroke alive while the hand is missing for up to 160 ms; when the hand reappears somewhere else, the engine connected the two positions. | Hand gone 133 ms, back 0.06–0.12 frame widths away: 89–166 px of connector ink | Fixed: gaps are bridged only when short and small or on the extrapolated path; otherwise the stroke is split |
+| **Outlier gate blind to gaps.** Its speed test divided by the time since the last *accepted* sample, so after a gap it became *more* permissive. At 30 fps only single-frame jumps above ~0.17 page widths (~260 px) were ever suspicious. | — | Superseded by time-aware tests in palm widths |
+| **Multi-frame fingertip misplacement** (occlusion). Each step stayed under the gate. | 3–6 frames, 0.1 frame widths: 144–307 px out-and-back excursions | Fixed: pen-relative-to-palm test; ink suspended until the pen trajectory is found again |
+| **Re-detection arriving in two sub-threshold steps.** | 0.2 frame widths over 2 frames: 257 px | Fixed: no step faster than the fastest plausible writing (≈1.2 m/s) is ever connected |
+| **Mapping change during the first stroke.** v0.1.4 locked the measured hand extent at the first writing frame, *after* that frame had been mapped with the prior extent: the region's height changed 0.690 → 0.599 mid-stroke. | First stroke within ~0.6 s of the hand appearing: 228 px jump | Fixed: the mapping is frozen from pinch start, and the extent estimate converges during hover so the lock changes nothing |
+| **Hand swap** (tracker latches onto the other hand). v0.1.4's gate split the stroke and then inked the other hand. | 0.35 frame widths for 8 frames: a 29 px mark at the other hand | Fixed: physically impossible displacements and handedness / palm-size changes suspend ink until the pen is found again |
+| Frame stalls (250 ms without frames) | No stray ink on a straight line (a straight bridge was a fair guess) | Now split unless the gap is short or on-path: no invented positions |
+| Orientation changes, Writing Assist scale changes mid-stroke, pending-frame buffer | Not a source of jumps in replay: the scale was already frozen while writing; buffered frames used one mapping except in the first-stroke case above | Scale and mapping now frozen from pinch start (pinch-pending frames included) |
+
+### 2. How stroke protection works (`strokes/continuity.ts`)
+
+Each inked frame is compared with the last accepted one in view space, **measured in palm widths** (so thresholds mean the same at 30 or 70 cm and at any writing size) with **time-aware** tolerances:
+- *kinematic*: residual from constant-velocity prediction ≤ noise floor + 0.6 × speed × dt + acceleration term (linear beyond one frame). The noise floor adapts to the measured residual (3.5 × its mean), so noisy cameras and hard orientations don't trigger it.
+- *shape*: the pen's position relative to the palm may change ≤ 0.3 palm widths per frame + 1.5 per second (a misplaced fingertip moves the pen, not the palm).
+- *identity*: palm size (≤ 0.2 log per frame), palm orientation (≤ 30° per frame), handedness.
+- *speed*: nothing faster than 14 palm widths/s (≈1.2 m/s) is ever connected.
+
+Outcomes: **normal** → inked immediately (no latency). **Suspicious** → held (ink pauses one frame); the next frame decides: back on the trajectory → the held frame was a glitch and is dropped; continuing smoothly → it was a legitimate fast move or sharp reversal and is released; settled at a new place → **confirmed jump**: the stroke ends where it was (nothing connects across) and ink resumes at the new place after 2 consistent frames if the hand could physically have got there, otherwise ink is **suspended** until the tracker is clearly back on the pen's path, or tracking has been steady for 6 frames with the same hand (palm size, handedness), or the pen lifts. **Gaps** are bridged only if ≤ 200 ms and either small (≤ 0.2 palm widths) or on the extrapolated path; otherwise split. At pen-up, ordinary held frames near the stroke end are kept, so quick strokes don't lose their last frame. Mouse input never goes through the guard.
+
+### 3. Coordinate discontinuities
+
+The page mapping (region, mirroring, pen point, Writing Assist gain) is captured when a pinch begins and used for every point of that stroke, including the frames buffered while the pinch settled; points are mapped when applied, not when observed. Changing calibration, writing size, mirroring, pen point or mode during a stroke takes effect at the next pen-up. A two-corner calibration is reduced to the largest page-shaped rectangle inside it: in v0.1.4 a comfortable, wide calibration stretched the page over a 3.6 : 1 area, so x and y had different gains — **a circle came out 2.26× taller than wide (now 1.01)**. This is a likely cause of "unusually tall letters" for anyone who calibrated.
+
+### 4. Handwriting size: what was found, kept and rejected
+
+- Natural Writing: size follows distance (22 % size spread across 37–56 cm, unchanged; physics). Writing Assist compensates (5 %).
+- **Rejected after measurement — word-level gain hold.** Holding the Writing Assist gain until a pause and applying distance changes "between words" made size *less* consistent (size spread 4.7 → 10.1 %, baseline steps 4.9 → 16.6 px) because the distance estimate converges over ~0.5–1 s and got applied mid-word; deadband variants were no better even with 3× world-landmark noise. v0.1.4's smoothed, rate-limited following stays; the change kept is freezing it from pinch start.
+- **Pipeline-induced variation (measured, not changed):** the drawn height of the same letter varies 82–107 % with speed and noise, mostly because short strokes lose their ends to the pen-down settle and pen-up trim (the "fast short strokes lose a third" concern). That timing is the gesture behaviour you asked to keep; fixing it needs your real traces.
+- Air writing has no physical feedback, so natural size variation remains; the guides (now with adjustable line spacing) are the tool for that.
+
+### 5. Alignment
+
+Guides: baseline, x-height, uppercase height, line-spacing bands, now with a *Line spacing* slider (0.6–2×; letter guides keep following the writing size). Tidy lines (rigid, reversible line straightening) unchanged; it leaves the maths line untouched. **Rejected after measurement — per-word baseline evening:** moving whole words onto the line's baseline made a bobbing-arm scene worse (baseline spread 6.5 → 10.9–13.8 px): drift within words tilts them, and two noisy estimates don't beat leaving words as written.
+
+### 6. A/B results (`npm run ab -- --seeds 6`, synthetic, mean per run, v0.1.4 → v0.1.5)
+
+| | v0.1.4 | v0.1.5 |
+|---|---|---|
+| 12 required scenarios + calibration: stray ink (> 20 px from the intended path) | 99 px | 56 px |
+| …stray lines ≥ 40 px | 0.83 | 0.33 |
+| …legitimate ink missing | 2 968 px | 2 964 px |
+| …strokes lost / short strokes lost | 0.67 / 6.0 | 0.67 / 6.0 |
+| …letter size spread (words, lines, distances) | 6.1 / 5.9 / 5.1 % | 6.0 / 5.9 / 5.1 % |
+| …baseline spread / line tilt | 2.1 px / 0.52° | 2.1 px / 0.52° |
+| Circle in a wide calibrated area (height ÷ width) | 2.26 | 1.01 |
+| Hand re-detected 0.05 frame widths away (S06): stray ink / end error | 81 px / 172 px | 38 px / 89 px |
+| **6 adversarial traces: stray ink** | **2 285 px** | **510 px** (−78 %) |
+| …stray lines ≥ 40 px | 14.2 | 3.3 (−76 %) |
+| …injected faults that left a stray line | 12.2 of 28 | 3.3 of 28 |
+| …legitimate ink missing | 3 390 px | 3 552 px (+5 %) |
+| …strokes lost | 1.8 | 2.0 |
+| Added delay before live ink | — | 0 ms in 11 of 12 normal scenarios (S06 +0.2 ms); +0–2.2 ms mean on adversarial traces |
+| Pipeline time per frame (excl. hand tracking) | 0.005 ms | 0.007 ms |
+
+All 12 required scenarios are identical between the pipelines except S06, the one designed to trigger a connector. Remaining v0.1.5 failures by fault type (≥ 40 px stray, 6 seeds): drop-out then re-detection at a wrong but reachable place 10/38 (v0.1.4 20/38) — indistinguishable from the hand really moving, so the stroke is split but the wrong place is inked; fingertip glitches 5/64 (18/64); whole-hand jumps 4/23 (12/23); palm-scale jumps 1/22 (16/22); hand swaps 0/21 (4/21). The cost: strokes are split at faults (more pieces), ~5 % more missing ink on corrupted traces, and one extra lost dash per ~4 adversarial dash runs.
+
+### 7. WISP-Motion research foundation
+
+`src/wisp-motion/` (not imported by the app): trace v4 recording (handedness, guard verdicts, *Mark glitch* labels, pseudonymous metadata, never video), validation, versioned manifests, participant-grouped splits with a leakage check, 25 per-frame features from tracker output only, Task A baselines, synthetic fault injection, and a TCN proposal with the data, labels and evaluation bar required before any model may touch the live pipeline. **No model was trained**: there is no real data or labels yet. See `src/wisp-motion/README.md`.
 
 ## v0.1.4: canvas edges, steady writing size, alignment
 
@@ -460,7 +535,7 @@ Nothing in Inkling has been changed for this yet.
 
 ## Testing
 
-`npm test` runs 291 unit tests (v0.1.4 adds 72 gesture-golden cases and 22 boundary/plane/layout tests; earlier: 197 (v0.1.3 adds 21: 3D ratio invariance and fallbacks, orientation quality and blending, live-ink pause and identical decisions, glitch confirmation, quadratic onset, robust noise level, fast-loop refinement, orientation scenarios, trace v3, settings)). They cover:
+`npm test` runs 384 unit tests (v0.1.5 adds 93: the continuity guard — ordinary, fast, reversing, glitching, relocating, swapping, gapping and suspended-then-steady motion, distance independence; mapping frozen for a stroke and setting changes deferred; aspect-true calibration; A/B guarantees on normal and adversarial traces; 64 bit-exact v0.1.4 replays; trace v4; guides and settings; wisp-motion validation, manifests, splits, leakage, features, labels and baselines. v0.1.4 added 72 gesture-golden cases and 22 boundary/plane/layout tests; earlier: 197 (v0.1.3 adds 21: 3D ratio invariance and fallbacks, orientation quality and blending, live-ink pause and identical decisions, glitch confirmation, quadratic onset, robust noise level, fast-loop refinement, orientation scenarios, trace v3, settings)). They cover:
 - **Gestures:** pinch thresholds and asymmetry; deliberate pen-down (drifting fingers don't start ink); pen-up cases (rapid, slow, small and fast openings, noisy measurements, re-pinch); hinge-fit trimming (quick release trims nothing, slow release trims the ramp); tracking gaps before and during writing.
 - **Smoothing:** the Whittaker solver against a dense reference; glitch removal; noise estimation; noise-matched refinement (straightens noisy ticks without shortening them, keeps loops round); the noise-gated filter.
 - **Ink and data:** the midpoint and mirroring; the continuous filter and seeding; pinch depth weight; trace v2 recording and parsing; serialization round-trips and invalid input; settings migration; undo/redo; the Inkling adapter.
@@ -480,6 +555,8 @@ The file contains:
 
 Never video. Replay it with: `npm run replay -- wisp-trace-….json --compare releaseSensitivity=0.8,1,1.2 --html compare.html`. Every run sees exactly the same hand motion, and the HTML page draws the strokes for each setting side by side. Any setting can be compared, including `depthWeight` and `noiseGate`.
 
+**Needs testing with a real webcam and hand (v0.1.5):** see "Real-webcam test plan (v0.1.5)" below.
+
 **Needs testing with a real webcam and hand (v0.1.3):**
 - Every orientation in the brief (palm facing, 45°, fingers toward the camera, sideways, tilted up/down, near/far): record one trace each, then `npm run replay -- trace.json --compare pinchMetric=2d,auto,3d --html compare.html`
 - How noisy MediaPipe's world landmarks really are (the 3D-vs-2D trade-off depends on it)
@@ -495,6 +572,21 @@ Never video. Replay it with: `npm run replay -- wisp-trace-….json --compare re
 - Frame rate and inference time on your laptop
 
 
+## Real-webcam test plan (v0.1.5)
+
+Turn on *Developer diagnostics*. For each test: *Record landmark trace*, write, press *Mark glitch* right after any stray line, *Stop & save trace*. Then `npm run ab -- trace.json --html ab.html` and open the page: every piece of ink that v0.1.5 removed should be a stray line, never your writing.
+
+1. **Stray lines (main fix).** Write "Hello World" three times at normal speed while (a) briefly covering the index fingertip with the thumb, (b) moving your other hand into view and out again, (c) dipping your writing hand out of the frame bottom for a moment mid-word. Expect: no line across the page; the diagnostics show *Strokes split* / *Ink suspended* counts.
+2. **Nothing legitimate lost.** Fast short dashes (– – – –), a fast zig-zag (W W W), "x² + 3x − 5 = 0", a dotted "i". Compare with *v0.1.4 pipeline (A/B)* on the same writing. Expect: the same strokes; *Glitch frames dropped* stays near 0 when tracking is clean.
+3. **First stroke after raising the hand.** Raise your hand and start writing within half a second, ten times. Expect: no jump in the first stroke.
+4. **Calibration shape.** *Set writing area* with a wide, comfortable rectangle, then draw circles and "o o o". Expect: round circles (v0.1.4 drew them tall).
+5. **Distances.** Writing Assist on: one line at your normal distance, lean in ~10 cm for the next, back ~10 cm for the third. Natural off vs on.
+6. **Rotation while writing.** Write "hello" while slowly turning the palm sideways (~40°).
+7. **Multiple lines with guides.** Guides on, try *Line spacing* 1.0 and 1.4; write three lines; then *Tidy lines* and *Restore original*.
+8. **Latency.** Diagnostics: *Capture → pen update* with Smart Ink on and on the v0.1.4 pipeline (should match within noise); does live ink ever feel like it hesitates?
+
+Send the traces (landmarks only) and a screenshot; they decide the next tuning, including the short-fast-stroke fix.
+
 ## Known limitations
 
 - **Defaults are tuned on modelled noise.** Two models agree on the direction of every change, but real traces are needed to confirm the values.
@@ -507,9 +599,13 @@ Never video. Replay it with: `npm run replay -- wisp-trace-….json --compare re
 - **3D pinch is modelled, not verified.** World-landmark noise in the replay model is an assumption (`--world-noise`).
 - **Pen-up decision.** Lifting a little (fingers just separating) still takes ~4 frames to decide on a facing hand; live ink stops sooner, but the decision does not.
 - **Edge reach depends on your camera.** The fitted region assumes MediaPipe loses the hand when the palm leaves the frame; if your camera tracks partly-visible hands, *Set writing area* can make it larger.
-- **Writing size** is about 1.33× larger at Medium than in v0.1.3 (smaller fitted region); use Small for the old size.
+- **Writing size** is about 1.33× larger at Medium than in v0.1.3 (smaller fitted region); use Small for the old size. A calibrated area that isn't page-shaped now maps the page to the largest page-shaped rectangle inside it (equal gains), so its usable area can be a little smaller than the rectangle pinched.
 - **Steady size needs a consistent hand pose**; turning the hand > 20° holds the last scale.
-- **Very short fast dashes** lose about a third of their length (≈ one frame of motion at each end).
+- **Very short fast dashes** lose about a third of their length (≈ one frame of motion at each end). Measured in v0.1.5: the drawn height of the same letter varies 82–107 % with speed and noise for this reason. It lives in the pen-down/pen-up timing, which is kept exactly as v0.1.2; the fix needs real traces.
+- **Stroke protection is tuned on modelled faults.** Its thresholds (palm widths, per second) are physically motivated, but how often and how MediaPipe really fails is unknown until real traces exist.
+- **Re-detection at a wrong but reachable place** (tracking drops out and returns a few cm off) can't be told from the hand really moving there: v0.1.5 no longer connects it, but inks the new place (10 of 38 such modelled faults left ≥ 40 px of stray ink).
+- **Splits instead of lines.** A confirmed jump ends the stroke; the result is two strokes where one was meant (more pieces on corrupted traces) and occasionally a lost dash.
+- **Held frames.** A suspicious frame pauses live ink for one frame (~33 ms) before it is drawn or dropped.
 - One hand only; uniform stroke width; timestamps are relative within a file; the calibrated area is stored in view space; no eraser yet.
 
 

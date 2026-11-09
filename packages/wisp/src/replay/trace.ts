@@ -22,9 +22,17 @@
  *          centre, camera-aligned axes) or null
  *     d.r2, d.r3  2D and 3D pinch ratios;  d.n palm normal;  d.q tracking quality
  *     d.dt frame interval, d.inf inference time, d.age capture→update latency (ms)
- *   events[]:  { t, type: 'pen-down' | 'pen-up', reason? }
+ *   v4 (WISP 0.1.5) adds:
+ *     h  – per frame, the tracker's handedness label ("Left"/"Right") or null
+ *     d.g  what the continuity guard did with the frame (accept, hold, drop, split, …)
+ *     meta – recording metadata for the wisp-motion dataset (participant and
+ *            session ids chosen by the recorder, task, device; never names or video)
+ *     events[] may include { type: 'mark', label } — the writer pressed
+ *            "Mark glitch" right after a tracking error (weak label, see wisp-motion)
+ *            and { type: 'split', reason } — the guard split a stroke
+ *   events[]:  { t, type: 'pen-down' | 'pen-up' | 'mark' | 'split', reason?, label? }
  *   strokes[]: the finished strokes, as in the stroke export (raw + processed points)
- * Replay uses t, c, lm, w and videoAspect, so v1–v3 traces all replay
+ * Replay uses t, c, lm, w, h and videoAspect, so v1–v4 traces all replay
  * (v1/v2 have no world landmarks and replay with the 2D pinch ratio).
  */
 import type { Landmark } from '../tracking/landmarks'
@@ -51,6 +59,8 @@ export interface FrameDiagnostics {
   dt?: number
   inf?: number
   age?: number
+  /** v4: continuity-guard verdict for this frame's inked sample. */
+  g?: string | null
 }
 
 export interface TraceFrame {
@@ -59,18 +69,38 @@ export interface TraceFrame {
   lm: number[] | null
   /** v3: MediaPipe world landmarks (63 numbers, metres, origin at the hand centre), or null. */
   w?: number[] | null
+  /** v4: handedness label from the tracker, or null. */
+  h?: string | null
   d?: FrameDiagnostics
 }
 
 export interface TraceEvent {
   t: number
-  type: 'pen-down' | 'pen-up'
+  type: 'pen-down' | 'pen-up' | 'mark' | 'split'
   reason?: string
+  /** 'mark' events: what the writer flagged (default 'tracking-error'). */
+  label?: string
+}
+
+/** v4 recording metadata (all optional; ids are pseudonymous codes chosen by whoever records). */
+export interface TraceMeta {
+  /** Pseudonymous participant code, e.g. "P03". Never a name. */
+  participant?: string
+  /** Session code; recordings from one sitting share it (used to keep sessions out of each other's test sets). */
+  session?: string
+  /** What was written, e.g. "S09-hello-world" (see wisp-motion protocol). */
+  task?: string
+  /** Free-form camera / laptop description, e.g. "MacBook Air M2 built-in 720p". */
+  device?: string
+  /** WISP version that recorded the trace. */
+  wispVersion?: string
+  /** Participant agreed to their landmark trace being used for research. */
+  consent?: boolean
 }
 
 export interface LandmarkTrace {
   format: typeof TRACE_FORMAT
-  version: 1 | 2 | 3
+  version: 1 | 2 | 3 | 4
   videoAspect: number
   /** Optional free-text label, e.g. "Hello World, defaults". */
   note?: string
@@ -79,6 +109,8 @@ export interface LandmarkTrace {
   frames: TraceFrame[]
   events?: TraceEvent[]
   strokes?: Stroke[]
+  /** v4 */
+  meta?: TraceMeta
 }
 
 const r4 = (v: number | null | undefined): number | null => (v === null || v === undefined || !Number.isFinite(v) ? null : Math.round(v * 1e4) / 1e4)
@@ -115,10 +147,10 @@ export class TraceRecorder {
     this.recording = true
   }
 
-  add(t: number, lm: readonly Landmark[] | null, confidence: number, videoAspect: number, d?: FrameDiagnostics, world?: readonly Landmark[] | null): void {
+  add(t: number, lm: readonly Landmark[] | null, confidence: number, videoAspect: number, d?: FrameDiagnostics, world?: readonly Landmark[] | null, hand?: string | null): void {
     if (!this.recording) return
     this.aspect = videoAspect
-    const f: TraceFrame = { t: Math.round(t * 10) / 10, c: Math.round(confidence * 1000) / 1000, lm: packLandmarks(lm), w: packLandmarks(world ?? null) }
+    const f: TraceFrame = { t: Math.round(t * 10) / 10, c: Math.round(confidence * 1000) / 1000, lm: packLandmarks(lm), w: packLandmarks(world ?? null), h: hand ?? null }
     if (d) {
       f.d = {
         ...d,
@@ -152,11 +184,17 @@ export class TraceRecorder {
     return this.frames.length
   }
 
-  stop(note?: string, settings?: Record<string, unknown>): LandmarkTrace {
+  /** The writer flags a tracking error that just happened (weak label for wisp-motion). */
+  mark(t: number, label = 'tracking-error'): void {
+    this.addEvent({ t, type: 'mark', label })
+  }
+
+  stop(note?: string, settings?: Record<string, unknown>, meta?: TraceMeta): LandmarkTrace {
     this.recording = false
-    const trace: LandmarkTrace = { format: TRACE_FORMAT, version: 3, videoAspect: this.aspect, frames: this.frames, events: this.events, strokes: this.strokes }
+    const trace: LandmarkTrace = { format: TRACE_FORMAT, version: 4, videoAspect: this.aspect, frames: this.frames, events: this.events, strokes: this.strokes }
     if (note) trace.note = note
     if (settings) trace.settings = settings
+    if (meta) trace.meta = meta
     this.frames = []
     this.events = []
     this.strokes = []
@@ -166,8 +204,8 @@ export class TraceRecorder {
 
 export function parseTrace(data: unknown): LandmarkTrace {
   const d = data as Partial<LandmarkTrace> | null
-  if (!d || d.format !== TRACE_FORMAT || ![1, 2, 3].includes(d.version as number) || !Array.isArray(d.frames)) {
-    throw new Error('Not a WISP landmark trace (format "wisp.landmarks", version 1–3).')
+  if (!d || d.format !== TRACE_FORMAT || ![1, 2, 3, 4].includes(d.version as number) || !Array.isArray(d.frames)) {
+    throw new Error('Not a WISP landmark trace (format "wisp.landmarks", version 1–4).')
   }
   const videoAspect = typeof d.videoAspect === 'number' && d.videoAspect > 0 ? d.videoAspect : 16 / 9
   const frames: TraceFrame[] = []
@@ -176,16 +214,21 @@ export function parseTrace(data: unknown): LandmarkTrace {
     const ok = (a: unknown): a is number[] => Array.isArray(a) && a.length >= 63 && a.every((v) => typeof v === 'number' && Number.isFinite(v))
     const lm = ok(f.lm) ? f.lm : null
     const w = ok(f.w) ? f.w : null
-    frames.push({ t: f.t, c: typeof f.c === 'number' ? f.c : 1, lm, w })
+    const h = typeof f.h === 'string' ? f.h : null
+    const fr: TraceFrame = { t: f.t, c: typeof f.c === 'number' ? f.c : 1, lm, w }
+    if (h) fr.h = h
+    if (f.d && typeof f.d === 'object') fr.d = f.d
+    frames.push(fr)
   }
   return {
     format: TRACE_FORMAT,
-    version: d.version as 1 | 2 | 3,
+    version: d.version as 1 | 2 | 3 | 4,
     videoAspect,
     note: typeof d.note === 'string' ? d.note : undefined,
     settings: d.settings && typeof d.settings === 'object' ? d.settings : undefined,
     frames,
     events: Array.isArray(d.events) ? d.events : undefined,
-    strokes: Array.isArray(d.strokes) ? d.strokes : undefined
+    strokes: Array.isArray(d.strokes) ? d.strokes : undefined,
+    meta: d.meta && typeof d.meta === 'object' ? d.meta : undefined
   }
 }

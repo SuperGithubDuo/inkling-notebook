@@ -1,0 +1,1349 @@
+{
+ "note": "Produced by running the v0.1.4 commit (2b13cce) on these traces: FNV-1a hashes of every stroke point and every cursor sample. smartInk: false must reproduce them exactly.",
+ "cases": [
+  {
+   "profile": "webcam",
+   "id": "A-slow-line",
+   "cfg": "centred",
+   "strokes": "ba131e00",
+   "cursor": "3ef960bb"
+  },
+  {
+   "profile": "webcam",
+   "id": "A-slow-line",
+   "cfg": "hand",
+   "strokes": "69d0f1de",
+   "cursor": "a9e50822"
+  },
+  {
+   "profile": "webcam",
+   "id": "A-slow-line",
+   "cfg": "assist",
+   "strokes": "2dd89b96",
+   "cursor": "9456de71"
+  },
+  {
+   "profile": "webcam",
+   "id": "A3-fast-line",
+   "cfg": "centred",
+   "strokes": "927a517b",
+   "cursor": "04631e16"
+  },
+  {
+   "profile": "webcam",
+   "id": "A3-fast-line",
+   "cfg": "hand",
+   "strokes": "60256bfb",
+   "cursor": "18f7efc9"
+  },
+  {
+   "profile": "webcam",
+   "id": "A3-fast-line",
+   "cfg": "assist",
+   "strokes": "e6f3fbfb",
+   "cursor": "3ebf3508"
+  },
+  {
+   "profile": "webcam",
+   "id": "A2-slow-vertical",
+   "cfg": "centred",
+   "strokes": "8e5690e7",
+   "cursor": "436f2a19"
+  },
+  {
+   "profile": "webcam",
+   "id": "A2-slow-vertical",
+   "cfg": "hand",
+   "strokes": "36709886",
+   "cursor": "a1eb0c22"
+  },
+  {
+   "profile": "webcam",
+   "id": "A2-slow-vertical",
+   "cfg": "assist",
+   "strokes": "92d0f56a",
+   "cursor": "23cbdb35"
+  },
+  {
+   "profile": "webcam",
+   "id": "G-circle",
+   "cfg": "centred",
+   "strokes": "c7b4c004",
+   "cursor": "3cb63662"
+  },
+  {
+   "profile": "webcam",
+   "id": "G-circle",
+   "cfg": "hand",
+   "strokes": "754789c4",
+   "cursor": "f202e2ac"
+  },
+  {
+   "profile": "webcam",
+   "id": "G-circle",
+   "cfg": "assist",
+   "strokes": "985e84c3",
+   "cursor": "7dc6910b"
+  },
+  {
+   "profile": "webcam",
+   "id": "H-small-loops",
+   "cfg": "centred",
+   "strokes": "55aa7dbf",
+   "cursor": "ec1cc9fd"
+  },
+  {
+   "profile": "webcam",
+   "id": "H-small-loops",
+   "cfg": "hand",
+   "strokes": "9b4e43ba",
+   "cursor": "25966b25"
+  },
+  {
+   "profile": "webcam",
+   "id": "H-small-loops",
+   "cfg": "assist",
+   "strokes": "87b0bf30",
+   "cursor": "580cac4a"
+  },
+  {
+   "profile": "webcam",
+   "id": "B-hello",
+   "cfg": "centred",
+   "strokes": "e280c531",
+   "cursor": "7683238e"
+  },
+  {
+   "profile": "webcam",
+   "id": "B-hello",
+   "cfg": "hand",
+   "strokes": "786bb4ce",
+   "cursor": "a64cdca7"
+  },
+  {
+   "profile": "webcam",
+   "id": "B-hello",
+   "cfg": "assist",
+   "strokes": "dd12b469",
+   "cursor": "7715d4f8"
+  },
+  {
+   "profile": "webcam",
+   "id": "C-math",
+   "cfg": "centred",
+   "strokes": "df56688c",
+   "cursor": "e9451fca"
+  },
+  {
+   "profile": "webcam",
+   "id": "C-math",
+   "cfg": "hand",
+   "strokes": "35126d7b",
+   "cursor": "b6b2e0a8"
+  },
+  {
+   "profile": "webcam",
+   "id": "C-math",
+   "cfg": "assist",
+   "strokes": "86a693ba",
+   "cursor": "1ff59722"
+  },
+  {
+   "profile": "webcam",
+   "id": "F-repeated",
+   "cfg": "centred",
+   "strokes": "7f0bd9b6",
+   "cursor": "11fbe646"
+  },
+  {
+   "profile": "webcam",
+   "id": "F-repeated",
+   "cfg": "hand",
+   "strokes": "26805043",
+   "cursor": "fae892d8"
+  },
+  {
+   "profile": "webcam",
+   "id": "F-repeated",
+   "cfg": "assist",
+   "strokes": "b8fe482e",
+   "cursor": "2e576d76"
+  },
+  {
+   "profile": "webcam",
+   "id": "F2-fast-ticks",
+   "cfg": "centred",
+   "strokes": "e927d4dc",
+   "cursor": "197654c5"
+  },
+  {
+   "profile": "webcam",
+   "id": "F2-fast-ticks",
+   "cfg": "hand",
+   "strokes": "876e1661",
+   "cursor": "30fc8f0a"
+  },
+  {
+   "profile": "webcam",
+   "id": "F2-fast-ticks",
+   "cfg": "assist",
+   "strokes": "0a3c430a",
+   "cursor": "f2891cd1"
+  },
+  {
+   "profile": "webcam",
+   "id": "F3-dashes",
+   "cfg": "centred",
+   "strokes": "083f6174",
+   "cursor": "f1e75675"
+  },
+  {
+   "profile": "webcam",
+   "id": "F3-dashes",
+   "cfg": "hand",
+   "strokes": "9b018f63",
+   "cursor": "e3f9a90d"
+  },
+  {
+   "profile": "webcam",
+   "id": "F3-dashes",
+   "cfg": "assist",
+   "strokes": "a166ef60",
+   "cursor": "03b24e77"
+  },
+  {
+   "profile": "webcam",
+   "id": "P1-gentle-lift-line",
+   "cfg": "centred",
+   "strokes": "0a59d780",
+   "cursor": "c9f4bcd6"
+  },
+  {
+   "profile": "webcam",
+   "id": "P1-gentle-lift-line",
+   "cfg": "hand",
+   "strokes": "2e77af7b",
+   "cursor": "3deaea6f"
+  },
+  {
+   "profile": "webcam",
+   "id": "P1-gentle-lift-line",
+   "cfg": "assist",
+   "strokes": "afaea780",
+   "cursor": "0ad20117"
+  },
+  {
+   "profile": "webcam",
+   "id": "P2-gentle-lift-hello",
+   "cfg": "centred",
+   "strokes": "dc9c8057",
+   "cursor": "2a4dc509"
+  },
+  {
+   "profile": "webcam",
+   "id": "P2-gentle-lift-hello",
+   "cfg": "hand",
+   "strokes": "723b8dc9",
+   "cursor": "2d32cfca"
+  },
+  {
+   "profile": "webcam",
+   "id": "P2-gentle-lift-hello",
+   "cfg": "assist",
+   "strokes": "fa02287d",
+   "cursor": "1be1a24e"
+  },
+  {
+   "profile": "webcam",
+   "id": "P3-gentle-lift-short",
+   "cfg": "centred",
+   "strokes": "4fe3371f",
+   "cursor": "efa432be"
+  },
+  {
+   "profile": "webcam",
+   "id": "P3-gentle-lift-short",
+   "cfg": "hand",
+   "strokes": "5acc2c41",
+   "cursor": "b2bb8d3c"
+  },
+  {
+   "profile": "webcam",
+   "id": "P3-gentle-lift-short",
+   "cfg": "assist",
+   "strokes": "0a691372",
+   "cursor": "1fdc2f29"
+  },
+  {
+   "profile": "webcam",
+   "id": "P4-gentle-lift-toward",
+   "cfg": "centred",
+   "strokes": "56e307cd",
+   "cursor": "140e195d"
+  },
+  {
+   "profile": "webcam",
+   "id": "P4-gentle-lift-toward",
+   "cfg": "hand",
+   "strokes": "e141433c",
+   "cursor": "457947da"
+  },
+  {
+   "profile": "webcam",
+   "id": "P4-gentle-lift-toward",
+   "cfg": "assist",
+   "strokes": "6ca6d9f3",
+   "cursor": "25053b51"
+  },
+  {
+   "profile": "webcam",
+   "id": "S2-hello-2x",
+   "cfg": "centred",
+   "strokes": "c80648ca",
+   "cursor": "3dda3eed"
+  },
+  {
+   "profile": "webcam",
+   "id": "S2-hello-2x",
+   "cfg": "hand",
+   "strokes": "e8c8c2b5",
+   "cursor": "f5f04738"
+  },
+  {
+   "profile": "webcam",
+   "id": "S2-hello-2x",
+   "cfg": "assist",
+   "strokes": "dab7f84c",
+   "cursor": "53293145"
+  },
+  {
+   "profile": "webcam",
+   "id": "S3-hello-3x",
+   "cfg": "centred",
+   "strokes": "fb1d7e9e",
+   "cursor": "c614bfe5"
+  },
+  {
+   "profile": "webcam",
+   "id": "S3-hello-3x",
+   "cfg": "hand",
+   "strokes": "4442fd42",
+   "cursor": "9149a60d"
+  },
+  {
+   "profile": "webcam",
+   "id": "S3-hello-3x",
+   "cfg": "assist",
+   "strokes": "7708ebe8",
+   "cursor": "d45f8a67"
+  },
+  {
+   "profile": "webcam",
+   "id": "S4-math-2x",
+   "cfg": "centred",
+   "strokes": "e0cd4c9c",
+   "cursor": "90814110"
+  },
+  {
+   "profile": "webcam",
+   "id": "S4-math-2x",
+   "cfg": "hand",
+   "strokes": "66c54d26",
+   "cursor": "e182666c"
+  },
+  {
+   "profile": "webcam",
+   "id": "S4-math-2x",
+   "cfg": "assist",
+   "strokes": "a0fa7b6f",
+   "cursor": "4d27936e"
+  },
+  {
+   "profile": "webcam",
+   "id": "D-rapid-release",
+   "cfg": "centred",
+   "strokes": "5789aa87",
+   "cursor": "0013c77b"
+  },
+  {
+   "profile": "webcam",
+   "id": "D-rapid-release",
+   "cfg": "hand",
+   "strokes": "4f78f3a9",
+   "cursor": "8847e1d9"
+  },
+  {
+   "profile": "webcam",
+   "id": "D-rapid-release",
+   "cfg": "assist",
+   "strokes": "e1bf612e",
+   "cursor": "858e09c4"
+  },
+  {
+   "profile": "webcam",
+   "id": "D2-slow-release",
+   "cfg": "centred",
+   "strokes": "6c319149",
+   "cursor": "c8ccf9ff"
+  },
+  {
+   "profile": "webcam",
+   "id": "D2-slow-release",
+   "cfg": "hand",
+   "strokes": "c7e97c97",
+   "cursor": "f2c687c6"
+  },
+  {
+   "profile": "webcam",
+   "id": "D2-slow-release",
+   "cfg": "assist",
+   "strokes": "f9ab3ec4",
+   "cursor": "d93c32f4"
+  },
+  {
+   "profile": "webcam",
+   "id": "D3-repeated-pinch",
+   "cfg": "centred",
+   "strokes": "6c903139",
+   "cursor": "73b86d9f"
+  },
+  {
+   "profile": "webcam",
+   "id": "D3-repeated-pinch",
+   "cfg": "hand",
+   "strokes": "1b581a72",
+   "cursor": "f9efda20"
+  },
+  {
+   "profile": "webcam",
+   "id": "D3-repeated-pinch",
+   "cfg": "assist",
+   "strokes": "56986b77",
+   "cursor": "cdaa32fa"
+  },
+  {
+   "profile": "webcam",
+   "id": "E-reposition",
+   "cfg": "centred",
+   "strokes": "741638a5",
+   "cursor": "5011fceb"
+  },
+  {
+   "profile": "webcam",
+   "id": "E-reposition",
+   "cfg": "hand",
+   "strokes": "741638a5",
+   "cursor": "65215611"
+  },
+  {
+   "profile": "webcam",
+   "id": "E-reposition",
+   "cfg": "assist",
+   "strokes": "741638a5",
+   "cursor": "0d31b7b3"
+  },
+  {
+   "profile": "webcam",
+   "id": "L-tracking-loss",
+   "cfg": "centred",
+   "strokes": "c4815f20",
+   "cursor": "0bedd387"
+  },
+  {
+   "profile": "webcam",
+   "id": "L-tracking-loss",
+   "cfg": "hand",
+   "strokes": "5e199311",
+   "cursor": "a647fcb8"
+  },
+  {
+   "profile": "webcam",
+   "id": "L-tracking-loss",
+   "cfg": "assist",
+   "strokes": "7a376afa",
+   "cursor": "92871762"
+  },
+  {
+   "profile": "webcam",
+   "id": "O1-facing",
+   "cfg": "centred",
+   "strokes": "e280c531",
+   "cursor": "7683238e"
+  },
+  {
+   "profile": "webcam",
+   "id": "O1-facing",
+   "cfg": "hand",
+   "strokes": "786bb4ce",
+   "cursor": "a64cdca7"
+  },
+  {
+   "profile": "webcam",
+   "id": "O1-facing",
+   "cfg": "assist",
+   "strokes": "dd12b469",
+   "cursor": "7715d4f8"
+  },
+  {
+   "profile": "webcam",
+   "id": "O2-rot45",
+   "cfg": "centred",
+   "strokes": "d373aa48",
+   "cursor": "a5989f12"
+  },
+  {
+   "profile": "webcam",
+   "id": "O2-rot45",
+   "cfg": "hand",
+   "strokes": "48104be2",
+   "cursor": "9b2e818d"
+  },
+  {
+   "profile": "webcam",
+   "id": "O2-rot45",
+   "cfg": "assist",
+   "strokes": "dcf8cc05",
+   "cursor": "8ea096cf"
+  },
+  {
+   "profile": "webcam",
+   "id": "O3-toward",
+   "cfg": "centred",
+   "strokes": "89e46fd8",
+   "cursor": "d0cf5b62"
+  },
+  {
+   "profile": "webcam",
+   "id": "O3-toward",
+   "cfg": "hand",
+   "strokes": "c9a72b69",
+   "cursor": "71efc788"
+  },
+  {
+   "profile": "webcam",
+   "id": "O3-toward",
+   "cfg": "assist",
+   "strokes": "2f2ca7a7",
+   "cursor": "a433ad47"
+  },
+  {
+   "profile": "webcam",
+   "id": "O4-sideways",
+   "cfg": "centred",
+   "strokes": "d6eb783e",
+   "cursor": "e73255d2"
+  },
+  {
+   "profile": "webcam",
+   "id": "O4-sideways",
+   "cfg": "hand",
+   "strokes": "5423d223",
+   "cursor": "bf3d476e"
+  },
+  {
+   "profile": "webcam",
+   "id": "O4-sideways",
+   "cfg": "assist",
+   "strokes": "55b2cc54",
+   "cursor": "93904c44"
+  },
+  {
+   "profile": "webcam",
+   "id": "O5-tilt-up",
+   "cfg": "centred",
+   "strokes": "9c2ba446",
+   "cursor": "b2378796"
+  },
+  {
+   "profile": "webcam",
+   "id": "O5-tilt-up",
+   "cfg": "hand",
+   "strokes": "ac01c13a",
+   "cursor": "689afa5f"
+  },
+  {
+   "profile": "webcam",
+   "id": "O5-tilt-up",
+   "cfg": "assist",
+   "strokes": "1f580401",
+   "cursor": "a3df3c3a"
+  },
+  {
+   "profile": "webcam",
+   "id": "O6-tilt-down",
+   "cfg": "centred",
+   "strokes": "9e50b658",
+   "cursor": "82d10619"
+  },
+  {
+   "profile": "webcam",
+   "id": "O6-tilt-down",
+   "cfg": "hand",
+   "strokes": "b6e003fe",
+   "cursor": "82061e8a"
+  },
+  {
+   "profile": "webcam",
+   "id": "O6-tilt-down",
+   "cfg": "assist",
+   "strokes": "867f4a39",
+   "cursor": "a4382bde"
+  },
+  {
+   "profile": "webcam",
+   "id": "O7-rolled",
+   "cfg": "centred",
+   "strokes": "8168976f",
+   "cursor": "5c4dc160"
+  },
+  {
+   "profile": "webcam",
+   "id": "O7-rolled",
+   "cfg": "hand",
+   "strokes": "4386ee9d",
+   "cursor": "ebf6e9f6"
+  },
+  {
+   "profile": "webcam",
+   "id": "O7-rolled",
+   "cfg": "assist",
+   "strokes": "5ee09ea8",
+   "cursor": "8604423c"
+  },
+  {
+   "profile": "webcam",
+   "id": "O8-near",
+   "cfg": "centred",
+   "strokes": "586f885e",
+   "cursor": "12728ce4"
+  },
+  {
+   "profile": "webcam",
+   "id": "O8-near",
+   "cfg": "hand",
+   "strokes": "cb2687c6",
+   "cursor": "b9b745c4"
+  },
+  {
+   "profile": "webcam",
+   "id": "O8-near",
+   "cfg": "assist",
+   "strokes": "893c0054",
+   "cursor": "2f52b5ed"
+  },
+  {
+   "profile": "webcam",
+   "id": "O9-far",
+   "cfg": "centred",
+   "strokes": "20fc657f",
+   "cursor": "790e8e3f"
+  },
+  {
+   "profile": "webcam",
+   "id": "O9-far",
+   "cfg": "hand",
+   "strokes": "5bb6ce02",
+   "cursor": "8df35f6e"
+  },
+  {
+   "profile": "webcam",
+   "id": "O9-far",
+   "cfg": "assist",
+   "strokes": "d4ec8046",
+   "cursor": "63560264"
+  },
+  {
+   "profile": "webcam",
+   "id": "O10-reposition-toward",
+   "cfg": "centred",
+   "strokes": "c6c2cf81",
+   "cursor": "a8c47792"
+  },
+  {
+   "profile": "webcam",
+   "id": "O10-reposition-toward",
+   "cfg": "hand",
+   "strokes": "3a555f25",
+   "cursor": "ac385664"
+  },
+  {
+   "profile": "webcam",
+   "id": "O10-reposition-toward",
+   "cfg": "assist",
+   "strokes": "0c62aebb",
+   "cursor": "283c00c2"
+  },
+  {
+   "profile": "model",
+   "id": "A-slow-line",
+   "cfg": "centred",
+   "strokes": "ae216d04",
+   "cursor": "c3f08ef2"
+  },
+  {
+   "profile": "model",
+   "id": "A-slow-line",
+   "cfg": "hand",
+   "strokes": "e81f3049",
+   "cursor": "ab359782"
+  },
+  {
+   "profile": "model",
+   "id": "A-slow-line",
+   "cfg": "assist",
+   "strokes": "567a9a4d",
+   "cursor": "79a599a5"
+  },
+  {
+   "profile": "model",
+   "id": "A3-fast-line",
+   "cfg": "centred",
+   "strokes": "3b9621f4",
+   "cursor": "8ee98a2d"
+  },
+  {
+   "profile": "model",
+   "id": "A3-fast-line",
+   "cfg": "hand",
+   "strokes": "7b30a5f1",
+   "cursor": "1dcaacd8"
+  },
+  {
+   "profile": "model",
+   "id": "A3-fast-line",
+   "cfg": "assist",
+   "strokes": "e6870837",
+   "cursor": "b2d2de5d"
+  },
+  {
+   "profile": "model",
+   "id": "A2-slow-vertical",
+   "cfg": "centred",
+   "strokes": "4384427f",
+   "cursor": "0c5bc2c5"
+  },
+  {
+   "profile": "model",
+   "id": "A2-slow-vertical",
+   "cfg": "hand",
+   "strokes": "9cfc4ca6",
+   "cursor": "2ee7dbc2"
+  },
+  {
+   "profile": "model",
+   "id": "A2-slow-vertical",
+   "cfg": "assist",
+   "strokes": "ad623a2e",
+   "cursor": "778ef315"
+  },
+  {
+   "profile": "model",
+   "id": "G-circle",
+   "cfg": "centred",
+   "strokes": "4c18e7f7",
+   "cursor": "c1883e3d"
+  },
+  {
+   "profile": "model",
+   "id": "G-circle",
+   "cfg": "hand",
+   "strokes": "eb9ea2ec",
+   "cursor": "8ef54411"
+  },
+  {
+   "profile": "model",
+   "id": "G-circle",
+   "cfg": "assist",
+   "strokes": "f46831d4",
+   "cursor": "f3bac03d"
+  },
+  {
+   "profile": "model",
+   "id": "H-small-loops",
+   "cfg": "centred",
+   "strokes": "930d0ad8",
+   "cursor": "0a936ed5"
+  },
+  {
+   "profile": "model",
+   "id": "H-small-loops",
+   "cfg": "hand",
+   "strokes": "a78b71ed",
+   "cursor": "6bbcd4ec"
+  },
+  {
+   "profile": "model",
+   "id": "H-small-loops",
+   "cfg": "assist",
+   "strokes": "5df73827",
+   "cursor": "ab523a81"
+  },
+  {
+   "profile": "model",
+   "id": "B-hello",
+   "cfg": "centred",
+   "strokes": "e6934a99",
+   "cursor": "99178b1f"
+  },
+  {
+   "profile": "model",
+   "id": "B-hello",
+   "cfg": "hand",
+   "strokes": "98867565",
+   "cursor": "d0ccfebc"
+  },
+  {
+   "profile": "model",
+   "id": "B-hello",
+   "cfg": "assist",
+   "strokes": "6fcde9c6",
+   "cursor": "dcb55978"
+  },
+  {
+   "profile": "model",
+   "id": "C-math",
+   "cfg": "centred",
+   "strokes": "62019fb2",
+   "cursor": "fe074f66"
+  },
+  {
+   "profile": "model",
+   "id": "C-math",
+   "cfg": "hand",
+   "strokes": "7b019e18",
+   "cursor": "750ebbb5"
+  },
+  {
+   "profile": "model",
+   "id": "C-math",
+   "cfg": "assist",
+   "strokes": "7b9edd60",
+   "cursor": "afb2b7b0"
+  },
+  {
+   "profile": "model",
+   "id": "F-repeated",
+   "cfg": "centred",
+   "strokes": "f2525e1e",
+   "cursor": "42a793e9"
+  },
+  {
+   "profile": "model",
+   "id": "F-repeated",
+   "cfg": "hand",
+   "strokes": "d1481fee",
+   "cursor": "ccc892c8"
+  },
+  {
+   "profile": "model",
+   "id": "F-repeated",
+   "cfg": "assist",
+   "strokes": "df2b7278",
+   "cursor": "e6ec7c5b"
+  },
+  {
+   "profile": "model",
+   "id": "F2-fast-ticks",
+   "cfg": "centred",
+   "strokes": "1b5d8bf6",
+   "cursor": "40010899"
+  },
+  {
+   "profile": "model",
+   "id": "F2-fast-ticks",
+   "cfg": "hand",
+   "strokes": "66d03d59",
+   "cursor": "3b539bb0"
+  },
+  {
+   "profile": "model",
+   "id": "F2-fast-ticks",
+   "cfg": "assist",
+   "strokes": "adefef1b",
+   "cursor": "5f7837d7"
+  },
+  {
+   "profile": "model",
+   "id": "F3-dashes",
+   "cfg": "centred",
+   "strokes": "b33cd06a",
+   "cursor": "28c659da"
+  },
+  {
+   "profile": "model",
+   "id": "F3-dashes",
+   "cfg": "hand",
+   "strokes": "111b7f52",
+   "cursor": "9cef0f0f"
+  },
+  {
+   "profile": "model",
+   "id": "F3-dashes",
+   "cfg": "assist",
+   "strokes": "b8d9ae33",
+   "cursor": "7c622db3"
+  },
+  {
+   "profile": "model",
+   "id": "P1-gentle-lift-line",
+   "cfg": "centred",
+   "strokes": "3c67e928",
+   "cursor": "e22f40e6"
+  },
+  {
+   "profile": "model",
+   "id": "P1-gentle-lift-line",
+   "cfg": "hand",
+   "strokes": "d0f095ef",
+   "cursor": "ebc5ef3c"
+  },
+  {
+   "profile": "model",
+   "id": "P1-gentle-lift-line",
+   "cfg": "assist",
+   "strokes": "a9af017e",
+   "cursor": "64bce0e3"
+  },
+  {
+   "profile": "model",
+   "id": "P2-gentle-lift-hello",
+   "cfg": "centred",
+   "strokes": "4fea778b",
+   "cursor": "c5788254"
+  },
+  {
+   "profile": "model",
+   "id": "P2-gentle-lift-hello",
+   "cfg": "hand",
+   "strokes": "ec762eb2",
+   "cursor": "33111138"
+  },
+  {
+   "profile": "model",
+   "id": "P2-gentle-lift-hello",
+   "cfg": "assist",
+   "strokes": "51292520",
+   "cursor": "16992452"
+  },
+  {
+   "profile": "model",
+   "id": "P3-gentle-lift-short",
+   "cfg": "centred",
+   "strokes": "785c10e3",
+   "cursor": "262bade9"
+  },
+  {
+   "profile": "model",
+   "id": "P3-gentle-lift-short",
+   "cfg": "hand",
+   "strokes": "0ed4dc05",
+   "cursor": "5418095c"
+  },
+  {
+   "profile": "model",
+   "id": "P3-gentle-lift-short",
+   "cfg": "assist",
+   "strokes": "39e2ae42",
+   "cursor": "2a7c4bb3"
+  },
+  {
+   "profile": "model",
+   "id": "P4-gentle-lift-toward",
+   "cfg": "centred",
+   "strokes": "b21cc104",
+   "cursor": "abbf1384"
+  },
+  {
+   "profile": "model",
+   "id": "P4-gentle-lift-toward",
+   "cfg": "hand",
+   "strokes": "3d05b295",
+   "cursor": "733837a3"
+  },
+  {
+   "profile": "model",
+   "id": "P4-gentle-lift-toward",
+   "cfg": "assist",
+   "strokes": "4085319b",
+   "cursor": "9f0b322a"
+  },
+  {
+   "profile": "model",
+   "id": "S2-hello-2x",
+   "cfg": "centred",
+   "strokes": "a4ea394e",
+   "cursor": "9e1d6cc9"
+  },
+  {
+   "profile": "model",
+   "id": "S2-hello-2x",
+   "cfg": "hand",
+   "strokes": "9bf428e4",
+   "cursor": "d452562d"
+  },
+  {
+   "profile": "model",
+   "id": "S2-hello-2x",
+   "cfg": "assist",
+   "strokes": "98e76389",
+   "cursor": "63e49653"
+  },
+  {
+   "profile": "model",
+   "id": "S3-hello-3x",
+   "cfg": "centred",
+   "strokes": "4a66d765",
+   "cursor": "f85a801f"
+  },
+  {
+   "profile": "model",
+   "id": "S3-hello-3x",
+   "cfg": "hand",
+   "strokes": "d8e7c790",
+   "cursor": "c2ba2817"
+  },
+  {
+   "profile": "model",
+   "id": "S3-hello-3x",
+   "cfg": "assist",
+   "strokes": "ff645a7d",
+   "cursor": "61a63a98"
+  },
+  {
+   "profile": "model",
+   "id": "S4-math-2x",
+   "cfg": "centred",
+   "strokes": "a37ee3de",
+   "cursor": "38fd0abd"
+  },
+  {
+   "profile": "model",
+   "id": "S4-math-2x",
+   "cfg": "hand",
+   "strokes": "71ff6995",
+   "cursor": "bb0e4c0b"
+  },
+  {
+   "profile": "model",
+   "id": "S4-math-2x",
+   "cfg": "assist",
+   "strokes": "b35fb152",
+   "cursor": "18c1d5e5"
+  },
+  {
+   "profile": "model",
+   "id": "D-rapid-release",
+   "cfg": "centred",
+   "strokes": "90ce8ac9",
+   "cursor": "aa543f7b"
+  },
+  {
+   "profile": "model",
+   "id": "D-rapid-release",
+   "cfg": "hand",
+   "strokes": "6454545a",
+   "cursor": "69ddc328"
+  },
+  {
+   "profile": "model",
+   "id": "D-rapid-release",
+   "cfg": "assist",
+   "strokes": "c369da9a",
+   "cursor": "49ebcf4a"
+  },
+  {
+   "profile": "model",
+   "id": "D2-slow-release",
+   "cfg": "centred",
+   "strokes": "ed5ad00e",
+   "cursor": "7f7e1da5"
+  },
+  {
+   "profile": "model",
+   "id": "D2-slow-release",
+   "cfg": "hand",
+   "strokes": "5852537c",
+   "cursor": "3daff95a"
+  },
+  {
+   "profile": "model",
+   "id": "D2-slow-release",
+   "cfg": "assist",
+   "strokes": "bd1937f6",
+   "cursor": "e5572cd4"
+  },
+  {
+   "profile": "model",
+   "id": "D3-repeated-pinch",
+   "cfg": "centred",
+   "strokes": "7cf63543",
+   "cursor": "dd8f0bd9"
+  },
+  {
+   "profile": "model",
+   "id": "D3-repeated-pinch",
+   "cfg": "hand",
+   "strokes": "0facaa91",
+   "cursor": "73f9c775"
+  },
+  {
+   "profile": "model",
+   "id": "D3-repeated-pinch",
+   "cfg": "assist",
+   "strokes": "31c741ee",
+   "cursor": "9c043e1c"
+  },
+  {
+   "profile": "model",
+   "id": "E-reposition",
+   "cfg": "centred",
+   "strokes": "741638a5",
+   "cursor": "b02f1db1"
+  },
+  {
+   "profile": "model",
+   "id": "E-reposition",
+   "cfg": "hand",
+   "strokes": "741638a5",
+   "cursor": "96699d18"
+  },
+  {
+   "profile": "model",
+   "id": "E-reposition",
+   "cfg": "assist",
+   "strokes": "741638a5",
+   "cursor": "a0cbd2f6"
+  },
+  {
+   "profile": "model",
+   "id": "L-tracking-loss",
+   "cfg": "centred",
+   "strokes": "3043fe1e",
+   "cursor": "c6de38d7"
+  },
+  {
+   "profile": "model",
+   "id": "L-tracking-loss",
+   "cfg": "hand",
+   "strokes": "18ca2c0d",
+   "cursor": "956664de"
+  },
+  {
+   "profile": "model",
+   "id": "L-tracking-loss",
+   "cfg": "assist",
+   "strokes": "7897ee6c",
+   "cursor": "c279a4d9"
+  },
+  {
+   "profile": "model",
+   "id": "O1-facing",
+   "cfg": "centred",
+   "strokes": "e6934a99",
+   "cursor": "99178b1f"
+  },
+  {
+   "profile": "model",
+   "id": "O1-facing",
+   "cfg": "hand",
+   "strokes": "98867565",
+   "cursor": "d0ccfebc"
+  },
+  {
+   "profile": "model",
+   "id": "O1-facing",
+   "cfg": "assist",
+   "strokes": "6fcde9c6",
+   "cursor": "dcb55978"
+  },
+  {
+   "profile": "model",
+   "id": "O2-rot45",
+   "cfg": "centred",
+   "strokes": "6c05f27c",
+   "cursor": "82ae4973"
+  },
+  {
+   "profile": "model",
+   "id": "O2-rot45",
+   "cfg": "hand",
+   "strokes": "cc4455b2",
+   "cursor": "c0ddba82"
+  },
+  {
+   "profile": "model",
+   "id": "O2-rot45",
+   "cfg": "assist",
+   "strokes": "4dd48133",
+   "cursor": "0777ff79"
+  },
+  {
+   "profile": "model",
+   "id": "O3-toward",
+   "cfg": "centred",
+   "strokes": "acab02aa",
+   "cursor": "c714a8d7"
+  },
+  {
+   "profile": "model",
+   "id": "O3-toward",
+   "cfg": "hand",
+   "strokes": "c783efa1",
+   "cursor": "c1b953a5"
+  },
+  {
+   "profile": "model",
+   "id": "O3-toward",
+   "cfg": "assist",
+   "strokes": "c9616e1d",
+   "cursor": "28ef18ff"
+  },
+  {
+   "profile": "model",
+   "id": "O4-sideways",
+   "cfg": "centred",
+   "strokes": "a6306214",
+   "cursor": "ca76d9b2"
+  },
+  {
+   "profile": "model",
+   "id": "O4-sideways",
+   "cfg": "hand",
+   "strokes": "369e6e92",
+   "cursor": "420ae701"
+  },
+  {
+   "profile": "model",
+   "id": "O4-sideways",
+   "cfg": "assist",
+   "strokes": "41e560a1",
+   "cursor": "05813774"
+  },
+  {
+   "profile": "model",
+   "id": "O5-tilt-up",
+   "cfg": "centred",
+   "strokes": "9a123a91",
+   "cursor": "28a08d3b"
+  },
+  {
+   "profile": "model",
+   "id": "O5-tilt-up",
+   "cfg": "hand",
+   "strokes": "a8ecd3c7",
+   "cursor": "6fbf72d8"
+  },
+  {
+   "profile": "model",
+   "id": "O5-tilt-up",
+   "cfg": "assist",
+   "strokes": "bd5e940d",
+   "cursor": "653a6938"
+  },
+  {
+   "profile": "model",
+   "id": "O6-tilt-down",
+   "cfg": "centred",
+   "strokes": "fcc7960b",
+   "cursor": "1ee3f720"
+  },
+  {
+   "profile": "model",
+   "id": "O6-tilt-down",
+   "cfg": "hand",
+   "strokes": "9f0937ed",
+   "cursor": "30769e02"
+  },
+  {
+   "profile": "model",
+   "id": "O6-tilt-down",
+   "cfg": "assist",
+   "strokes": "450b63c1",
+   "cursor": "3d43400e"
+  },
+  {
+   "profile": "model",
+   "id": "O7-rolled",
+   "cfg": "centred",
+   "strokes": "739acf35",
+   "cursor": "41a87011"
+  },
+  {
+   "profile": "model",
+   "id": "O7-rolled",
+   "cfg": "hand",
+   "strokes": "fcd268d3",
+   "cursor": "8533b7ee"
+  },
+  {
+   "profile": "model",
+   "id": "O7-rolled",
+   "cfg": "assist",
+   "strokes": "59a4ce0e",
+   "cursor": "1507ca78"
+  },
+  {
+   "profile": "model",
+   "id": "O8-near",
+   "cfg": "centred",
+   "strokes": "5decf1ce",
+   "cursor": "c914e31e"
+  },
+  {
+   "profile": "model",
+   "id": "O8-near",
+   "cfg": "hand",
+   "strokes": "3aee6e97",
+   "cursor": "c8b86b1e"
+  },
+  {
+   "profile": "model",
+   "id": "O8-near",
+   "cfg": "assist",
+   "strokes": "b489054d",
+   "cursor": "a1424d5c"
+  },
+  {
+   "profile": "model",
+   "id": "O9-far",
+   "cfg": "centred",
+   "strokes": "7d30f28b",
+   "cursor": "2b5e9939"
+  },
+  {
+   "profile": "model",
+   "id": "O9-far",
+   "cfg": "hand",
+   "strokes": "366f548d",
+   "cursor": "6d38708c"
+  },
+  {
+   "profile": "model",
+   "id": "O9-far",
+   "cfg": "assist",
+   "strokes": "2c0b019c",
+   "cursor": "e8cc9194"
+  },
+  {
+   "profile": "model",
+   "id": "O10-reposition-toward",
+   "cfg": "centred",
+   "strokes": "f32b3c64",
+   "cursor": "10f51e1f"
+  },
+  {
+   "profile": "model",
+   "id": "O10-reposition-toward",
+   "cfg": "hand",
+   "strokes": "49c6e649",
+   "cursor": "70fb658a"
+  },
+  {
+   "profile": "model",
+   "id": "O10-reposition-toward",
+   "cfg": "assist",
+   "strokes": "cb1cc32d",
+   "cursor": "12052d3f"
+  }
+ ]
+}

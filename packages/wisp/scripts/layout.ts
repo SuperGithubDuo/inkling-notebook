@@ -19,7 +19,10 @@ const noise = (opt('--profile') ?? 'webcam') === 'model' ? DEFAULT_NOISE : WEBCA
 const asJson = args.includes('--json')
 const page = { width: 1600, height: 1000, background: '#ffffff' }
 
-const configs = [...Object.entries(LAYOUT_CONFIGS), ['Writing Assist + Tidy lines', LAYOUT_CONFIGS['Writing Assist']!, true] as const].map((c) => ({ label: c[0] as string, cfg: c[1], tidy: c.length > 2 }))
+const configs = [
+  ...Object.entries(LAYOUT_CONFIGS).map(([label, cfg]) => ({ label, cfg, tidy: false })),
+  { label: 'Writing Assist + Tidy lines', cfg: LAYOUT_CONFIGS['Writing Assist']!, tidy: true }
+]
 const rows: Array<Record<string, number | string>> = []
 for (const def of LAYOUT_SCENES) {
   for (const c of configs) {

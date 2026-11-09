@@ -78,6 +78,19 @@ export const LAYOUT_SCENES: SceneDef[] = [
     },
     lineOf: (w) => Math.floor(w / 3)
   },
+  {
+    // v0.1.5: the arm bobs up and down while writing a line (±5 mm, ≈ ±0.18 em, period
+    // ≈ 3.6 s, about two words). Not a tilt, so rotating the whole line can't remove it.
+    scene: {
+      id: 'LF-wavy',
+      title: 'Arm bobbing up and down along one line (±5 mm)',
+      em: EM,
+      origin: originFor(),
+      words: words(['hello', 'hello', 'hello', 'hello', 'hello'], 0, 0).map((g) => ({ glyphs: g, depth: 0.45 })),
+      drift: (s) => ({ dX: 0, dY: 0.005 * Math.sin((2 * Math.PI * s) / 3.6) })
+    },
+    lineOf: () => 0
+  },
   (() => {
     // x² + 1 = (a over b) √x ∫x₁ Σ — main glyphs plus superscripts, subscripts and fraction parts.
     const g: Placed[] = []

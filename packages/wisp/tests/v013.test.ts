@@ -250,7 +250,7 @@ describe('trace v3 and settings', () => {
     rec.start()
     rec.add(0, imageLandmarks(cam), 0.9, VIDEO_ASPECT, { r: 0.2, r2: 0.21, r3: 0.2, n: [0, 0, -1], q: 'good', dt: 33.3, inf: 9.12, age: 41.27 }, worldLandmarks(cam))
     const t = parseTrace(JSON.parse(JSON.stringify(rec.stop())))
-    expect(t.version).toBe(3)
+    expect(t.version).toBe(4) // v0.1.5 records trace v4 (a superset of v3)
     expect(t.frames[0]!.w).toHaveLength(63)
     const raw = rec // recorder is reset after stop
     void raw
