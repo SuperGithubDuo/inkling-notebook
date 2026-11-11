@@ -27,7 +27,7 @@ This beta is **not code-signed**. Signing is how Windows and macOS confirm who m
 - don't install it on a computer where you aren't allowed to install your own software (for example, a school- or work-managed computer) without permission;
 - if you're unsure, don't install it, and ask us.
 
-**Updates.** You install Inkling once. On Windows, new versions download in the background and a small notice offers *Restart & Update* (or *Later*); your notebooks and settings are kept. On macOS, unsigned builds can't install updates themselves: Inkling tells you a new version is out and links to it, and you install it over the old app. *Settings → Updates* shows your version, checks for updates, and lets you choose the Stable or Beta channel. Versions 0.2.0-beta.3 and earlier don't check for updates: install the next version once by hand, and it updates itself from then on.
+**Updates.** You install Inkling once. On Windows, new versions download in the background and a small notice offers *Restart & Update* (or *Later*); your notebooks and settings are kept. Each update is checked against the files this project published, but while Inkling is an unsigned beta your computer can't confirm who published it, the same as for the installer you downloaded. On macOS, unsigned builds can't install updates themselves: Inkling tells you a new version is out and links to it, and you install it over the old app. *Settings → Updates* shows your version, checks for updates, and lets you choose the Stable or Beta channel. Versions 0.2.0-beta.3 and earlier don't check for updates: install the next version once by hand, and it updates itself from then on.
 
 ### Windows
 

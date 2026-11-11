@@ -5,7 +5,7 @@
 **Updates**
 - **Install once, update in the app.** On Windows, new versions download in the background; a small notice shows the progress, then offers **Restart & Update** or **Later**. Inkling saves your notebooks and keeps a *Before update* backup first. Nothing restarts unless you click, and the notice waits until you stop writing.
 - **Settings → Updates** shows your version and whether it is up to date, has **Check for Updates**, and lets you choose the **Stable** or **Beta** channel. Inkling never switches channel by itself.
-- Updates download only the parts that changed when possible, and are checked before they install: an update that doesn't match the verified build is discarded.
+- Updates download only the parts that changed when possible, and are checked before they install: an update that doesn't match the verified build is discarded. If Inkling can't save your work or make its backup first, it doesn't restart and tells you why. While Inkling is an unsigned beta, updates are checked against the published files but not signed by a verified publisher.
 - macOS: until Inkling is signed with an Apple Developer ID, Mac updates still come as a download link.
 - **Versions 0.2.0-beta.3 and earlier never check for updates** (a bug, now fixed). Install this version once by hand; it updates itself from then on.
 

@@ -11,18 +11,24 @@
  *   when its release carries Inkling-<version>-update-approval.json, which the Release workflow
  *   writes after every build and test passed, listing the exact SHA-512 of each update file
  *   (scripts/release/rules.mjs, checkApproval). Deleting that file withdraws an update.
- * - Integrity: electron-updater checks every download against the SHA-512 in latest*.yml before
- *   it can be installed; on Windows a signed build also checks the publisher, and on macOS
- *   Squirrel only accepts an update signed with the same Developer ID.
+ * - Integrity vs authentication (see resolveMode): every download is checked against the SHA-512
+ *   in latest*.yml and the approval. That proves the file is the one the release lists, not who
+ *   published the release; only a code signature authenticates the publisher (Windows: same
+ *   publisher as the installed signed build; macOS: same Developer ID). Unsigned builds update
+ *   themselves only as betas, for testers.
+ * - Withdrawal: the approval is fetched again before Restart & Update and by the periodic check,
+ *   so an update withdrawn after it was downloaded is never installed.
  * - Differential: on Windows and macOS, electron-updater downloads only the blocks that changed
  *   (from the .blockmap files on both releases) and falls back to the full file.
- * - Never forced: "Later" leaves it for next time (nothing installs on quit). Restart & Update
- *   saves every notebook and takes a before-update snapshot first. Notebooks and settings live in
+ * - Never forced: "Later" leaves it for next time (nothing installs on quit). Notebooks and settings live in
  *   the user's app-data folder, outside the app, so the installer never touches them.
  * - The first start after an update records whether the new version actually installed.
+ * - Restart & Update goes ahead only if the approval re-check, saving, the before-update backup
+ *   and the pending-update record all succeed (prepareInstall); otherwise the notice says why and
+ *   offers Try again.
  *
- * Modes (updatePolicy.ts): `auto` on Windows and Developer-ID macOS builds; `notify` (points to
- * the release page) for ad-hoc signed macOS builds; `off` in development.
+ * Modes (updatePolicy.ts): `auto` on signed Windows builds, unsigned Windows betas and
+ * Developer-ID macOS builds; `notify` (points to the release page) otherwise; `off` in development.
  */
 import { app, net } from 'electron'
 import { promises as fs } from 'node:fs'
@@ -30,7 +36,7 @@ import { join } from 'node:path'
 import type { UpdateChannel, UpdateState } from '@shared/ipc'
 import { REPO_URL, RELEASES_URL } from '@shared/product'
 import { approvalName, checkApproval } from '../../scripts/release/rules.mjs'
-import { defaultChannel, friendlyError, installOutcome, parsePrefs, resolveMode, type UpdateMode, type UpdatePrefs } from './updatePolicy'
+import { defaultChannel, friendlyError, installOutcome, parsePrefs, prepareInstall, resolveMode, type UpdateMode, type UpdatePrefs } from './updatePolicy'
 
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000
 const RETRY_AFTER_ERROR_MS = 30 * 60 * 1000
@@ -47,6 +53,10 @@ export class Updater {
   private retry: ReturnType<typeof setTimeout> | null = null
   private updater: AutoUpdater | null = null
   private busy = false
+  private installing = false
+  /** The update that has been downloaded (status 'ready'): re-checked before it is installed. */
+  private readyInfo: Info | null = null
+  private readonly publisherVerified: boolean
   /** Only for the automated update test (INKLING_TEST_HOOKS=1): a local feed instead of GitHub. */
   private readonly testFeed: string | undefined
 
@@ -55,35 +65,41 @@ export class Updater {
       configDir: string
       testHooks: boolean
       onState: (s: UpdateState) => void
-      /** Saves notebooks and takes a snapshot before restarting into an update. */
-      beforeInstall: () => Promise<boolean>
+      /** Writes every pending edit to disk. */
+      saveAll: () => Promise<{ ok: boolean; message?: string }>
+      /** Takes the before-update snapshot; throws if it couldn't be made completely. */
+      backup: () => Promise<void>
     }
   ) {
     this.mode = resolveMode({
       packaged: app.isPackaged,
       platform: process.platform,
+      version: app.getVersion(),
       configured: import.meta.env.MAIN_VITE_INKLING_UPDATE_MODE,
+      signed: import.meta.env.MAIN_VITE_INKLING_SIGNED === '1',
       disabled: process.env.INKLING_DISABLE_UPDATES === '1',
       testHooks: opts.testHooks,
       appImage: !!process.env.APPIMAGE
     })
     this.testFeed = opts.testHooks ? process.env.INKLING_TEST_UPDATE_FEED : undefined
+    this.publisherVerified = import.meta.env.MAIN_VITE_INKLING_SIGNED === '1'
     this.prefsPath = join(opts.configDir, 'update-settings.json')
     this.channel = defaultChannel(app.getVersion())
     this.state =
       this.mode === 'off'
         ? { enabled: false, status: 'disabled', message: app.isPackaged ? 'Automatic updates are off in this build.' : 'Updates are checked only in installed builds.' }
-        : { enabled: true, status: 'idle', channel: this.channel }
+        : { enabled: true, status: 'idle', channel: this.channel, publisherVerified: this.publisherVerified }
   }
 
   get current(): UpdateState {
     return this.state
   }
 
-  private set(next: Omit<UpdateState, 'enabled' | 'channel'>): void {
+  private set(next: Omit<UpdateState, 'enabled' | 'channel' | 'publisherVerified'>): void {
     // What the last restart into an update did stays visible until the next one.
     const lastInstall = this.state.lastInstall
-    this.state = { enabled: true, channel: this.channel, ...(lastInstall ? { lastInstall } : {}), ...next }
+    if (next.status !== 'ready') this.readyInfo = null
+    this.state = { enabled: true, channel: this.channel, publisherVerified: this.publisherVerified, ...(lastInstall ? { lastInstall } : {}), ...next }
     this.opts.onState(this.state)
   }
 
@@ -119,7 +135,7 @@ export class Updater {
       }
       await this.savePrefs().catch((err) => console.warn('update settings not saved:', (err as Error).message))
     }
-    this.state = { enabled: true, status: 'idle', channel: this.channel, ...(outcome ? { lastInstall: outcome } : {}) }
+    this.state = { enabled: true, status: 'idle', channel: this.channel, publisherVerified: this.publisherVerified, ...(outcome ? { lastInstall: outcome } : {}) }
     if (outcome && !outcome.ok) {
       this.state.message = `The update to Inkling ${outcome.version} didn’t finish installing. Your notebooks weren’t changed. Inkling will offer it again.`
     }
@@ -143,7 +159,6 @@ export class Updater {
       lastPercent = percent
       this.set({ status: 'downloading', version: this.state.version, percent })
     })
-    autoUpdater.on('update-downloaded', (info) => this.set({ status: 'ready', version: info.version }))
     this.opts.onState(this.state)
     setTimeout(() => void this.check(), Number(process.env.INKLING_UPDATE_CHECK_DELAY_MS) || 15_000)
     this.timer = setInterval(() => void this.check(), CHECK_EVERY_MS)
@@ -151,7 +166,8 @@ export class Updater {
 
   async check(): Promise<UpdateState> {
     const u = this.updater
-    if (!u || this.busy || this.state.status === 'ready') return this.state
+    if (!u || this.busy || this.installing) return this.state
+    if (this.state.status === 'ready') return this.recheckReady()
     this.busy = true
     if (this.retry) clearTimeout(this.retry)
     this.retry = null
@@ -178,6 +194,7 @@ export class Updater {
       this.set({ status: 'downloading', version: info.version, percent: 0 })
       await u.downloadUpdate()
       this.set({ status: 'ready', version: info.version })
+      this.readyInfo = info
     } catch (err) {
       const code = String((err as { code?: string })?.code ?? '')
       if (phase === 'check' && /ERR_UPDATER_(LATEST_VERSION_NOT_FOUND|NO_PUBLISHED_VERSIONS)/.test(code)) {
@@ -219,16 +236,65 @@ export class Updater {
     return this.check()
   }
 
-  async install(): Promise<void> {
+  /**
+   * While an update waits for Restart & Update, the periodic check only asks whether it is still
+   * approved: if it was withdrawn, the notice goes away. Offline, nothing changes.
+   */
+  private async recheckReady(): Promise<UpdateState> {
+    const info = this.readyInfo
+    if (!info) return this.state
+    this.busy = true
+    try {
+      if (!(await this.approved(info))) this.set({ status: 'none', message: `Inkling ${info.version} is no longer offered, so it won’t be installed.` })
+    } catch {
+      /* offline: keep offering it; install() checks again */
+    } finally {
+      this.busy = false
+    }
+    return this.state
+  }
+
+  /**
+   * Restart & Update. Re-checks the approval, saves, backs up and records the update first
+   * (prepareInstall); if any of that fails, nothing restarts and the notice says why, with
+   * Restart & Update still there to try again.
+   */
+  async install(): Promise<UpdateState> {
     const u = this.updater
-    const version = this.state.version
-    if (!u || this.state.status !== 'ready' || !version) return
-    if (!(await this.opts.beforeInstall())) return
-    this.prefs.pending = { from: app.getVersion(), to: version, at: new Date().toISOString() }
-    await this.savePrefs().catch((err) => console.warn('update settings not saved:', (err as Error).message))
+    const info = this.readyInfo
+    if (!u || this.state.status !== 'ready' || !info || this.installing || this.busy) return this.state
+    this.installing = true
+    this.set({ status: 'ready', version: info.version, installing: true })
+    this.readyInfo = info
+    const from = app.getVersion()
+    const result = await prepareInstall(info.version, {
+      revalidate: () => this.approved(info),
+      save: () => this.opts.saveAll(),
+      backup: () => this.opts.backup(),
+      record: async () => {
+        this.prefs.pending = { from, to: info.version, at: new Date().toISOString() }
+        try {
+          await this.savePrefs()
+        } catch (err) {
+          delete this.prefs.pending
+          throw err
+        }
+      }
+    })
+    this.installing = false
+    if (!result.ok) {
+      console.warn(`update not installed (${result.step}): ${result.message}`)
+      if (result.step === 'withdrawn') this.set({ status: 'none', message: result.message })
+      else {
+        this.set({ status: 'ready', version: info.version, installError: result.message })
+        this.readyInfo = info
+      }
+      return this.state
+    }
     this.stop()
     // Windows: the installer runs silently (no wizard) and starts the new version when done.
     u.quitAndInstall(true, true)
+    return this.state
   }
 
   stop(): void {

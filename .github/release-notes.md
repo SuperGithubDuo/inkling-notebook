@@ -22,7 +22,7 @@ This beta isn't code-signed yet, so your computer can't verify who published it.
 - **Windows:** "Windows protected your PC" → *More info* → check the file name → *Run anyway*.
 - **macOS:** open Inkling once, then *System Settings → Privacy & Security → Open Anyway*.
 
-Only install Inkling from the download page or this release, and don't install it on a school- or work-managed computer without permission. Step-by-step help: [install guide](https://github.com/SuperGithubDuo/inkling-notebook/blob/v{{VERSION}}/docs/INSTALL.md). Unsigned builds can't update themselves; Inkling tells you when a new version is out.
+Only install Inkling from the download page or this release, and don't install it on a school- or work-managed computer without permission. Step-by-step help: [install guide](https://github.com/SuperGithubDuo/inkling-notebook/blob/v{{VERSION}}/docs/INSTALL.md). **Updates:** on Windows, Inkling downloads new versions itself and offers *Restart & Update*; each update is checked against the files this project published, but because this beta isn't signed your computer can't confirm who published it. On macOS, Inkling tells you when a new version is out and links to it.
 
 <details>
 <summary>SHA-256 checksums (optional: check your download)</summary>

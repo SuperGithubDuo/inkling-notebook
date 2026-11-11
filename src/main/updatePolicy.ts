@@ -8,18 +8,43 @@ import type { UpdateChannel } from '@shared/ipc'
 export type UpdateMode = 'auto' | 'notify' | 'off'
 
 /**
- * - Windows: `auto` (download in the background, then offer Restart & Update). electron-updater
- *   checks every download against the SHA-512 in latest.yml, and once builds are signed, that the
- *   new installer is signed by the same publisher.
- * - macOS: `notify` unless the build was made with a Developer ID (the release workflow then sets
- *   `auto`): Squirrel.Mac refuses to install updates into ad-hoc signed apps.
+ * Two different guarantees, kept apart:
+ * - Integrity: electron-updater checks every download against the SHA-512 in latest*.yml, and
+ *   Inkling only downloads files whose SHA-512 the release's update approval lists. That catches
+ *   corrupted or swapped files, but both come from the same GitHub release, so it can't tell
+ *   whether that release was published by Inkling's maintainers (e.g. a stolen GitHub token).
+ * - Authentication: only a code signature does that. A signed Windows build records its
+ *   publisher, and electron-updater then refuses any update not signed by the same publisher;
+ *   Squirrel.Mac requires the same Developer ID.
+ *
+ * Modes:
+ * - Windows, signed (`signed`): `auto` (download in the background, Restart & Update).
+ * - Windows, unsigned: `auto` only for beta/test builds (a prerelease version), which testers
+ *   install knowing they are unsigned; an unsigned stable build only says a new version exists
+ *   (`notify`), whatever the build asked for. The Release workflow also refuses to make one.
+ * - macOS: `notify` unless the build is Developer-ID signed and the workflow set `auto`
+ *   (Squirrel.Mac refuses updates to ad-hoc signed apps).
  * - Linux: only for the automated update test (AppImage), never for users.
  * - Development and unpackaged builds, or INKLING_DISABLE_UPDATES=1: `off`.
  */
-export function resolveMode(o: { packaged: boolean; platform: string; configured?: string; disabled?: boolean; testHooks?: boolean; appImage?: boolean }): UpdateMode {
+export function resolveMode(o: {
+  packaged: boolean
+  platform: string
+  version: string
+  configured?: string
+  signed?: boolean
+  disabled?: boolean
+  testHooks?: boolean
+  appImage?: boolean
+}): UpdateMode {
   if (!o.packaged || o.disabled) return 'off'
   const configured = o.configured === 'auto' || o.configured === 'notify' || o.configured === 'off' ? o.configured : undefined
-  if (o.platform === 'win32') return configured ?? 'auto'
+  if (configured === 'off') return 'off'
+  const prerelease = o.version.includes('-')
+  if (o.platform === 'win32') {
+    if (o.signed) return configured ?? 'auto'
+    return prerelease ? (configured ?? 'auto') : 'notify'
+  }
   if (o.platform === 'darwin') return configured ?? 'notify'
   if (o.platform === 'linux' && o.testHooks && o.appImage) return configured ?? 'auto'
   return 'off'
@@ -80,4 +105,57 @@ export function friendlyError(err: unknown, phase: 'check' | 'download'): string
     return phase === 'download' ? 'The download was interrupted. Inkling will try again later.' : 'Couldn’t check for updates (no connection). Inkling will try again later.'
   if (/ENOSPC/i.test(msg)) return 'Not enough disk space to download the update.'
   return phase === 'download' ? 'The update couldn’t be downloaded. Inkling will try again later.' : 'Couldn’t check for updates. Inkling will try again later.'
+}
+
+export type InstallFailure = { ok: false; step: 'withdrawn' | 'unverified' | 'save' | 'backup' | 'record'; message: string }
+
+/**
+ * Everything that must succeed before Inkling quits to install an update, in order. The first
+ * failure stops it: nothing restarts, nothing is installed, and the message says what to do.
+ *
+ * 1. revalidate: the release's update approval is fetched again for exactly the downloaded files,
+ *    so an update withdrawn after it was downloaded is never installed (false = withdrawn; a
+ *    throw = couldn't confirm, e.g. offline: fail closed).
+ * 2. save: every pending edit reaches the disk.
+ * 3. backup: a complete before-update snapshot exists.
+ * 4. record: the pending-update record is written, so the next start can tell whether the
+ *    installer finished.
+ */
+export async function prepareInstall(version: string, steps: {
+  revalidate(): Promise<boolean>
+  save(): Promise<{ ok: boolean; message?: string }>
+  backup(): Promise<void>
+  record(): Promise<void>
+}): Promise<{ ok: true } | InstallFailure> {
+  const why = (err: unknown): string => String((err as Error)?.message ?? err).slice(0, 200)
+  try {
+    if (!(await steps.revalidate()))
+      return { ok: false, step: 'withdrawn', message: `Inkling ${version} is no longer offered, so it won’t be installed. Nothing was changed; you don’t need to do anything.` }
+  } catch (err) {
+    console.warn('update approval could not be re-checked:', why(err))
+    return { ok: false, step: 'unverified', message: `Inkling couldn’t confirm that ${version} is still approved, so it didn’t restart. Nothing was changed. Check your connection and try again.` }
+  }
+  let saved: { ok: boolean; message?: string }
+  try {
+    saved = await steps.save()
+  } catch (err) {
+    saved = { ok: false, message: why(err) }
+  }
+  if (!saved.ok) {
+    if (saved.message) console.warn('save before update failed:', saved.message)
+    return { ok: false, step: 'save', message: 'Inkling couldn’t save your latest changes, so it didn’t restart. Try again in a moment.' }
+  }
+  try {
+    await steps.backup()
+  } catch (err) {
+    console.warn('before-update backup failed:', why(err))
+    return { ok: false, step: 'backup', message: 'Inkling couldn’t make its backup before updating, so it didn’t restart. Your notebooks weren’t changed. Check that the disk has free space, then try again.' }
+  }
+  try {
+    await steps.record()
+  } catch (err) {
+    console.warn('pending-update record not saved:', why(err))
+    return { ok: false, step: 'record', message: 'Inkling couldn’t prepare the update, so it didn’t restart. Your notebooks weren’t changed. Try again.' }
+  }
+  return { ok: true }
 }

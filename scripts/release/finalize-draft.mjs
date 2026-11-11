@@ -50,9 +50,13 @@ export async function hashFile(path, algorithm, encoding = 'hex') {
  *        downloadAll(tag, dir), upload(tag, path), deleteAsset(tag, name) }
  * Returns the notes text. Throws with a readable message on any problem.
  */
-export async function finalizeDraft({ api, version, sha, runUrl, feedback, downloadPage, template, workDir }) {
+export async function finalizeDraft({ api, version, sha, runUrl, feedback, downloadPage, template, workDir, signed = { windows: false, mac: false } }) {
   const tag = `v${version}`
   const problems = []
+  // Unsigned builds are for beta testers: their in-app updates are integrity-checked, not
+  // publisher-authenticated. A stable release must be signed on both systems.
+  if (!version.includes('-') && !(signed.windows && signed.mac))
+    problems.push(`${version} is a stable version, but the ${[!signed.windows && 'Windows', !signed.mac && 'macOS'].filter(Boolean).join(' and ')} build is unsigned; unsigned builds are beta/testing only`)
   const draft = await api.getDraft(tag)
   if (!draft) throw new Error(`No draft release ${tag} found`)
   if (draft.draft !== true) throw new Error(`${tag} is already published; refusing to change it`)
@@ -167,7 +171,8 @@ async function main() {
       feedback: process.env.FEEDBACK_URL,
       downloadPage: process.env.DOWNLOAD_PAGE_URL || `https://${repo.split('/')[0].toLowerCase()}.github.io/${repo.split('/')[1]}/`,
       template: readFileSync('.github/release-notes.md', 'utf8'),
-      workDir
+      workDir,
+      signed: { windows: process.env.WIN_SIGNED === 'true', mac: process.env.MAC_SIGNED === 'true' }
     })
     await api.editNotes(`v${version}`, notes)
     console.log(`::notice title=Draft release ready for review::v${version}: files, checksums and update metadata verified. Still a draft: nothing is public until someone presses Publish.`)

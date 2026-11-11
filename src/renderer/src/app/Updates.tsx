@@ -33,7 +33,8 @@ function useIdle(ms: number): boolean {
   return idle
 }
 
-const install = (): void => void window.inkling.updates.install()
+/** Restart & Update. If it can't go ahead (backup, saving, approval), the returned state says why. */
+const install = (): void => void window.inkling.updates.install().then((u) => useApp.getState().setUpdate(u))
 
 export function UpdateNotice() {
   const update = useApp((s) => s.update)
@@ -75,14 +76,23 @@ export function UpdateNotice() {
   } else if (update.status === 'ready') {
     body = (
       <>
-        <Download size={16} className="shrink-0 text-accent" />
-        <span className="flex-1">Inkling {update.version} is ready.</span>
-        <button type="button" data-testid="update-restart" onClick={install} className="shrink-0 rounded-lg bg-accent px-2.5 py-1 font-medium text-white">
-          Restart &amp; Update
+        <Download size={16} className={`shrink-0 ${update.installError ? 'text-[#9a6200]' : 'text-accent'}`} />
+        <span className="flex-1">
+          Inkling {update.version} is ready.
+          {update.installError && (
+            <span className="mt-0.5 block text-[12px] text-[#9a6200]" data-testid="update-install-error">
+              {update.installError}
+            </span>
+          )}
+        </span>
+        <button type="button" data-testid="update-restart" disabled={update.installing} onClick={install} className="shrink-0 rounded-lg bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-60">
+          {update.installing ? 'Restarting…' : update.installError ? 'Try again' : 'Restart & Update'}
         </button>
-        <button type="button" data-testid="update-later" onClick={later} className="shrink-0 text-ink-3 hover:text-ink">
-          Later
-        </button>
+        {!update.installing && (
+          <button type="button" data-testid="update-later" onClick={later} className="shrink-0 text-ink-3 hover:text-ink">
+            Later
+          </button>
+        )}
       </>
     )
   } else if (update.status === 'available') {
@@ -194,6 +204,7 @@ export function UpdateSettings() {
           <span className="block h-full rounded-full bg-accent" style={{ width: `${update.percent ?? 0}%` }} />
         </span>
       )}
+      {update?.status === 'ready' && update.installError && <p className="mt-1 text-[12.5px] text-[#9a6200]">{update.installError}</p>}
       {update?.lastInstall && !update.lastInstall.ok && (
         <p className="mt-1 text-[12.5px] text-[#9a6200]">The last update ({update.lastInstall.version}) didn’t finish installing. Your notebooks weren’t changed.</p>
       )}
@@ -201,8 +212,8 @@ export function UpdateSettings() {
         <>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {update?.status === 'ready' ? (
-              <button type="button" onClick={install} className="rounded-lg bg-accent px-2.5 py-1 text-[12.5px] font-medium text-white">
-                Restart &amp; Update
+              <button type="button" disabled={update.installing} onClick={install} className="rounded-lg bg-accent px-2.5 py-1 text-[12.5px] font-medium text-white disabled:opacity-60">
+                {update.installing ? 'Restarting…' : update.installError ? 'Try again' : 'Restart & Update'}
               </button>
             ) : (
               <button
@@ -239,6 +250,11 @@ export function UpdateSettings() {
               : 'Stable gets tested releases only. Switching from beta keeps your version until a newer stable one is out. '}
             Updates download in the background and install only when you choose Restart &amp; Update. Your notebooks and settings are never touched.
           </p>
+          {update?.publisherVerified === false && (
+            <p className="mt-1 text-[12px] text-ink-3" data-testid="update-unsigned">
+              This is an unsigned test build: updates are checked against the published checksums, but your computer can’t confirm they come from Inkling’s publisher. Signed releases add that check.
+            </p>
+          )}
         </>
       )}
     </div>

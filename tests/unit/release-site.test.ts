@@ -229,6 +229,12 @@ describe('draft finalization (Release workflow)', () => {
     await expect(run(s)).rejects.toThrow()
     expect(s.calls).toEqual([`delete ${approvalName(V)}`])
   })
+  it('refuses to approve an unsigned stable release (unsigned builds are beta/testing only)', async () => {
+    const s = setup()
+    const stable = '0.2.0'
+    await expect(finalizeDraft({ api: s.api, version: stable, sha: SHA, runUrl: 'r', feedback: '', downloadPage: 'd', template, workDir: s.workDir, signed: { windows: false, mac: true } })).rejects.toThrow(/stable version, but the Windows build is unsigned/)
+    expect(s.calls.some((c) => c.includes('update-approval'))).toBe(false)
+  })
   it('refuses a draft that targets another commit', async () => {
     await expect(run(setup({ tamper: 'target' }))).rejects.toThrow(/targets c{7}/)
   })

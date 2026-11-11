@@ -314,17 +314,11 @@ const updater = new Updater({
   onState: (state) => {
     if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.updateChanged, state)
   },
-  beforeInstall: async () => {
-    if (!mainWindow) return true
-    const saved = await flushRenderer(mainWindow)
-    if (!saved.ok) {
-      await dialog.showMessageBox(mainWindow, { type: 'warning', message: 'Inkling couldn’t save your latest changes, so the update was not installed yet.', detail: saved.message })
-      return false
-    }
-    // A snapshot of the library from just before the update, in case anything about it goes wrong.
-    await createBackup(dataDir, backupsDir, { kind: 'before-update', appVersion: app.getVersion(), link: true }).catch((err) => console.warn('before-update backup failed', err))
-    await pruneBackups(backupsDir, 'before-update', 3).catch(() => {})
-    return true
+  saveAll: async () => (mainWindow ? flushRenderer(mainWindow) : { ok: true }),
+  // A complete snapshot of the library from just before the update, or no update.
+  backup: async () => {
+    await createBackup(dataDir, backupsDir, { kind: 'before-update', appVersion: app.getVersion(), link: true })
+    await pruneBackups(backupsDir, 'before-update', 3).catch((err) => console.warn('old before-update backups not pruned:', (err as Error).message))
   }
 })
 

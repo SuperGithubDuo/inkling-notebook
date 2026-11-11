@@ -157,11 +157,22 @@ jobs:
           fi
           [ "$RUNNER_OS" = macOS ] && [ "$signed" = no ] && echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
           echo "SIGNED=$signed" >> "$GITHUB_ENV"
-          # Self-installing updates: always on Windows (electron-updater checks every download's SHA-512, and
-          # once a build is signed, that updates come from the same publisher). On macOS only for Developer ID
-          # builds: Squirrel.Mac refuses updates to ad-hoc signed apps, so those only say a new version exists.
+          if [ "$signed" = yes ]; then echo "MAIN_VITE_INKLING_SIGNED=1" >> "$GITHUB_ENV"; else echo "MAIN_VITE_INKLING_SIGNED=0" >> "$GITHUB_ENV"; fi
+          # In-app updates. Integrity and authentication are different things:
+          # - every download is checked against the SHA-512 the release lists (latest*.yml + update approval):
+          #   that catches corrupt or swapped files, but not a malicious release (e.g. a stolen GitHub token);
+          # - only a code signature authenticates the publisher (Windows: same publisher as the installed
+          #   signed build; macOS: Squirrel.Mac requires the same Developer ID and refuses ad-hoc apps).
+          # So: Windows `auto`, but the app installs updates itself unsigned only as a beta (updatePolicy.ts);
+          # macOS `auto` only with a Developer ID.
           if [ "$RUNNER_OS" = Windows ] || [ "$signed" = yes ]; then echo "MAIN_VITE_INKLING_UPDATE_MODE=auto" >> "$GITHUB_ENV"; else echo "MAIN_VITE_INKLING_UPDATE_MODE=notify" >> "$GITHUB_ENV"; fi
-          if [ "$signed" = yes ]; then echo "::notice title=Signing::Signed build"; else echo "::warning title=Signing::Unsigned build: for testers only (security prompts on first open)"; fi
+          ver=$(node -p "require('./package.json').version")
+          # Unsigned builds are for beta testers only: never make an unsigned stable (non-prerelease) release.
+          if [ "${{ needs.plan.outputs.publish }}" = always ] && [ "$signed" = no ] && [[ "$ver" != *-* ]]; then
+            echo "::error title=Signing::$ver is a stable version, but this $RUNNER_OS build is unsigned. Unsigned builds are beta/testing only (their updates are integrity-checked but not publisher-authenticated). Add the signing secrets, or use a -beta version."; exit 1
+          fi
+          if [ "$signed" = yes ]; then echo "::notice title=Signing::Signed build: updates are publisher-authenticated"
+          else echo "::warning title=Signing::Unsigned build: beta/testing only. Security prompts on first open; in-app updates are integrity-checked (SHA-512), NOT publisher-authenticated."; fi
           if [ -n "$MAIN_VITE_INKLING_BETA_URL" ]; then echo "::notice title=Cloud AI::Built with the beta server $MAIN_VITE_INKLING_BETA_URL"; else echo "::warning title=Cloud AI::No INKLING_BETA_URL variable: this build has no cloud AI server built in"; fi
       - run: node scripts/ci-run.mjs build npm run build
       - name: Check the cloud AI server address is built in
@@ -349,6 +360,10 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       FEEDBACK_URL: ${{ vars.INKLING_FEEDBACK_URL }}
       DOWNLOAD_PAGE_URL: ${{ vars.INKLING_DOWNLOAD_PAGE_URL }}
+      # Whether the installer jobs had signing credentials (the same test they use). finalize-draft refuses
+      # to approve a stable release that isn't signed on both systems.
+      WIN_SIGNED: ${{ secrets.WIN_CSC_LINK != '' }}
+      MAC_SIGNED: ${{ secrets.MAC_CSC_LINK != '' }}
       ALL_PASSED: ${{ needs.checks.result == 'success' && needs.installers.result == 'success' && needs.acceptance.result == 'success' }}
     steps:
       - uses: actions/checkout@v5

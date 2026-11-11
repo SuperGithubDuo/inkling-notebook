@@ -8,7 +8,10 @@
  *      A's .blockmap is served, as it is on GitHub Releases)
  *   5. "Later" restarts nothing, installs nothing on quit, and the next start offers the update
  *      again from the already downloaded file
- *   6. "Restart & Update" installs B in place: B runs, every notebook file is byte-identical,
+ *   6. Restart & Update does NOT go ahead when the before-update backup fails, when the pending-
+ *      update record can't be saved, or when the update was withdrawn (its approval deleted)
+ *      after it was downloaded; nothing restarts, and the error offers Try again
+ *   7. "Restart & Update" installs B in place: B runs, every notebook file is byte-identical,
  *      settings are kept, and the update is recorded as installed
  *
  * The feed is a local HTTP server standing in for GitHub Releases (same files: latest*.yml, the
@@ -31,7 +34,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { copyFileSync, chmodSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
 import assert from 'node:assert/strict'
@@ -310,7 +313,64 @@ try {
   assert.equal(installerRequests(), requestsBefore, 'the update was not downloaded a second time')
   step('Later installs nothing on quit; the next start offers the downloaded update again')
 
-  // 6. Restart & Update.
+  // 6. Restart & Update must not go ahead unless everything before it succeeds.
+  const backupsDir = join(userData, 'Backups')
+  const prefsPath = join(userData, 'update-settings.json')
+  const stillA = async (label) => {
+    assert.equal(await app.evaluate(({ app: a }) => a.getVersion()), versionA, `${label}: A is still running`)
+    assert.equal((await readPrefs(userData)).pending, undefined, `${label}: no pending update was recorded`)
+  }
+  await sleep(4500)
+  await w.waitForSelector('[data-testid="update-restart"]', { timeout: 15_000 })
+  // a) The before-update backup fails (a file where the Backups folder goes): no restart, a clear error.
+  if (existsSync(backupsDir)) await rename(backupsDir, `${backupsDir}.aside`)
+  await writeFile(backupsDir, 'not a folder')
+  await w.click('[data-testid="update-restart"]')
+  await w.waitForSelector('[data-testid="update-install-error"]', { timeout: 30_000 })
+  assert.match(await w.locator('[data-testid="update-install-error"]').textContent(), /couldn’t make its backup.*didn’t restart/)
+  await sleep(2000)
+  await stillA('backup failed')
+  await w.screenshot({ path: join(shots, 'update-backup-failed.png') })
+  await rm(backupsDir, { force: true })
+  if (existsSync(`${backupsDir}.aside`)) await rename(`${backupsDir}.aside`, backupsDir)
+  step('a failed before-update backup stops Restart & Update, with a clear error and Try again')
+  // b) The pending-update record can't be saved (a folder where the file goes): no restart.
+  const prefsText = await readFile(prefsPath, 'utf8')
+  await rm(prefsPath, { force: true })
+  await mkdir(prefsPath)
+  await w.click('[data-testid="update-restart"]')
+  await w.waitForFunction(() => document.querySelector('[data-testid="update-install-error"]')?.textContent?.includes('couldn’t prepare'), null, { timeout: 30_000 })
+  await sleep(2000)
+  assert.equal(await app.evaluate(({ app: a }) => a.getVersion()), versionA, 'record failed: A is still running')
+  await rm(prefsPath, { recursive: true, force: true })
+  await writeFile(prefsPath, prefsText)
+  assert.equal((await readPrefs(userData)).pending, undefined, 'record failed: no pending update')
+  step('a pending-update record that can’t be saved stops Restart & Update; Try again stays available')
+  // c) Withdrawn after it was downloaded: the approval is checked again, before installing and by the periodic check.
+  feed.approval = 'missing'
+  let st = await w.evaluate(() => window.inkling.updates.install())
+  assert.equal(st.status, 'none', `withdrawn: not installed (${JSON.stringify(st)})`)
+  assert.match(st.message ?? '', /no longer offered/)
+  await sleep(2000)
+  await stillA('withdrawn at Restart & Update')
+  feed.approval = 'good'
+  await w.evaluate(() => window.inkling.updates.check())
+  await waitState((x) => x.status === 'ready', 'the re-approved update to be offered again (from the download cache)')
+  feed.approval = 'wrong'
+  st = await w.evaluate(() => window.inkling.updates.check())
+  await waitState((x) => x.status === 'none', 'the periodic check to drop an update withdrawn while ready')
+  assert.equal(await w.locator('[data-testid="update-notice"]').count(), 0, 'the notice went away')
+  await close()
+  facts = await launch('withdrawn, next start')
+  await sleep(6000)
+  assert.equal(facts.version, versionA)
+  assert.notEqual((await state()).status, 'ready', 'a withdrawn update already in the download cache is not offered on the next start')
+  step('an update withdrawn after downloading is never installed: refused at Restart & Update, dropped by the next check and on the next start')
+  feed.approval = 'good'
+  await w.evaluate(() => window.inkling.updates.check())
+  await waitState((x) => x.status === 'ready', 'the update to be offered again once approved')
+
+  // 7. Restart & Update.
   const data = snapshot(library)
   await sleep(4500)
   await w.waitForSelector('[data-testid="update-restart"]', { timeout: 15_000 })
