@@ -277,20 +277,17 @@ describe('download site build', () => {
     expect(home).not.toMatch(/\/releases\/download\//)
     expect(home).toContain('href="download/"')
   })
-  it('shows the feedback form only for a safe link, and the demo film only from the site folder', () => {
+  it('shows the feedback form only for a safe link', () => {
     let { outDir } = build([], {}, { withdrawn: [] }, 'https://forms.example/f')
     expect(page(outDir)).toContain('href="https://forms.example/f"')
     expect(page(outDir)).not.toContain('feedback-fallback')
     ;({ outDir } = build([], {}, { withdrawn: [] }, 'javascript:alert(1)'))
     expect(page(outDir)).not.toContain('feedback-btn')
     expect(page(outDir)).toContain('feedback-fallback')
-    expect(page(outDir, 'index.html')).toContain('the demo is being filmed')
-    ;({ outDir } = build([], {}, { withdrawn: [], demoVideo: { src: 'https://evil.example/x.mp4' } }))
-    expect(page(outDir, 'index.html')).not.toContain('evil.example')
-    ;({ outDir } = build([], {}, { withdrawn: [], demoVideo: { src: 'assets/demo/inkling.mp4', poster: '../../x.webp' } }))
-    expect(page(outDir, 'index.html')).toContain('<source src="assets/demo/inkling.mp4"')
-    expect(page(outDir, 'index.html')).not.toContain('the demo is being filmed')
-    expect(page(outDir, 'index.html')).toContain('poster=""')
+  })
+  it('the homepage shows no unfinished demo video', () => {
+    const { outDir } = build([])
+    expect(page(outDir, 'index.html')).not.toMatch(/<video|demo/i)
   })
   it('escapes release values written into the page', () => {
     const r = goodRelease({ html_url: 'https://github.com/x?a=1&b="2"<script>' })

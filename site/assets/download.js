@@ -111,6 +111,14 @@
     try { navigator.clipboard.writeText(url).then(function () { done('Link copied'); }, function () { done(url); }); } catch (e) { done(url); }
   });
 
+  // A link to a folded section (#needs, #install-mac…) opens it.
+  function openTarget() {
+    var t = location.hash && document.getElementById(location.hash.slice(1));
+    if (t && t.tagName === 'DETAILS') t.open = true;
+  }
+  window.addEventListener('hashchange', openTarget);
+  openTarget();
+
   function ready() { document.documentElement.dataset.ready = '1'; }
   detect().then(render, function () { render({ os: 'other', arch: 'unknown' }); }).then(ready, ready);
 })();

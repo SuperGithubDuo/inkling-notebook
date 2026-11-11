@@ -1,11 +1,11 @@
 /* Hallmark · shape: Margin and page (a notebook page: the tutor's margin lane beside the content, two ink bands) · genre: editorial · theme: custom · redesign: full · job: try · idea: "every page is written in two hands: the student's, and the tutor's notes in the margin" · vibe: "a clever friend's notebook, ink and highlighter"
- * paper: oklch(98.6% 0.005 255) · accent: oklch(90.5% 0.175 102) · display: Parkinsans · body: Figtree · outlier: Caveat (the tutor's hand, as in the app) · hero: Stacked (slogan with the lede and action beside it, the real tutor screenshot at full width below, its caption in the margin) · hero: Settled (/download/) · nav: edge-aligned wordmark, three links and a quiet Download pill · footer: a mast, wordmark and slogan over one row of links · imagery: screenshots 7 (the real app: 3 captured by scripts/site/capture-screenshots.mjs, 3 real tutor answers, 1 library view) · signature: the hero you can write on, beside the tutor marking up a real page
- * axes: light/rounded-geometric/chromatic-yellow · posture: full palette (paper, blue-black ink with two ink-field bands, highlighter yellow on download actions only, the tutor's violet for margin notes and the margin rule) · contrast: pass · fold: pass · v2.0.0 */
+ * paper: oklch(98.6% 0.005 255) · accent: oklch(90.5% 0.175 102) · display: Parkinsans · body: Figtree · outlier: Caveat (the tutor's hand, as in the app) · hero: Stacked (slogan with the lede and action beside it, the real tutor screenshot at full width below, its caption in the margin) · hero: Settled (/download/) · nav: edge-aligned wordmark, three links and a quiet Download pill · footer: a mast, wordmark and slogan over one row of links · imagery: screenshots 7 (the real app: write, notebooks and pdf captured by scripts/site/capture-screenshots.mjs; hero and three tutor steps cropped from real tutor answers, with phone crops) · signature: the hero you can write on, beside the tutor marking up a real page
+ * axes: light/rounded-geometric/chromatic-yellow · posture: full palette (paper, blue-black ink with one ink-field band, highlighter yellow on download actions only, the tutor's violet for margin notes and the margin rule) · contrast: pass · fold: pass · v2.0.0 */
 /* Hallmark · pre-emit critique: P4 H5 E4 S5 R4 V5 · weakest: E, the margin lane must survive phones; below 60rem the notes fall inline above their sections and the rule goes */
 /* Hallmark · waive 39b · .btn--big on /download/ only, one per page · the big download button is the one control a student came for, so it gets 60px */
 /* Hallmark · answered F4 · the selected tutor step is a tab state, not a second button; the page has one filled button style */
 /* Hallmark · answered F17 · the hero caption sits in the 184px margin lane on purpose: it is the tutor's note beside the screenshot */
-/* Hallmark · waive 77 · /download/ help is one line and two actions, requirements are five rows · reference text for the few students who need it; the download block above carries the page */
+/* Hallmark · waive 77 · /download/ help is one line, two actions and one fold · reference text for the few students who need it; the download block above carries the page */
 /* Hallmark · dismissed render · the font fallback is a file:// preload quirk; served over http the faces load (checked in the 1440 shots) */
 @import url("./tokens.css");
 @import url("./base.css");
@@ -94,7 +94,7 @@ main > section { position: relative; z-index: 1; }
 .shot img { width: 100%; }
 
 /* ------------------------------------------------------------ handwriting */
-.write { padding-block: var(--section-gap) var(--section-gap-s); }
+.write { padding-block: var(--section-gap-s); }
 .shot--wide { margin: 0; }
 .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-lg); margin: var(--space-xl) 0 0; }
 .facts > div { border-top: 1px solid var(--color-rule); padding-top: var(--space-md); }
@@ -102,7 +102,7 @@ main > section { position: relative; z-index: 1; }
 .facts dd { margin: 0; color: var(--color-ink-2); max-width: 28ch; }
 
 /* ------------------------------------------------------------ tutor steps */
-.tutor { padding-block: var(--section-gap-s) var(--section-gap); }
+.tutor { padding-block: var(--section-gap-s); }
 .step-tabs { counter-reset: step; list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-xs); align-content: start; }
 .step-tabs li { counter-increment: step; }
 .step-tabs button { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr); align-items: center; gap: var(--space-sm); width: 100%; min-height: 52px; padding: var(--space-sm) var(--space-md); border: 1px solid transparent; border-radius: var(--radius-card); background: transparent; color: var(--color-ink-2); font: 700 var(--text-lg)/1.25 var(--font-display); letter-spacing: -0.02em; text-align: left; cursor: pointer; transition: background-color var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out); }
@@ -112,11 +112,16 @@ main > section { position: relative; z-index: 1; }
 .step-tabs button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .step-tabs button[aria-selected="true"] { color: var(--color-display); background: var(--color-paper-3); }
 .step-tabs button[aria-selected="true"]::before { background: var(--color-display); border-color: var(--color-display); color: var(--color-paper); }
-.step-panel { display: grid; gap: var(--space-md); }
-.step-panel + .step-panel { margin-top: var(--space-2xl); }
-.step-panel > p { color: var(--color-ink-2); max-width: 52ch; min-height: 1lh; }
-.steps.is-tabs { display: grid; grid-template-columns: minmax(0, 20rem) minmax(0, 1fr); gap: var(--space-xl); align-items: start; }
+.step-panel { display: grid; gap: var(--space-lg); }
+.step-panel + .step-panel { margin-top: var(--space-3xl); }
+.step-text { font-size: var(--text-lead); line-height: 1.45; color: var(--color-ink); max-width: 44ch; }
+/* With script: three tabs across the top, the chosen step's screenshot at full width below. */
+.steps.is-tabs { display: grid; gap: var(--space-lg); }
+.steps.is-tabs .step-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.steps.is-tabs .step-tabs button { white-space: nowrap; }
 .steps.is-tabs .step-panel + .step-panel { margin-top: 0; }
+.steps.is-tabs .step-panel:not([hidden]) { animation: step-in var(--dur-long) var(--ease-out); }
+@keyframes step-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .steps:not(.is-tabs) .step-tabs { display: none; }
 .tutor-more { display: grid; gap: var(--space-sm); margin-top: var(--space-xl); padding-top: var(--space-lg); border-top: 1px solid var(--color-rule); }
 .tutor-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-lg); color: var(--color-ink); }
@@ -129,17 +134,9 @@ main > section { position: relative; z-index: 1; }
 .band .intro { color: var(--color-on-field-2); }
 .band .hand { color: var(--color-tutor-on-field); }
 .band .btn:focus-visible, .band a:focus-visible { outline-color: var(--color-focus-on-field); }
-.demo { padding-block: var(--section-gap-s); }
-.demo-grid .head { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: end; column-gap: var(--space-xl); }
-.video { margin: 0; aspect-ratio: 16 / 9; border-radius: var(--radius-shot); overflow: hidden; background: var(--color-field-2); }
-.video video { width: 100%; height: 100%; object-fit: cover; }
-.video--soon { display: grid; }
-.video--soon > img { opacity: 0.14; }
-.video--soon figcaption { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: var(--space-xl); }
-.video--soon .hand { font-size: clamp(1.75rem, 2vw + 1rem, 2.75rem); max-width: 18ch; text-align: center; color: var(--color-on-field); }
 
 /* ------------------------------------------------------------ more */
-.more { padding-block: var(--section-gap) var(--section-gap-s); }
+.more { padding-block: var(--section-gap-s); background: var(--color-paper-2); }
 .more-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--space-xl) var(--space-xl); align-items: start; }
 .more-pdf { grid-row: span 2; margin: 0; }
 .more-books { margin: 0; }
@@ -164,7 +161,7 @@ main > section { position: relative; z-index: 1; }
 .foot-links a:hover { color: var(--color-display); }
 
 /* ============================================================ download page */
-.dl { padding-block: var(--space-2xl) var(--space-3xl); }
+.dl { padding-block: var(--space-2xl); }
 .dl .page { grid-template-columns: var(--margin) minmax(0, 6fr) minmax(0, 5fr); }
 .dl .page > .dl-main { grid-column: 2; }
 .dl .page > .dl-shot { grid-column: 3; margin: var(--space-sm) 0 0; }
@@ -197,6 +194,7 @@ main > section { position: relative; z-index: 1; }
 details[open] > summary::after { transform: translateY(0.1em) rotate(-135deg); }
 .aside summary:focus-visible, .steps-os summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: 4px; }
 .aside > p, .aside > .sums, .aside > .list { margin-top: var(--space-xs); color: var(--color-ink-2); max-width: 62ch; }
+.sums-lead { margin-top: var(--space-xs); }
 .sums { display: grid; gap: var(--space-xs); margin: 0; }
 .sums dt { font-weight: 700; font-size: var(--text-sm); color: var(--color-ink); }
 .sums dd { margin: 0; font-size: var(--text-xs); overflow-wrap: anywhere; color: var(--color-ink-2); }
@@ -207,7 +205,6 @@ details[open] > summary::after { transform: translateY(0.1em) rotate(-135deg); }
 
 .install { padding-block: var(--space-2xl) var(--space-3xl); }
 .narrow { max-width: 46rem; }
-.needs .narrow { max-width: none; }
 .nowrap { white-space: nowrap; }
 .narrow h2 { margin-bottom: var(--space-lg); }
 .status-next { margin-bottom: var(--space-md); font-weight: 700; color: var(--color-display); }
@@ -220,14 +217,15 @@ details[open] > summary::after { transform: translateY(0.1em) rotate(-135deg); }
 .install-steps { margin: 0 0 var(--space-lg); padding-left: var(--space-lg); display: grid; gap: var(--space-sm); max-width: 62ch; }
 .install-steps li::marker { font-weight: 700; color: var(--color-display); }
 .more-link { margin-top: var(--space-lg); color: var(--color-ink-2); }
-.help { padding-block: var(--space-3xl); background: var(--color-paper-2); }
+.help { padding-block: 0 var(--section-gap-s); }
+.help .narrow { border-top: 1px solid var(--color-rule); padding-top: var(--space-3xl); }
 .help-links { display: flex; flex-wrap: wrap; gap: var(--space-sm); margin-bottom: var(--space-md); }
 .help .small { max-width: 60ch; }
-.needs { padding-block: var(--space-3xl) var(--section-gap-s); }
-.req { margin: 0; border-top: 1px solid var(--color-rule); }
-.req > div { display: grid; grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); gap: var(--space-lg); padding-block: var(--space-md); border-bottom: 1px solid var(--color-rule); }
+.req { margin: 0 0 var(--space-lg); border-top: 1px solid var(--color-rule); }
+.req > div { display: grid; grid-template-columns: minmax(0, 10rem) minmax(0, 1fr); gap: var(--space-lg); padding-block: var(--space-md); border-bottom: 1px solid var(--color-rule); }
 .req dd { margin: 0; color: var(--color-ink-2); }
 .list { padding-left: var(--space-lg); display: grid; gap: var(--space-sm); }
+.privacy { margin-top: var(--space-xl); }
 .privacy .small { margin-top: var(--space-md); }
 
 /* ============================================================ narrower screens */
@@ -246,27 +244,28 @@ details[open] > summary::after { transform: translateY(0.1em) rotate(-135deg); }
   .margin:empty, .hero .margin { display: none; }
   .hero-shot figcaption, .pick-note { position: static; width: auto; text-align: left; transform: none; margin-top: var(--space-md); }
   .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .steps.is-tabs { grid-template-columns: minmax(0, 1fr); }
-  .step-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .step-tabs button { grid-template-columns: minmax(0, 1fr); justify-items: start; font-size: var(--text-md); }
-  .demo-grid .head { grid-template-columns: minmax(0, 1fr); }
   .more-grid { grid-template-columns: minmax(0, 1fr); }
   .more-pdf { grid-row: auto; }
   .nav-links { gap: var(--space-lg); }
 }
 @media (max-width: 40rem) {
+  :root { --section-gap-s: 80px; --space-3xl: 72px; --space-2xl: 48px; }
   .nav-opt { display: none; }
   .hero { padding-top: var(--space-md); }
   .facts { grid-template-columns: minmax(0, 1fr); }
-  .step-tabs { grid-template-columns: minmax(0, 1fr); }
-  .step-tabs button { grid-template-columns: 2.25rem minmax(0, 1fr); }
+  .steps.is-tabs .step-tabs { grid-template-columns: minmax(0, 1fr); gap: var(--space-2xs); }
+  .steps.is-tabs .step-tabs button { white-space: normal; }
+  .step-tabs button { grid-template-columns: 2.25rem minmax(0, 1fr); min-height: 48px; padding-block: var(--space-xs); }
+  .step-text { font-size: var(--text-md); }
   .req > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-2xs); }
   .choice-link { grid-template-columns: minmax(0, 1fr); grid-template-areas: "name" "req" "file" "act"; }
   .choice-act { margin-top: var(--space-xs); }
+  .steps-os summary { font-size: var(--text-lg); }
   .btn--primary { width: 100%; }
   .btn--big { white-space: normal; text-align: center; flex-wrap: wrap; padding-block: var(--space-sm); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .settle { animation: none; }
+  .settle, .steps.is-tabs .step-panel:not([hidden]) { animation: none; }
   .step-tabs button, .choice-link, .aside summary::after, .steps-os summary::after { transition: none; }
 }

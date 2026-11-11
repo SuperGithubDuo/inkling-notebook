@@ -77,7 +77,6 @@ export const longDate = (iso) => {
 /** The {{KEY}} values for a page. Every value is HTML-escaped; unknown keys throw (fillTemplate). */
 export function pageValues(release, site) {
   const v = { FEEDBACK_URL: site.feedbackUrl || '' }
-  if (site.demoVideo) Object.assign(v, { DEMO_SRC: site.demoVideo.src, DEMO_POSTER: site.demoVideo.poster || '' })
   if (release.status === 'available') {
     const d = release.downloads
     Object.assign(v, {
@@ -98,28 +97,17 @@ export function pageValues(release, site) {
 }
 
 export function renderPage(html, release, site) {
-  const keep = [release.status === 'available' ? 'available' : 'none', site.feedbackUrl ? 'feedback' : 'no-feedback', site.demoVideo ? 'video' : 'no-video']
+  const keep = [release.status === 'available' ? 'available' : 'none', site.feedbackUrl ? 'feedback' : 'no-feedback']
   let out = fillTemplate(keepBlocks(html, keep), pageValues(release, site))
   if (out.includes('id="inkling-release"')) out = injectData(out, 'inkling-release', release)
   if (out.includes('id="inkling-site"')) out = injectData(out, 'inkling-site', site)
   return out
 }
 
-/**
- * The homepage's demo film, from site/config.json: { "demoVideo": { "src": "assets/demo/inkling-demo.mp4",
- * "poster": "assets/demo/poster.webp" } }. Only files inside site/assets are accepted. Without it the
- * page shows a "being filmed" placeholder.
- */
-export function demoVideo(v) {
-  const ok = (p) => typeof p === 'string' && /^assets\/[\w./-]+$/.test(p) && !p.includes('..')
-  if (!v || !ok(v.src)) return null
-  return { src: v.src, poster: ok(v.poster) ? v.poster : '' }
-}
-
 export function buildSite({ siteDir, outDir, releases, tagCommits, config, feedbackUrl, generatedAt }) {
   const { manifest, rejected } = pickRelease(releases, { withdrawn: config.withdrawn ?? [], tagCommits })
   const release = manifest ?? noReleaseManifest()
-  const site = { feedbackUrl: safeFeedbackUrl(feedbackUrl), demoVideo: demoVideo(config.demoVideo), generatedAt }
+  const site = { feedbackUrl: safeFeedbackUrl(feedbackUrl), generatedAt }
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
   cpSync(siteDir, outDir, { recursive: true, filter: (src) => !src.endsWith('config.json') })

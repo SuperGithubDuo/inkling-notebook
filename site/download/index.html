@@ -83,16 +83,16 @@
             <p>Open the Apple menu and choose <em>About This Mac</em>. “Chip: Apple M1” (or M2, M3 and later) means Apple silicon. “Processor: … Intel” means Intel.</p>
           </details>
           <details class="aside" id="checksums">
-            <summary>Check a download (SHA-256)</summary>
+            <summary>Technical details</summary>
+            <p class="sums-lead">SHA-256 of each installer:</p>
             <dl class="sums">
               <div><dt>{{WIN_FILE}}</dt><dd class="num">{{WIN_SHA}}</dd></div>
               <div><dt>{{MAC_ARM_FILE}}</dt><dd class="num">{{MAC_ARM_SHA}}</dd></div>
               <div><dt>{{MAC_INTEL_FILE}}</dt><dd class="num">{{MAC_INTEL_SHA}}</dd></div>
             </dl>
-            <p>Windows (PowerShell): <code>Get-FileHash .\Downloads\&lt;file&gt;</code>. Mac (Terminal): <code>shasum -a 256 ~/Downloads/&lt;file&gt;</code>. All three are in <a class="nowrap" href="{{CHECKSUMS_URL}}">the checksum file</a> too.</p>
+            <p>Every file comes straight from Inkling’s official GitHub release, built and verified from commit <span class="num">{{COMMIT}}</span>. To check a download, compare its SHA-256: in PowerShell <code>Get-FileHash .\Downloads\&lt;file&gt;</code>, on a Mac <code>shasum -a 256 ~/Downloads/&lt;file&gt;</code>. All three are in <a class="nowrap" href="{{CHECKSUMS_URL}}">the checksum file</a> too.</p>
           </details>
         </div>
-        <p class="source-note">Every file comes straight from Inkling’s official GitHub release, built and verified from commit <span class="num">{{COMMIT}}</span>.</p>
         <!-- end:available -->
         <!-- if:none -->
         <div class="status" id="status" role="status">
@@ -110,11 +110,11 @@
 
   <section class="install" id="install" aria-labelledby="install-title">
     <div class="container page">
-      <div class="margin"><p class="hand">about two minutes</p></div>
+      <div class="margin"><p class="hand">takes about two minutes</p></div>
       <div class="content narrow">
         <h2 id="install-title">Installing</h2>
         <p class="status-next" id="next" role="status" hidden></p>
-        <p class="caution"><strong>The first time, your computer asks if you trust Inkling.</strong> This beta isn’t code-signed yet, so Windows and macOS can’t confirm who made it. Only install Inkling from this page or its GitHub release, and don’t install it on a school or work computer without permission.</p>
+        <p class="caution"><strong>The first time, your computer asks if you trust Inkling.</strong> That’s expected: this beta isn’t code-signed yet, and the steps below show what to click. Only install Inkling from this page, and ask before installing it on a school or work computer.</p>
         <details class="steps-os" id="install-windows">
           <summary>On Windows</summary>
           <ol class="install-steps">
@@ -130,6 +130,16 @@
             <li>Open Inkling from Applications. macOS says it can’t verify the developer and won’t open it yet. Click <kbd>Done</kbd>.</li>
             <li>Open <strong>System Settings</strong>, then <strong>Privacy &amp; Security</strong>, scroll to the message about Inkling, click <kbd>Open Anyway</kbd> and confirm with your password. You only do this once.</li>
           </ol>
+        </details>
+        <details class="steps-os" id="needs">
+          <summary>What your computer needs</summary>
+          <dl class="req">
+            <div><dt>Windows</dt><dd>Windows 10 or 11, 64-bit. ARM PCs run it through Windows’ built-in emulation.</dd></div>
+            <div><dt>Mac</dt><dd>macOS 12 Monterey or later, on Apple silicon (M1 or newer) or Intel.</dd></div>
+            <div><dt>Internet</dt><dd>Only for the AI tutor and update checks. Notebooks work offline.</dd></div>
+            <div><dt>Pen or touch</dt><dd>Optional: a mouse or trackpad works too. Not yet tested on real pens and touch screens.</dd></div>
+            <div><dt>Phones and tablets</dt><dd>Not supported yet: no iPad, Android or web version.</dd></div>
+          </dl>
         </details>
         <p class="more-link">Uninstalling, checking a download and help for younger users: <a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/INSTALL.md">the full install guide</a>.</p>
       </div>
@@ -153,22 +163,6 @@
         <!-- if:no-feedback -->
         <p class="small" id="feedback-fallback">Our no-account feedback form is being set up. Until then, <em>Help, then Send Feedback or Report a Problem</em> in the app opens a GitHub issue, which needs a free GitHub account and is public. Please don’t include notebook contents or screenshots of personal notes.</p>
         <!-- end:no-feedback -->
-      </div>
-    </div>
-  </section>
-
-  <section class="needs" id="needs" aria-labelledby="needs-title">
-    <div class="container page">
-      <div class="margin"></div>
-      <div class="content narrow">
-        <h2 id="needs-title">What you need</h2>
-        <dl class="req">
-          <div><dt>Windows</dt><dd>Windows 10 or 11, 64-bit. ARM PCs run it through Windows’ built-in emulation.</dd></div>
-          <div><dt>Mac</dt><dd>macOS 12 Monterey or later, on Apple silicon (M1 or newer) or Intel.</dd></div>
-          <div><dt>Internet</dt><dd>Only for the AI tutor and update checks. Notebooks work offline.</dd></div>
-          <div><dt>Pen or touch</dt><dd>Optional: a mouse or trackpad works too. Not yet tested on real pens and touch screens.</dd></div>
-          <div><dt>Phones and tablets</dt><dd>Not supported yet: no iPad, Android or web version.</dd></div>
-        </dl>
         <details class="aside privacy" id="privacy">
           <summary>Your notebooks and the AI, in full</summary>
           <ul class="list">
@@ -184,6 +178,7 @@
       </div>
     </div>
   </section>
+
 </main>
 
 <footer class="foot">

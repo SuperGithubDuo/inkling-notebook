@@ -5,13 +5,14 @@
  * It launches the built app (npm run build) with a fresh, throwaway data folder, writes on the
  * pages with the real pen and highlighter tools (mouse strokes from a single-stroke handwriting
  * font, so the ink is ordinary Inkling ink), imports a real PDF, and saves 2x screenshots to
- * site/assets/screenshots/. Nothing here talks to an AI: the AI Tutor screenshots
- * (tutor-*.webp) are real answers captured separately and are not touched.
+ * site/assets/screenshots/. Nothing here talks to an AI.
  *
  *   npm run build && xvfb-run -a node scripts/site/capture-screenshots.mjs
  *
  * Needs: the dev dependencies (playwright-core, pdf-lib, hersheytext) and a display (xvfb on Linux).
- * Output: write.webp, notebooks.webp, pdf.webp (via Chromium's WebP encoder; PNG if that fails).
+ * Output: write.webp (and write-phone.webp, its handwriting for phones), notebooks.webp (the library's
+ * notebook row) and pdf.webp (the annotated worksheet), via Chromium's WebP encoder; PNG if that fails.
+ * The AI Tutor screenshots (hero-tutor*, step-*) are real tutor answers and are not made here.
  */
 import { _electron as electron } from 'playwright-core'
 import { mkdtemp, writeFile } from 'node:fs/promises'
@@ -129,24 +130,31 @@ async function saved() {
   await sleep(300)
   await win.waitForSelector('[data-testid="save-status"][data-state="saved"]', { timeout: 8000 })
 }
-async function shot(name) {
+/**
+ * Saves the window (2880 × 1800 at 2x) as one or more WebP files: [name, [x0, y0, x1, y1] | null],
+ * crop boxes in device pixels. Chromium's own encoder; PNG if WebP isn't available.
+ */
+async function shot(...outputs) {
   await win.mouse.move(2, 450)
   await sleep(400)
-  const png = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64')).then((b) => Buffer.from(b, 'base64'))
-  const webp = await win.evaluate(async (b64) => {
-    const img = new Image()
-    img.src = `data:image/png;base64,${b64}`
-    await img.decode()
-    const c = document.createElement('canvas')
-    c.width = img.naturalWidth
-    c.height = img.naturalHeight
-    c.getContext('2d').drawImage(img, 0, 0)
-    const url = c.toDataURL('image/webp', 0.86)
-    return url.startsWith('data:image/webp') ? url.split(',')[1] : null
-  }, png.toString('base64'))
-  const file = join(out, webp ? `${name}.webp` : `${name}.png`)
-  await writeFile(file, webp ? Buffer.from(webp, 'base64') : png)
-  console.log(`  ✓ ${file}`)
+  const png = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'))
+  for (const [name, box] of outputs) {
+    const webp = await win.evaluate(async ({ b64, box }) => {
+      const img = new Image()
+      img.src = `data:image/png;base64,${b64}`
+      await img.decode()
+      const [x0, y0, x1, y1] = box ?? [0, 0, img.naturalWidth, img.naturalHeight]
+      const c = document.createElement('canvas')
+      c.width = x1 - x0
+      c.height = y1 - y0
+      c.getContext('2d').drawImage(img, x0, y0, c.width, c.height, 0, 0, c.width, c.height)
+      const url = c.toDataURL('image/webp', 0.86)
+      return url.startsWith('data:image/webp') ? url.split(',')[1] : null
+    }, { b64: png, box })
+    const file = join(out, webp ? `${name}.webp` : `${name}.png`)
+    await writeFile(file, webp ? Buffer.from(webp, 'base64') : Buffer.from(png, 'base64'))
+    console.log(`  ✓ ${file}`)
+  }
 }
 
 try {
@@ -183,7 +191,7 @@ try {
   await draw(ellipse(112 + (ends[4] - 112) / 2, 738, (ends[4] - 112) / 2 + 26, 30))
   await draw(hand('check: why does it not slide?', ends[4] + 60, 728, 21))
   await saved()
-  await shot('write')
+  await shot(['write', null], ['write-phone', [800, 170, 2740, 1560]])
 
   // ---------------------------------------------------------------- the other notebooks get a page each
   await openNotebook('Math Notes')
@@ -216,7 +224,7 @@ try {
   // ---------------------------------------------------------------- the library
   await win.getByRole('button', { name: /^Notebooks$/ }).first().click()
   await sleep(800)
-  await shot('notebooks')
+  await shot(['notebooks', [420, 140, 2460, 900]])
 
   // ---------------------------------------------------------------- a PDF worksheet, annotated
   const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib')
@@ -258,7 +266,7 @@ try {
   await draw(hand('a = (25 - 5) / 4 = 5 m/s²', 152, 650, 24))
   await draw(hand('s = ½ (5 + 25) × 4 = 60 m', 152, 700, 24))
   await saved()
-  await shot('pdf')
+  await shot(['pdf', [400, 0, 2880, 1600]])
 } catch (err) {
   console.error(err)
   process.exitCode = 1

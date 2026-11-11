@@ -69,11 +69,11 @@
 
   <section class="write" id="write" aria-labelledby="write-title">
     <div class="container page">
-      <div class="margin"><p class="hand">mouse, trackpad, pen or touch screen</p></div>
+      <div class="margin"><p class="hand">a mouse or trackpad works too</p></div>
       <div class="content">
         <div class="head">
           <h2 id="write-title">Write your working by hand</h2>
-          <p class="intro">Real ink on grid, lined, dotted or blank paper, saved as you write.</p>
+          <p class="intro">Pen and highlighter on grid, lined, dotted or blank paper, saved as you write.</p>
         </div>
         <figure class="shot shot--wide">
           <picture>
@@ -84,7 +84,7 @@
         <dl class="facts">
           <div><dt>Tools</dt><dd>Pen, highlighter, eraser, shapes, text and pictures</dd></div>
           <div><dt>Lasso</dt><dd>Circle anything to move, resize or recolour it</dd></div>
-          <div><dt>Paper</dt><dd>A4, Letter, square or 16:9 pages, portrait or landscape</dd></div>
+          <div><dt>Paper</dt><dd>A4 (portrait or landscape), Letter, square or 16:9</dd></div>
           <div><dt>Saved</dt><dd>On your computer as you write, backed up daily</dd></div>
         </dl>
       </div>
@@ -101,52 +101,44 @@
         </div>
         <div class="steps" id="steps">
           <ol class="step-tabs" role="tablist" aria-label="How the tutor helps">
-            <li role="presentation"><button type="button" role="tab" id="tab-ask" aria-controls="panel-ask" aria-selected="true">Ask about your working</button></li>
-            <li role="presentation"><button type="button" role="tab" id="tab-mark" aria-controls="panel-mark" aria-selected="false" tabindex="-1">See it on your page</button></li>
+            <li role="presentation"><button type="button" role="tab" id="tab-ask" aria-controls="panel-ask" aria-selected="true">Ask the tutor</button></li>
+            <li role="presentation"><button type="button" role="tab" id="tab-mark" aria-controls="panel-mark" aria-selected="false" tabindex="-1">See the marks</button></li>
             <li role="presentation"><button type="button" role="tab" id="tab-keep" aria-controls="panel-keep" aria-selected="false" tabindex="-1">Keep what helps</button></li>
           </ol>
           <div class="step-panels">
             <div class="step-panel" role="tabpanel" id="panel-ask" aria-labelledby="tab-ask">
-              <p>Lasso part of the page and ask. The answer explains the mistake, with the maths typeset.</p>
-              <div class="shot"><img src="assets/screenshots/step-chat.webp" width="1206" height="872" loading="lazy" alt="The AI Tutor's chat beside the handwritten equation, explaining that the solutions are x = −2 and x = −3, not 2 and 3, with buttons for a hint, the concept, checking work and a similar problem."></div>
+              <p class="step-text">Lasso part of the page and ask. The answer explains the mistake step by step, with the maths typeset.</p>
+              <div class="shot shot--step">
+                <picture>
+                  <source media="(max-width: 40rem)" srcset="assets/screenshots/step-ask-phone.webp" width="776" height="968">
+                  <img src="assets/screenshots/step-ask.webp" width="2292" height="1296" loading="lazy" alt="The handwritten equation x² + 5x + 6 = 0, factored to x = 2, 3, beside the AI Tutor’s answer: the solutions are x = −2 and x = −3, with why the signs were wrong and how to fix it.">
+                </picture>
+              </div>
             </div>
             <div class="step-panel" role="tabpanel" id="panel-mark" aria-labelledby="tab-mark">
-              <p>Show this on my page: ticks, crosses and corrections appear as a preview.</p>
-              <div class="shot"><img src="assets/screenshots/step-markup.webp" width="1206" height="872" loading="lazy" alt="The tutor's proposed marks previewed on the page: a red cross by x = 2, 3, the correction x = −2, −3 and two notes, each listed with a checkbox and an Add 5 to my page button."></div>
+              <p class="step-text">Choose Show this on my page. Ticks, crosses and corrections appear on your page as a preview.</p>
+              <div class="shot shot--step">
+                <picture>
+                  <source media="(max-width: 40rem)" srcset="assets/screenshots/step-mark-phone.webp" width="1380" height="552">
+                  <img src="assets/screenshots/step-mark.webp" width="2292" height="1296" loading="lazy" alt="The tutor’s proposed marks previewed on the page: a red cross by x = 2, 3, the correction x = −2, −3 and two notes, each listed in the panel with a checkbox and an Add 5 to my page button.">
+                </picture>
+              </div>
             </div>
             <div class="step-panel" role="tabpanel" id="panel-keep" aria-labelledby="tab-keep">
-              <p>Untick what you don’t want. The rest becomes ordinary ink you can edit or undo.</p>
-              <div class="shot"><img src="assets/screenshots/step-applied.webp" width="1206" height="872" loading="lazy" alt="The page after adding the marks, with the tutor panel saying Added 5 marks to your page, and buttons to undo or mark up something else."></div>
+              <p class="step-text">Untick what you don’t want. The rest becomes ordinary ink you can move, edit or undo.</p>
+              <div class="shot shot--step">
+                <picture>
+                  <source media="(max-width: 40rem)" srcset="assets/screenshots/step-keep-phone.webp" width="776" height="380">
+                  <img src="assets/screenshots/step-keep.webp" width="2292" height="1296" loading="lazy" alt="The page after adding the marks, with the tutor panel saying Added 5 marks to your page, and buttons to undo or mark up something else.">
+                </picture>
+              </div>
             </div>
           </div>
         </div>
         <div class="tutor-more">
-          <p class="tutor-buttons"><span class="tutor-buttons-lead">Under every answer:</span> <span>Give me a hint</span> <span>Explain the concept</span> <span>Check my work</span> <span>Try a similar problem</span></p>
+          <p class="tutor-buttons"><span class="tutor-buttons-lead">Always one tap away:</span> <span>Give me a hint</span> <span>Explain the concept</span> <span>Check my work</span> <span>Try a similar problem</span></p>
           <p class="note">Free, with about 12 answers a day per computer. AI answers can be wrong, so check them.</p>
         </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="band demo" id="demo" aria-labelledby="demo-title">
-    <div class="container page">
-      <div class="margin"></div>
-      <div class="content demo-grid">
-        <div class="head">
-          <h2 id="demo-title">One problem, start to finish</h2>
-          <p class="intro">A one-minute film: writing a problem, asking the tutor, and learning from its answer.</p>
-        </div>
-        <!-- if:video -->
-        <figure class="video">
-          <video controls preload="none" playsinline poster="{{DEMO_POSTER}}" width="1920" height="1080"><source src="{{DEMO_SRC}}" type="video/mp4"></video>
-        </figure>
-        <!-- end:video -->
-        <!-- if:no-video -->
-        <figure class="video video--soon" data-slot="demo-video" data-kind="product">
-          <img src="assets/screenshots/write.webp" width="2880" height="1800" loading="lazy" alt="">
-          <figcaption data-keep><span class="hand">the demo is being filmed. it will play right here</span></figcaption>
-        </figure>
-        <!-- end:no-video -->
       </div>
     </div>
   </section>
@@ -160,17 +152,17 @@
         </div>
         <div class="more-grid">
           <figure class="more-pdf">
-            <div class="shot"><img src="assets/screenshots/pdf-crop.webp" width="2480" height="1600" loading="lazy" alt="A kinematics worksheet imported as a PDF, with a phrase highlighted and handwritten working in blue under each question."></div>
+            <div class="shot"><img src="assets/screenshots/pdf.webp" width="2480" height="1600" loading="lazy" alt="A kinematics worksheet imported as a PDF, with a phrase highlighted and handwritten working in blue under each question."></div>
             <figcaption>Import a worksheet as a PDF and write your answers on it.</figcaption>
           </figure>
           <figure class="more-books">
-            <div class="shot"><img src="assets/screenshots/notebooks-crop.webp" width="2040" height="760" loading="lazy" alt="The Notebooks view: Math Notes, Physics, Chemistry, Biology and Personal, each with a coloured spine and a preview of its first page."></div>
+            <div class="shot"><img src="assets/screenshots/notebooks.webp" width="2040" height="760" loading="lazy" alt="The Notebooks view: Math Notes, Physics, Chemistry, Biology and Personal, each with a coloured spine and a preview of its first page."></div>
             <figcaption>A notebook for each subject.</figcaption>
           </figure>
           <dl class="more-list">
             <div><dt>Typed notes</dt><dd>Headings, lists, tables and formulas, with Markdown in and out</dd></div>
             <div><dt>Search and links</dt><dd>Find typed text, link pages and see them on a graph</dd></div>
-            <div><dt>Export</dt><dd>A whole notebook to one PDF, annotations included</dd></div>
+            <div><dt>Export</dt><dd>A notebook’s handwritten and PDF pages to one PDF, with your annotations</dd></div>
           </dl>
         </div>
       </div>

@@ -250,7 +250,7 @@ Every row is a unit test in `tests/unit/release-site.test.ts`, including the rea
 
 ### What users see
 
-**Homepage** (`site/index.html`): the slogan beside a real screenshot of the AI Tutor marking up a page (visitors can write on the hero with a mouse or pen; the ink fades), handwriting, the tutor's three steps (ask, see the marks, keep what helps), the demo film, notebooks and PDFs, and a closing *Download Inkling*. Every download button goes to the download page; the homepage never links a file.
+**Homepage** (`site/index.html`): the slogan beside a real screenshot of the AI Tutor marking up a page (visitors can write on the hero with a mouse or pen; the ink fades), handwriting, the tutor's three steps (ask, see the marks, keep what helps), notebooks and PDFs, and a closing *Download Inkling*. Every download button goes to the download page; the homepage never links a file.
 
 **Download page** (`site/download/index.html`):
 - The version, *free beta*, release date and *What's new* link; **one big button for the visitor's computer** (Windows, or the right Mac when the browser can tell). When it can't tell which Mac, both Mac rows are marked and *Which Mac do I have?* opens.
@@ -260,9 +260,7 @@ Every row is a unit test in `tests/unit/release-site.test.ts`, including the rea
 - Phones and tablets: a note that Inkling is for Windows and Mac, with *Copy this page's link*; the downloads stay listed.
 - Keyboard navigation, no horizontal scrolling from 320 px to 1920 px, and it works with JavaScript switched off.
 
-**Screenshots** (`site/assets/screenshots/`): `write`, `notebooks` and `pdf` are captured from the real app by `npm run build && xvfb-run -a node scripts/site/capture-screenshots.mjs` (a throwaway data folder; ink drawn with the real pen tool). The `tutor-*` files are real tutor answers (local Qwen3-VL 4B); the page uses crops of them (`hero-tutor`, `step-*`). Recapture them with the cloud tutor when convenient.
-
-**Demo film:** put the video (MP4, H.264) and a poster under `site/assets/demo/` and set `"demoVideo": { "src": "assets/demo/<file>.mp4", "poster": "assets/demo/<poster>.webp" }` in `site/config.json`. Until then the homepage says the demo is being filmed.
+**Screenshots** (`site/assets/screenshots/`): `write`, `notebooks` and `pdf` are captured from the real app by `npm run build && xvfb-run -a node scripts/site/capture-screenshots.mjs` (a throwaway data folder; ink drawn with the real pen tool). The AI Tutor shots (`hero-tutor*`, `step-*`) are crops of real tutor answers to a handwritten quadratic, taken with the optional local tutor (Qwen3-VL 4B via Ollama; the originals are `tutor-*.webp` in git history before Nov 2026). The crops leave out that build's model label. Recapture them with the default cloud tutor when convenient; `*-phone.webp` are the tighter crops shown on phones.
 
 **Release page** (`.github/release-notes.md`): a download table with direct links at the top, then the security-prompt explanation, checksums folded away, privacy and feedback. It tells readers to ignore `.zip`, `.blockmap` and `.yml` files. Those must stay on the release: electron-updater reads `latest*.yml`, signed macOS updates need the `.zip`, and `.blockmap` files make updates smaller.
 
