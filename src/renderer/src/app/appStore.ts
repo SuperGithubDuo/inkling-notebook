@@ -14,7 +14,7 @@ interface AppState {
   info: AppInfo | null
   update: UpdateState | null
   /** A settings section to scroll to when Settings opens. */
-  settingsSection: 'storage' | 'ai' | 'privacy' | null
+  settingsSection: 'storage' | 'updates' | 'ai' | 'privacy' | null
   open(dialog: AppDialog): void
   openSettings(section?: AppState['settingsSection']): void
   loadInfo(): Promise<AppInfo>
@@ -81,6 +81,9 @@ export function runCommand(command: AppCommand): void {
       return
     case 'settings':
       app.openSettings()
+      return
+    case 'updates':
+      app.openSettings('updates')
       return
     case 'feedback':
       void window.inkling.openFeedback()

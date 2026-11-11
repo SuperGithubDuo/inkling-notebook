@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { FolderOpen, Info, MessageSquare, ShieldCheck, X } from 'lucide-react'
 import { BackupSettings } from '@/app/BackupSettings'
+import { UpdateSettings } from '@/app/Updates'
 import { useApp } from '@/app/appStore'
 import { useStore } from '@/store/store'
 import { IconButton } from './ui/primitives'
@@ -47,6 +48,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </button>
           </div>
           <BackupSettings />
+        </section>
+
+        <section id="settings-updates" className="mb-5">
+          <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-ink-3 uppercase">Updates</h3>
+          <UpdateSettings />
         </section>
 
         <section id="settings-ai" className="mb-5">

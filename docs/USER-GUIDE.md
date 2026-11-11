@@ -116,7 +116,7 @@ What Inkling doesn't do yet, or does with caveats. Open work is listed in the [r
 - PDF links, form fields and text selection are not interactive inside Inkling.
 - Highlights exported to PNG are blended normally, not multiplied, over PDF content (PDF export uses a true multiply blend).
 - Very large PDFs import page by page with a progress notice; a 500-page PDF creates 500 page files.
-- Installers are not yet code-signed: Windows and macOS show a security prompt on first open, and macOS can't install updates in-app (Inkling links to the release instead). See [RELEASING.md](RELEASING.md#signing-and-notarization).
+- Installers are not yet code-signed: Windows and macOS show a security prompt on first open, and macOS can't install updates in-app (Inkling links to the release instead). Windows installs updates in-app. See [RELEASING.md](RELEASING.md#signing-and-notarization).
 - The Windows and macOS installers are built, and every acceptance suite plus the install → update → uninstall → reinstall check runs, on GitHub's Windows and macOS machines for every release build. Hands-on testing on a real PC and Mac (security prompts, display scaling) is still pending; see [DEVICE-TESTING.md](DEVICE-TESTING.md).
 - Real pens and touch screens (stylus pressure, palm rejection, touch gestures) have not yet been tested on physical devices, and macOS has not been tried on real hardware. Windows was tested by independent QA with automated input (see [the Phase 4.5 notes](archive/PHASE-4.5-WINDOWS.md)).
 - In windows narrower than about 1180 px some toolbar buttons fold away (they all have shortcuts or Markdown input rules), and the AI Tutor button shows only its icon. The notebook title is shortened at the minimum width (960 px).

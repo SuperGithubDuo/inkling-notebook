@@ -37,6 +37,41 @@ export function requiredAssets(version) {
 
 const HEX64 = /^[0-9a-f]{64}$/
 
+/**
+ * The in-app update approval: a small JSON file finalize-draft uploads to a draft only after every
+ * build, test and file check passed. Installed copies of Inkling download an update only when this
+ * file exists on the release and lists the exact SHA-512 of the file the update metadata points at.
+ * So a release published without a finished, verified build (or whose files were rebuilt after it
+ * was verified) is never installed in-app. Deleting the file from a release withdraws the update.
+ */
+export const approvalName = (version) => `Inkling-${version}-update-approval.json`
+
+/** metadata: the parsed latest*.yml files ({ files: [{ url, sha512 }] }). */
+export function renderApproval({ version, commit, run, metadata }) {
+  const files = {}
+  for (const m of metadata) for (const f of m.files) files[f.url] = f.sha512
+  return JSON.stringify({ format: 1, kind: 'inkling-update-approval', version, commit, run, files }, null, 2) + '\n'
+}
+
+/**
+ * May an installed app download this update? update: electron-updater's UpdateInfo
+ * ({ version, files: [{ url, sha512 }] }). Returns { ok: true } or { ok: false, reason }.
+ */
+export function checkApproval(approval, update) {
+  if (!approval || typeof approval !== 'object' || approval.format !== 1 || approval.kind !== 'inkling-update-approval') return { ok: false, reason: 'no valid update approval on the release' }
+  if (!update || typeof update.version !== 'string' || !VERSION_RE.test(update.version)) return { ok: false, reason: 'the update has no valid version' }
+  if (approval.version !== update.version) return { ok: false, reason: `approval is for ${approval.version}, update is ${update.version}` }
+  const files = Array.isArray(update.files) ? update.files : []
+  if (!files.length) return { ok: false, reason: 'the update metadata lists no files' }
+  const approved = approval.files && typeof approval.files === 'object' ? approval.files : {}
+  for (const f of files) {
+    const want = Object.prototype.hasOwnProperty.call(approved, f?.url) ? approved[f.url] : undefined
+    if (typeof want !== 'string' || !want) return { ok: false, reason: `${f?.url} was not approved` }
+    if (want !== f.sha512) return { ok: false, reason: `${f.url} changed after it was verified` }
+  }
+  return { ok: true }
+}
+
 /** `sha256sum` format: "<hex>  <name>" per line. */
 export function parseSums(text) {
   const out = new Map()

@@ -14,7 +14,7 @@ The easiest way is the **[download page]({{DOWNLOAD_PAGE}})**. Or download direc
 
 Not sure which Mac you have? *Apple menu → About This Mac*: "Chip: Apple M…" means Apple silicon; "Processor: … Intel" means Intel.
 
-You can ignore every other file below (`.zip`, `.blockmap`, `.yml`): Inkling uses them to check for updates.
+You can ignore every other file below (`.zip`, `.blockmap`, `.yml`, `.json`): Inkling uses them to check for updates.
 
 ### ⚠️ First open: security prompt
 

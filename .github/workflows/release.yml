@@ -79,6 +79,8 @@ jobs:
           state=$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo none)
           if [ "$state" = false ]; then echo "::error title=Draft release::$tag is already PUBLISHED; refusing to change it. Bump the version."; exit 1; fi
           if [ "$state" = true ]; then
+            # The in-app update approval is only ever written by finalize-draft for the files it verified.
+            gh release delete-asset "$tag" "Inkling-$ver-update-approval.json" --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
             gh release edit "$tag" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --notes "Draft: installers are being rebuilt and tested from $GITHUB_SHA. Not published."
             echo "::notice title=Draft release::Uploading to the existing draft $tag, now targeting $GITHUB_SHA"
           else
@@ -155,8 +157,10 @@ jobs:
           fi
           [ "$RUNNER_OS" = macOS ] && [ "$signed" = no ] && echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
           echo "SIGNED=$signed" >> "$GITHUB_ENV"
-          # Self-installing updates only for signed builds; unsigned betas only say that a new version exists.
-          if [ "$signed" = yes ]; then echo "MAIN_VITE_INKLING_UPDATE_MODE=auto" >> "$GITHUB_ENV"; else echo "MAIN_VITE_INKLING_UPDATE_MODE=notify" >> "$GITHUB_ENV"; fi
+          # Self-installing updates: always on Windows (electron-updater checks every download's SHA-512, and
+          # once a build is signed, that updates come from the same publisher). On macOS only for Developer ID
+          # builds: Squirrel.Mac refuses updates to ad-hoc signed apps, so those only say a new version exists.
+          if [ "$RUNNER_OS" = Windows ] || [ "$signed" = yes ]; then echo "MAIN_VITE_INKLING_UPDATE_MODE=auto" >> "$GITHUB_ENV"; else echo "MAIN_VITE_INKLING_UPDATE_MODE=notify" >> "$GITHUB_ENV"; fi
           if [ "$signed" = yes ]; then echo "::notice title=Signing::Signed build"; else echo "::warning title=Signing::Unsigned build: for testers only (security prompts on first open)"; fi
           if [ -n "$MAIN_VITE_INKLING_BETA_URL" ]; then echo "::notice title=Cloud AI::Built with the beta server $MAIN_VITE_INKLING_BETA_URL"; else echo "::warning title=Cloud AI::No INKLING_BETA_URL variable: this build has no cloud AI server built in"; fi
       - run: node scripts/ci-run.mjs build npm run build
@@ -238,6 +242,20 @@ jobs:
           fi
           echo "::notice title=Upgrade test::$prev → $me"
           node scripts/ci-run.mjs "upgrade from $prev" node tests/e2e/installer.e2e.mjs "$a" "$b"
+      - name: In-app update (download, verify, Later, Restart & Update; notebooks must survive)
+        shell: bash
+        run: |
+          # This build (A) updates itself to the "next version" build from the lifecycle step (B), from a
+          # local stand-in for GitHub Releases: unapproved, corrupt and interrupted downloads, Later, then
+          # Restart & Update (tests/e2e/update.e2e.mjs). Unsigned macOS builds only announce updates.
+          if [ "$RUNNER_OS" = Windows ]; then a=$(ls release/Inkling-Setup-*.exe | head -1)
+          else
+            # Install A as a user does (copy the app out of the DMG), and run it from there.
+            mount=$(mktemp -d); hdiutil attach "$(ls release/Inkling-*-arm64.dmg | head -1)" -nobrowse -readonly -mountpoint "$mount"
+            rm -rf "$HOME/Applications/Inkling.app"; mkdir -p "$HOME/Applications"; cp -R "$mount/Inkling.app" "$HOME/Applications/"; hdiutil detach "$mount" -force
+            a="$HOME/Applications/Inkling.app/Contents/MacOS/Inkling"
+          fi
+          node scripts/ci-run.mjs "in-app update" node tests/e2e/update.e2e.mjs "$a" release-next release
       # The installer on its own, so testers download just the .exe (or .dmg).
       - name: Upload the installer
         id: installer
@@ -342,6 +360,7 @@ jobs:
         shell: bash
         run: |
           ver=$(node -p "require('./package.json').version")
+          gh release delete-asset "v$ver" "Inkling-$ver-update-approval.json" --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
           gh release edit "v$ver" -R "$GITHUB_REPOSITORY" --notes "**DO NOT PUBLISH.** A build or test failed in $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Fix it and run Release → draft-release again."
           echo "::error title=Draft release::Tests failed; the draft v$ver is marked DO NOT PUBLISH"; exit 1
       - name: Verify the draft's files and write its notes

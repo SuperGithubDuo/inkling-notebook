@@ -24,7 +24,7 @@ export type LoadPageResult = { page: PageDoc | null; recovered: boolean; newer?:
 export type LoadNoteResult = { note: NoteDoc | null; recovered: boolean; newer?: boolean }
 
 /** Commands from the application menu (and the system) that the renderer carries out. */
-export type AppCommand = 'about' | 'settings' | 'backup' | 'restore' | 'welcome' | 'feedback' | 'privacy'
+export type AppCommand = 'about' | 'settings' | 'updates' | 'backup' | 'restore' | 'welcome' | 'feedback' | 'privacy'
 
 export interface BackupSummary {
   path: string
@@ -44,7 +44,15 @@ export interface UpdateState {
   message?: string
   /** macOS builds without a Developer ID signature can't install updates themselves: download from the release page instead. */
   manualDownloadUrl?: string
+  /** While downloading: 0–100. */
+  percent?: number
+  /** Which releases this copy follows. Never changes by itself. */
+  channel?: UpdateChannel
+  /** First start after Restart & Update: whether the new version installed. */
+  lastInstall?: { ok: boolean; version: string }
 }
+
+export type UpdateChannel = 'stable' | 'beta'
 
 export interface AppInfo {
   name: string
@@ -118,6 +126,8 @@ export interface InklingApi {
     check(): Promise<UpdateState>
     /** Restarts into a downloaded update, after saving. */
     install(): Promise<void>
+    /** Stable or beta. Switching to stable never downgrades: a beta stays until a newer stable is out. */
+    setChannel(channel: UpdateChannel): Promise<UpdateState>
     onState(handler: (state: UpdateState) => void): () => void
   }
   /** Menu commands for the renderer; returns an unsubscribe function. */
@@ -185,6 +195,7 @@ export const IPC = {
   updateState: 'update:state',
   updateCheck: 'update:check',
   updateInstall: 'update:install',
+  updateSetChannel: 'update:set-channel',
   updateChanged: 'update:changed',
   flushRequest: 'app:flush-request',
   flushDone: 'app:flush-done'

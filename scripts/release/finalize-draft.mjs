@@ -10,7 +10,9 @@
  *    - latest.yml / latest-mac.yml (in-app update metadata) name this version, and the files they
  *      point at exist with the SHA-512 and size they claim.
  * 3. Replaces the two per-OS checksum files with one Inkling-<version>-SHA256SUMS.txt.
- * 4. Writes user-friendly notes from .github/release-notes.md, ending with the hidden
+ * 4. Uploads Inkling-<version>-update-approval.json: the SHA-512 of every file the update metadata
+ *    points at. Installed apps download an update only when it is there and matches (rules.mjs).
+ * 5. Writes user-friendly notes from .github/release-notes.md, ending with the hidden
  *    verified-build marker the download site requires.
  * If anything fails, the notes become DO NOT PUBLISH and the job fails.
  *
@@ -25,6 +27,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   UPDATE_METADATA,
+  approvalName,
   checksumsName,
   fillTemplate,
   formatSums,
@@ -32,6 +35,7 @@ import {
   parseLatestYml,
   parseSums,
   perOsChecksumsNames,
+  renderApproval,
   renderMarker
 } from './rules.mjs'
 
@@ -54,9 +58,12 @@ export async function finalizeDraft({ api, version, sha, runUrl, feedback, downl
   if (draft.draft !== true) throw new Error(`${tag} is already published; refusing to change it`)
   if (draft.target_commitish !== sha) problems.push(`the draft targets ${draft.target_commitish}, but this run built ${sha}`)
 
+  // An approval left from an earlier run of this draft is never trusted: it is replaced at the end, or removed.
+  const approval = approvalName(version)
+  if ((draft.assets ?? []).some((a) => a.name === approval)) await api.deleteAsset(tag, approval)
   await api.downloadAll(tag, workDir)
-  const names = readdirSync(workDir).sort()
-  const remote = new Map((draft.assets ?? []).map((a) => [a.name, a]))
+  const names = readdirSync(workDir).filter((n) => n !== approval).sort()
+  const remote = new Map((draft.assets ?? []).filter((a) => a.name !== approval).map((a) => [a.name, a]))
   for (const n of names) if (!remote.has(n)) problems.push(`downloaded ${n}, which the release doesn't list`)
   for (const n of remote.keys()) if (!names.includes(n)) problems.push(`could not download ${n}`)
 
@@ -80,15 +87,18 @@ export async function finalizeDraft({ api, version, sha, runUrl, feedback, downl
     if (digest && digest !== `sha256:${hex}`) problems.push(`${name}: GitHub's digest ${digest} differs from the downloaded file`)
   }
 
+  const metadata = []
   for (const yml of UPDATE_METADATA) {
     if (!names.includes(yml)) { problems.push(`${yml} (update metadata) is missing`); continue }
     const meta = parseLatestYml(readFileSync(join(workDir, yml), 'utf8'))
+    metadata.push(meta)
     if (meta.version !== version) problems.push(`${yml} says version ${meta.version}, expected ${version}`)
     if (!meta.files.length) problems.push(`${yml} lists no files`)
     for (const f of meta.files) {
       if (!names.includes(f.url)) { problems.push(`${yml} points at ${f.url}, which isn't in the release`); continue }
       const p = join(workDir, f.url)
-      if ((await hashFile(p, 'sha512', 'base64')) !== f.sha512) problems.push(`${yml}: SHA-512 of ${f.url} doesn't match`)
+      if (!f.sha512) problems.push(`${yml}: no SHA-512 for ${f.url}`)
+      else if ((await hashFile(p, 'sha512', 'base64')) !== f.sha512) problems.push(`${yml}: SHA-512 of ${f.url} doesn't match`)
       if (f.size !== undefined && readFileSync(p).length !== f.size) problems.push(`${yml}: size of ${f.url} doesn't match`)
     }
   }
@@ -101,6 +111,11 @@ export async function finalizeDraft({ api, version, sha, runUrl, feedback, downl
   writeFileSync(sumsPath, sumsText)
   await api.upload(tag, sumsPath)
   for (const f of perOsChecksumsNames(version)) await api.deleteAsset(tag, f)
+
+  // Last: the in-app update approval, written only once everything above passed.
+  const approvalPath = join(workDir, approval)
+  writeFileSync(approvalPath, renderApproval({ version, commit: sha, run: runUrl, metadata }))
+  await api.upload(tag, approvalPath)
 
   const notes = fillTemplate(template, {
     VERSION: version,

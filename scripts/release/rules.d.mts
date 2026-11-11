@@ -17,3 +17,6 @@ export function evaluateRelease(release: any, opts?: { withdrawn?: string[]; tag
 export function pickRelease(releases: any[], opts?: { withdrawn?: string[]; tagCommits?: Record<string, string> }): { manifest: any; rejected: { tag: string; reasons: string[] }[] }
 export function noReleaseManifest(reason?: string): { status: 'none'; reason: string }
 export function fillTemplate(template: string, values: Record<string, string>): string
+export function approvalName(version: string): string
+export function renderApproval(a: { version: string; commit: string; run: string; metadata: { files: { url: string; sha512?: string }[] }[] }): string
+export function checkApproval(approval: unknown, update: { version: string; files: { url: string; sha512: string }[] }): { ok: true } | { ok: false; reason: string }

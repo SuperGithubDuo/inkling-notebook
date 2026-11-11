@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  approvalName,
+  checkApproval,
   checksumsName,
   evaluateRelease,
   fillTemplate,
@@ -13,6 +15,7 @@ import {
   parseMarker,
   parseSums,
   pickRelease,
+  renderApproval,
   renderMarker
 } from '../../scripts/release/rules.mjs'
 import { finalizeDraft } from '../../scripts/release/finalize-draft.mjs'
@@ -145,8 +148,26 @@ describe('release file helpers', () => {
   })
 })
 
+describe('in-app update approval', () => {
+  const file = { url: `Inkling-Setup-${V}-x64.exe`, sha512: 'abc==' }
+  const approval = JSON.parse(renderApproval({ version: V, commit: SHA, run: 'r', metadata: [{ files: [file] }] }))
+  it('approves exactly the verified file and version', () => {
+    expect(checkApproval(approval, { version: V, files: [file] })).toEqual({ ok: true })
+  })
+  it('refuses anything else', () => {
+    const no = (a: unknown, u: { version: string; files: { url: string; sha512: string }[] }) => checkApproval(a, u).ok
+    expect(no(null, { version: V, files: [file] })).toBe(false)
+    expect(no({ ...approval, format: 2 }, { version: V, files: [file] })).toBe(false)
+    expect(no(approval, { version: '0.2.0-beta.9', files: [file] })).toBe(false)
+    expect(no(approval, { version: V, files: [] })).toBe(false)
+    expect(no(approval, { version: V, files: [{ ...file, sha512: 'rebuilt==' }] })).toBe(false)
+    expect(no(approval, { version: V, files: [{ url: 'other.exe', sha512: 'abc==' }] })).toBe(false)
+    expect(no(approval, { version: V, files: [{ url: '__proto__', sha512: 'abc==' }] })).toBe(false)
+  })
+})
+
 describe('draft finalization (Release workflow)', () => {
-  function setup(opts: { tamper?: 'perOs' | 'yml' | 'target' } = {}) {
+  function setup(opts: { tamper?: 'perOs' | 'yml' | 'target'; staleApproval?: boolean } = {}) {
     const remoteDir = mkdtempSync(join(tmpdir(), 'remote-'))
     const names = installerNames(V)
     const write = (n: string, c: string) => writeFileSync(join(remoteDir, n), c)
@@ -158,6 +179,7 @@ describe('draft finalization (Release workflow)', () => {
     const h = (n: string) => createHash('sha256').update(readFileSync(join(remoteDir, n))).digest('hex')
     write(`Inkling-${V}-SHA256SUMS-Windows.txt`, `${opts.tamper === 'perOs' ? '0'.repeat(64) : h(names.windows)}  ${names.windows}\n`)
     write(`Inkling-${V}-SHA256SUMS-macOS.txt`, `${h(names.macArm)}  ${names.macArm}\n${h(names.macIntel)}  ${names.macIntel}\n`)
+    if (opts.staleApproval) write(approvalName(V), '{"format":1}')
     const calls: string[] = []
     const api = {
       async getDraft() {
@@ -176,7 +198,13 @@ describe('draft finalization (Release workflow)', () => {
   it('verifies the files, merges the checksums and writes notes the site accepts', async () => {
     const s = setup()
     const notes = await run(s)
-    expect(s.calls).toEqual([`upload ${checksumsName(V)}`, `delete Inkling-${V}-SHA256SUMS-Windows.txt`, `delete Inkling-${V}-SHA256SUMS-macOS.txt`])
+    expect(s.calls).toEqual([`upload ${checksumsName(V)}`, `delete Inkling-${V}-SHA256SUMS-Windows.txt`, `delete Inkling-${V}-SHA256SUMS-macOS.txt`, `upload ${approvalName(V)}`])
+    // The in-app update approval lists exactly the files the update metadata points at.
+    const approval = JSON.parse(readFileSync(join(s.workDir, approvalName(V)), 'utf8'))
+    expect(approval).toMatchObject({ format: 1, version: V, commit: SHA })
+    expect(Object.keys(approval.files).sort()).toEqual([`Inkling-${V}-arm64-mac.zip`, `Inkling-Setup-${V}-x64.exe`])
+    const win = readFileSync(join(s.workDir, 'latest.yml'), 'utf8')
+    expect(checkApproval(approval, { version: V, files: parseLatestYml(win).files as { url: string; sha512: string }[] })).toEqual({ ok: true })
     expect(notes).toContain(`Inkling-Setup-${V}-x64.exe`)
     expect(notes).toContain('https://supergithubduo.github.io/inkling-notebook/')
     expect(notes).not.toMatch(/\{\{/)
@@ -191,8 +219,15 @@ describe('draft finalization (Release workflow)', () => {
     await expect(run(s)).rejects.toThrow(/differs from the one computed when it was built/)
     expect(s.calls).toEqual([])
   })
-  it('refuses broken update metadata', async () => {
-    await expect(run(setup({ tamper: 'yml' }))).rejects.toThrow(/latest\.yml: SHA-512/)
+  it('refuses broken update metadata, and approves no update', async () => {
+    const s = setup({ tamper: 'yml' })
+    await expect(run(s)).rejects.toThrow(/latest\.yml: SHA-512/)
+    expect(s.calls.some((c) => c.includes('update-approval'))).toBe(false)
+  })
+  it('removes an approval left from an earlier run before verifying again', async () => {
+    const s = setup({ tamper: 'perOs', staleApproval: true })
+    await expect(run(s)).rejects.toThrow()
+    expect(s.calls).toEqual([`delete ${approvalName(V)}`])
   })
   it('refuses a draft that targets another commit', async () => {
     await expect(run(setup({ tamper: 'target' }))).rejects.toThrow(/targets c{7}/)
