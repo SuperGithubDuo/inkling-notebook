@@ -52,6 +52,7 @@ const api: InklingApi = {
     state: () => ipcRenderer.invoke(IPC.updateState),
     check: () => ipcRenderer.invoke(IPC.updateCheck),
     install: () => ipcRenderer.invoke(IPC.updateInstall),
+    setChannel: (channel) => ipcRenderer.invoke(IPC.updateSetChannel, channel),
     onState: (handler) => {
       const listener = (_e: unknown, state: Parameters<typeof handler>[0]): void => handler(state)
       ipcRenderer.on(IPC.updateChanged, listener)

@@ -24,7 +24,7 @@ export type LoadPageResult = { page: PageDoc | null; recovered: boolean; newer?:
 export type LoadNoteResult = { note: NoteDoc | null; recovered: boolean; newer?: boolean }
 
 /** Commands from the application menu (and the system) that the renderer carries out. */
-export type AppCommand = 'about' | 'settings' | 'backup' | 'restore' | 'welcome' | 'feedback' | 'privacy'
+export type AppCommand = 'about' | 'settings' | 'updates' | 'backup' | 'restore' | 'welcome' | 'feedback' | 'privacy'
 
 export interface BackupSummary {
   path: string
@@ -44,7 +44,25 @@ export interface UpdateState {
   message?: string
   /** macOS builds without a Developer ID signature can't install updates themselves: download from the release page instead. */
   manualDownloadUrl?: string
+  /** While downloading: 0–100. */
+  percent?: number
+  /** Which releases this copy follows. Never changes by itself. */
+  channel?: UpdateChannel
+  /** Restart & Update didn't go ahead (save, backup or check failed): why, and what to do. Retry with install(). */
+  installError?: string
+  /** Saving, backing up and re-checking before the restart. */
+  installing?: boolean
+  /**
+   * false: this build isn't code-signed, so updates are checked for integrity (SHA-512 against the
+   * release's metadata and approval) but not authenticated as coming from Inkling's publisher.
+   * Such builds are beta/testing only.
+   */
+  publisherVerified?: boolean
+  /** First start after Restart & Update: whether the new version installed. */
+  lastInstall?: { ok: boolean; version: string }
 }
+
+export type UpdateChannel = 'stable' | 'beta'
 
 export interface AppInfo {
   name: string
@@ -116,8 +134,10 @@ export interface InklingApi {
   updates: {
     state(): Promise<UpdateState>
     check(): Promise<UpdateState>
-    /** Restarts into a downloaded update, after saving. */
-    install(): Promise<void>
+    /** Restarts into a downloaded update, after re-checking its approval, saving and a backup. Returns the state if it didn't. */
+    install(): Promise<UpdateState>
+    /** Stable or beta. Switching to stable never downgrades: a beta stays until a newer stable is out. */
+    setChannel(channel: UpdateChannel): Promise<UpdateState>
     onState(handler: (state: UpdateState) => void): () => void
   }
   /** Menu commands for the renderer; returns an unsubscribe function. */
@@ -185,6 +205,7 @@ export const IPC = {
   updateState: 'update:state',
   updateCheck: 'update:check',
   updateInstall: 'update:install',
+  updateSetChannel: 'update:set-channel',
   updateChanged: 'update:changed',
   flushRequest: 'app:flush-request',
   flushDone: 'app:flush-done'

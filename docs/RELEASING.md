@@ -86,7 +86,7 @@ If anything failed, the draft says **DO NOT PUBLISH** instead and carries no mar
 
 | | Without credentials | With credentials |
 |---|---|---|
-| **Windows** | Builds and installs. On first run SmartScreen shows "Windows protected your PC", and users click *More info → Run anyway*. | Signed with your certificate. An EV certificate, or Azure Trusted Signing, removes the SmartScreen warning at once. A standard OV certificate builds reputation over time. Updates are also checked to come from the same publisher. |
+| **Windows** | Builds and installs. On first run SmartScreen shows "Windows protected your PC", and users click *More info → Run anyway*. Updates install in-app. | Signed with your certificate. An EV certificate, or Azure Trusted Signing, removes the SmartScreen warning at once. A standard OV certificate builds reputation over time. Updates are also checked to come from the same publisher. |
 | **macOS** | Ad-hoc signed so it runs on Apple silicon. Gatekeeper blocks the first open: users go to *System Settings → Privacy & Security → Open Anyway*. In-app updates can't install themselves; Inkling shows a *Download* link instead. | Signed with your Developer ID, notarized and stapled: opens normally, and updates install in-app. |
 
 **Unsigned builds are for testers who have been told about the warnings. They are not production-ready.** For a public launch you need:
@@ -110,11 +110,50 @@ Set `MAIN_VITE_INKLING_BETA_URL=…` before building to include the cloud AI bet
 
 ## Updates
 
-In-app updates use electron-updater with GitHub Releases, configured by `publish:` in `electron-builder.yml`.
-- The app checks 15 seconds after start and every 6 hours. *About → Check for updates* checks on demand.
-- **Integrity.** Every download is checked against the SHA-512 in the release's `latest.yml`. On Windows a signed build also checks that the update is signed by the same publisher. On macOS, Squirrel only accepts an update signed with the same Developer ID.
-- **Never silent.** Signed builds download in the background and show *Restart to update*. Before restarting, Inkling saves every notebook and takes a *before update* snapshot. Unsigned builds only say a new version exists, with a link to its release page.
-- Development builds and `npm start` never check.
+Install once, then: **open Inkling → the update downloads in the background → Restart & Update → done.** No uninstalling, no installer to download. Code: `src/main/updater.ts` (electron-updater with GitHub Releases, `publish:` in `electron-builder.yml`), decisions in `src/main/updatePolicy.ts`, interface in `src/renderer/src/app/Updates.tsx`.
+
+**For users**
+- Inkling checks 15 seconds after it starts and every 6 hours (30 minutes after a failed attempt). *Settings → Updates → Check for Updates* (or *Help → Check for Updates…*) checks now.
+- The download runs in the background. A small notice in the bottom-left corner shows its progress, then *Inkling X is ready* with **Restart & Update** and **Later**. The notice appears only after a few seconds without pen, mouse or keyboard input, never takes focus, and nothing restarts unless the user clicks.
+- **Later** leaves everything as it is. Nothing is installed on quit; the next start offers the already downloaded update again.
+- **Restart & Update** first, in this order: checks the release's update approval again, saves every notebook, takes a *Before update* snapshot (the newest 3 are kept, under *Settings → Storage → Backups*), and records the pending update. If any step fails (offline, saving fails, the backup can't be made, the record can't be written), Inkling doesn't restart or install anything: the notice says what happened, and *Try again* is right there. Only then does it install silently and open the new version. The first start after an update says *Updated to Inkling X*, or, if the installer didn't finish, that it didn't and that the notebooks weren't changed; the update is offered again.
+
+**Channels.** *Settings → Updates → Release channel*: **Stable** or **Beta**. A copy starts on the channel of the version that was installed (`0.2.0-beta.4` → beta) and saves it in `update-settings.json` on first start, so it never changes by itself: stable copies never see betas, and a beta tester who receives a stable release stays on beta and gets the next beta. Switching to stable never downgrades; a beta stays until a newer stable release is out. (electron-updater: `allowPrerelease` = beta, `allowDowngrade` = false.) A release is a beta when GitHub marks it *pre-release*, which the Release workflow does for any version with a `-`.
+
+**Nothing unfinished is ever installed.**
+1. GitHub never lists draft releases, so a draft can't be found by the app.
+2. An update is downloaded only when its release also carries `Inkling-<version>-update-approval.json`. `finalize-draft.mjs` uploads it as the very last step, only after every build, test and file check passed, and it lists the exact SHA-512 of each file `latest*.yml` points at (`checkApproval` in `scripts/release/rules.mjs`). The app refuses the update if the approval is missing, is for another version, or doesn't match the files (e.g. installers rebuilt after verification). A failed run deletes it, and so does every rebuild of a draft before its new checks. So publishing a draft marked *DO NOT PUBLISH* still doesn't reach installed copies.
+3. **To withdraw an update** that is already published, delete its `…-update-approval.json` asset from the release (and add it to `site/config.json` `withdrawn` for the download page). It takes effect for copies that already downloaded it too: the approval is fetched again before *Restart & Update* (if it can't be fetched, e.g. offline, the update waits), by the periodic check while the update is waiting (the notice goes away), and at every start. The downloaded file stays in the updater's cache and is never installed. Limits: a copy that already restarted into it keeps it (publish a newer fixed version), and GitHub's download CDN can serve a deleted file for a few minutes.
+
+**Integrity is not authentication.** They protect against different things:
+- **Integrity** (every build): electron-updater checks each download against the SHA-512 in `latest*.yml` and discards it otherwise; Inkling only downloads files whose SHA-512 the update approval lists; everything comes over HTTPS from GitHub. This catches corrupted, truncated or swapped files and installers rebuilt after verification. It does **not** prove who published the release: the metadata, the approval and the installer all come from the same GitHub release, so anyone who could publish there (e.g. with a stolen token or account) could publish a matching set.
+- **Authentication** (signed builds only): a code signature proves the publisher. A signed Windows build records its publisher, and electron-updater then refuses any update not signed by that same publisher; Squirrel.Mac requires the same Developer ID.
+
+So **unsigned builds are beta/testing only**, for testers who chose to install an unsigned beta:
+- The app installs updates itself without a signature only when it is a beta (prerelease) version; an unsigned stable build only announces updates (`resolveMode`, `src/main/updatePolicy.ts`), and Settings → Updates says that updates aren't publisher-verified.
+- The Release workflow refuses to make an unsigned stable release: the installer job fails a `draft-release` of a non-prerelease version without signing secrets, and `finalize-draft.mjs` refuses to approve one unless both Windows and macOS were signed. Unsigned builds are annotated "integrity-checked (SHA-512), NOT publisher-authenticated".
+
+| | Unsigned (betas only) | Signed (required for stable) |
+|---|---|---|
+| **Windows** | Betas install updates themselves: integrity-checked, not publisher-authenticated. Running the installer from inside Inkling doesn't show SmartScreen. | Updates install themselves and must be signed by the same publisher. The first signed release installs over unsigned ones normally; from then on only that publisher's updates are accepted, so keep using the same certificate subject. |
+| **macOS** | Ad-hoc signed: Squirrel.Mac refuses to install updates into it. Inkling announces the update with a *Download* link instead (the user installs the new DMG over the old app; notebooks stay). | Developer ID + notarized: updates install in-app like Windows. The workflow switches this on by itself when the signing secrets exist. |
+| **Linux** | Not distributed. The same updater runs for AppImages, but only in the automated test. | — |
+
+**Differential downloads.** The `.blockmap` files on each release let electron-updater download only the parts that changed (Windows: compared with the previous release's blockmap; macOS: the `.zip`). In the update test, a build that differed only in its version downloaded 0.3 MB of 130 MB. If the previous release's blockmap is gone (e.g. skipped versions where the old release was deleted), it downloads the whole file. Keep every release's files on GitHub.
+
+**Migrating from 0.2.0-beta.3 and earlier.** Those builds never check for updates: their updater failed to load (electron-updater's `autoUpdater` was read as a named ES-module export, which is `undefined`; fixed in `updater.ts`). Testers on beta.2/beta.3 install the next release once, by running its installer (Windows installs over the old version; on macOS, drag the new app over the old one). Notebooks, settings and backups carry over, as the upgrade test in the Release workflow checks. Every update after that is in-app.
+
+**Cost.** $0: GitHub Releases hosts the files and serves the update metadata; no update server.
+
+**Tested by** `tests/e2e/update.e2e.mjs` (Release workflow, Windows and macOS runners; Linux AppImage locally): from an installed build A to the next-version build B through a local stand-in for GitHub Releases. It checks that an unapproved or mismatched release is never downloaded; a corrupt download is discarded and A keeps running; an interrupted download fails cleanly and the next check completes it (differentially); *Later* installs nothing on quit and the next start offers the downloaded file without downloading it again; *Restart & Update* does not restart when the before-update backup fails, when the pending-update record can't be written, or when the update was withdrawn after downloading (and a withdrawn update is dropped by the next check and the next start); then *Restart & Update* installs B in place, every notebook file is byte-identical, settings and channel are kept, and the update is recorded. Unit tests: `tests/unit/updater.test.ts`, `tests/unit/release-site.test.ts`.
+
+```bash
+npm run build && npx electron-builder --linux AppImage --publish never
+npx electron-builder --linux AppImage --publish never -c.extraMetadata.version=<version>.test1 -c.directories.output=release-next
+xvfb-run -a npm run test:update -- release/Inkling-<version>-x86_64.AppImage release-next release
+```
+
+Development builds and `npm start` never check. `INKLING_DISABLE_UPDATES=1` turns checks off in an installed build.
 
 ## What updates and uninstalling never touch
 
@@ -130,6 +169,9 @@ Inside it:
 - `Library\` holds the notebooks.
 - `Backups\` holds the daily snapshots.
 - `ai-settings.json`, `gemini-key.bin` and `beta-access.bin` hold the tutor settings and encrypted keys.
+- `update-settings.json` holds the release channel and the outcome of the last update.
+
+Downloaded updates wait in a separate cache (`%LOCALAPPDATA%\inkling-updater\` on Windows, `~/Library/Caches/inkling-updater/` on macOS) and are removed after installing.
 
 The Windows uninstaller is configured with `deleteAppDataOnUninstall: false`. Reinstalling, or installing a new version over an old one, opens the same library. Files saved by a newer version are never overwritten by an older one: the older app refuses to open them and asks for an update.
 

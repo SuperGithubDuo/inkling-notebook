@@ -1,11 +1,12 @@
 /** Welcome, About and Privacy dialogs, the update notice, and menu-command handling. */
 import { useEffect, useState } from 'react'
-import { ArrowRight, BookOpen, Download, ExternalLink, MessageSquare, PenLine, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react'
+import { ArrowRight, BookOpen, ExternalLink, MessageSquare, PenLine, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react'
 import { platformName } from '@shared/product'
 import { useApp, runCommand } from './appStore'
 import { Dialog } from './Dialog'
 import { BrandMark } from './Brand'
 import { PrivacyContent } from './PrivacyContent'
+import { UpdateLine, UpdateNotice } from './Updates'
 
 export function AppDialogs() {
   const dialog = useApp((s) => s.dialog)
@@ -165,59 +166,10 @@ function About({ onClose }: { onClose: () => void }) {
   )
 }
 
-function UpdateLine({ update }: { update: ReturnType<typeof useApp.getState>['update'] }) {
-  if (!update || !update.enabled) return <span className="text-ink-2">{update?.message ?? 'Updates are checked in installed versions.'}</span>
-  switch (update.status) {
-    case 'checking':
-      return <span className="text-ink-2">Checking for updates…</span>
-    case 'none':
-      return <span className="text-[#1f7a46]">Inkling is up to date.</span>
-    case 'downloading':
-      return <span className="text-ink-2">Downloading Inkling {update.version}…</span>
-    case 'ready':
-      return <span className="text-ink">Inkling {update.version} is ready to install.</span>
-    case 'available':
-      return <span className="text-ink">Inkling {update.version} is available.</span>
-    case 'error':
-      return <span className="text-[#9a6200]">{update.message}</span>
-    default:
-      return <span className="text-ink-2">Inkling checks for updates automatically.</span>
-  }
-}
-
 function LinkButton({ children, onClick, icon }: { children: React.ReactNode; onClick: () => void; icon: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick} className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-medium text-accent hover:bg-accent-softer">
       {icon} {children}
     </button>
-  )
-}
-
-// ------------------------------------------------------------ update notice
-
-function UpdateNotice() {
-  const update = useApp((s) => s.update)
-  const [hidden, setHidden] = useState<string | null>(null)
-  if (!update?.enabled || !update.version || hidden === update.version) return null
-  if (update.status !== 'ready' && update.status !== 'available') return null
-  return (
-    <div role="status" data-testid="update-notice" className="fixed bottom-4 left-4 z-40 flex max-w-[360px] items-center gap-3 rounded-xl border border-line bg-white px-4 py-3 text-[13px] shadow-float">
-      <Download size={16} className="shrink-0 text-accent" />
-      <span className="flex-1">{update.status === 'ready' ? `Inkling ${update.version} is ready.` : `Inkling ${update.version} is available.`}</span>
-      {update.status === 'ready' ? (
-        <button type="button" onClick={() => void window.inkling.updates.install()} className="shrink-0 rounded-lg bg-accent px-2.5 py-1 font-medium text-white">
-          Restart to update
-        </button>
-      ) : (
-        update.manualDownloadUrl && (
-          <a href={update.manualDownloadUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg bg-accent px-2.5 py-1 font-medium text-white">
-            Download
-          </a>
-        )
-      )}
-      <button type="button" onClick={() => setHidden(update.version!)} className="text-ink-3 hover:text-ink">
-        Later
-      </button>
-    </div>
   )
 }

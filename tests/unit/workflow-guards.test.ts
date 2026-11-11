@@ -62,3 +62,19 @@ describe('no workflow can change the production Worker outside the manual, appro
     }
   })
 })
+
+describe('Release workflow: unsigned builds stay beta-only', () => {
+  const y = readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8')
+  it('tells the app whether it was signed', () => {
+    expect(y).toContain('MAIN_VITE_INKLING_SIGNED=1')
+    expect(y).toContain('MAIN_VITE_INKLING_SIGNED=0')
+  })
+  it('refuses an unsigned stable draft release, and never calls unsigned updates authenticated', () => {
+    expect(y).toMatch(/publish \}\}" = always \] && \[ "\$signed" = no \] && \[\[ "\$ver" != \*-\* \]\]; then[\s\S]{0,400}exit 1/)
+    expect(y).toMatch(/NOT publisher-authenticated/)
+  })
+  it('passes the signing state to finalize-draft', () => {
+    expect(y).toContain("WIN_SIGNED: ${{ secrets.WIN_CSC_LINK != '' }}")
+    expect(y).toContain("MAC_SIGNED: ${{ secrets.MAC_CSC_LINK != '' }}")
+  })
+})

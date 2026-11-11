@@ -2,8 +2,10 @@
 interface ImportMetaEnv {
   /** The cloud AI server built into this version, e.g. https://inkling-ai-beta.example.workers.dev */
   readonly MAIN_VITE_INKLING_BETA_URL?: string
-  /** `auto` (signed builds), `notify` (default) or `off`. See src/main/updater.ts. */
+  /** `auto`, `notify` or `off`; unset: auto on Windows, notify on macOS. See src/main/updatePolicy.ts. */
   readonly MAIN_VITE_INKLING_UPDATE_MODE?: string
+  /** '1' when the release workflow code-signed this build (updates are then publisher-authenticated too). */
+  readonly MAIN_VITE_INKLING_SIGNED?: string
   /** Where "Send feedback" goes (https page or mailto:). Defaults to new GitHub issue. */
   readonly MAIN_VITE_INKLING_FEEDBACK_URL?: string
   /** '1' offers Google Gemini in a packaged build. Unset: no Gemini (public all-ages builds). Development always has it. */

@@ -176,6 +176,12 @@ export async function autoBackupIfDue(dataDir: string, backupsDir: string, appVe
   return info
 }
 
+/** Keeps the newest `keep` backups of one kind (e.g. before-update snapshots) and removes older ones. */
+export async function pruneBackups(backupsDir: string, kind: BackupKind, keep: number): Promise<void> {
+  const old = (await listBackups(backupsDir)).filter((b) => b.kind === kind).slice(keep)
+  for (const b of old) await fs.rm(b.path, { recursive: true, force: true })
+}
+
 /**
  * Replaces the library at `dataDir` with the backup at `backupDir`. The
  * current library is snapshotted into `backupsDir` first (kept like any

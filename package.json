@@ -30,6 +30,7 @@
     "dist:mac": "npm run build && node scripts/notices.mjs && electron-builder --mac --publish never",
     "dist:linux": "npm run build && node scripts/notices.mjs && electron-builder --linux --publish never",
     "test:packaged": "node tests/e2e/packaged.e2e.mjs",
+    "test:update": "node tests/e2e/update.e2e.mjs",
     "test:perf": "node tests/e2e/perf.e2e.mjs"
   },
   "author": {

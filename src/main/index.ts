@@ -15,7 +15,7 @@ import { AiService } from './ai/service'
 import { GeminiProvider } from './ai/gemini'
 import { OllamaProvider } from './ai/ollama'
 import { adoptOrphans, hasNotebookFolders, recoverLibrary } from './recovery'
-import { autoBackupIfDue, backupsDirFor, createBackup, listBackups, readBackup, restoreBackup } from './backup'
+import { autoBackupIfDue, backupsDirFor, createBackup, listBackups, pruneBackups, readBackup, restoreBackup } from './backup'
 import { buildMenu } from './menu'
 import { Updater } from './updater'
 import { FEEDBACK_URL, RELEASES_URL, feedbackLink } from '@shared/product'
@@ -309,19 +309,16 @@ const sendCommand = (command: AppCommand): void => {
 }
 
 const updater = new Updater({
+  configDir,
+  testHooks,
   onState: (state) => {
     if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.updateChanged, state)
   },
-  beforeInstall: async () => {
-    if (!mainWindow) return true
-    const saved = await flushRenderer(mainWindow)
-    if (!saved.ok) {
-      await dialog.showMessageBox(mainWindow, { type: 'warning', message: 'Inkling couldn’t save your latest changes, so the update was not installed yet.', detail: saved.message })
-      return false
-    }
-    // A snapshot of the library from just before the update, in case anything about it goes wrong.
-    await createBackup(dataDir, backupsDir, { kind: 'before-update', appVersion: app.getVersion(), link: true }).catch((err) => console.warn('before-update backup failed', err))
-    return true
+  saveAll: async () => (mainWindow ? flushRenderer(mainWindow) : { ok: true }),
+  // A complete snapshot of the library from just before the update, or no update.
+  backup: async () => {
+    await createBackup(dataDir, backupsDir, { kind: 'before-update', appVersion: app.getVersion(), link: true })
+    await pruneBackups(backupsDir, 'before-update', 3).catch((err) => console.warn('old before-update backups not pruned:', (err as Error).message))
   }
 })
 
@@ -642,6 +639,7 @@ function registerIpc(): void {
   handle(IPC.updateState, z.tuple([]), async () => updater.current)
   handle(IPC.updateCheck, z.tuple([]), async () => updater.check())
   handle(IPC.updateInstall, z.tuple([]), async () => updater.install())
+  handle(IPC.updateSetChannel, z.tuple([z.enum(['stable', 'beta'])]), async (channel) => updater.setChannel(channel))
 }
 
 app.whenReady().then(async () => {
@@ -657,7 +655,7 @@ app.whenReady().then(async () => {
     app.exit(0)
     return
   }
-  Menu.setApplicationMenu(buildMenu({ send: sendCommand, dev: !app.isPackaged || testHooks, checkForUpdates: updater.current.enabled ? () => void updater.check().then(() => sendCommand('about')) : undefined }))
+  Menu.setApplicationMenu(buildMenu({ send: sendCommand, dev: !app.isPackaged || testHooks, checkForUpdates: updater.current.enabled ? () => (sendCommand('updates'), void updater.check()) : undefined }))
   registerAssetProtocol()
   registerIpc()
   createWindow()

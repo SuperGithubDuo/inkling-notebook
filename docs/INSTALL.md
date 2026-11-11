@@ -12,7 +12,7 @@ The easiest way: open the **[download page](https://supergithubduo.github.io/ink
 | Mac with Apple silicon (*Apple menu → About This Mac* shows "Chip: Apple M…") | `Inkling-<version>-arm64.dmg` |
 | Mac with an Intel processor (About This Mac shows "Processor: … Intel …") | `Inkling-<version>-x64.dmg` |
 
-Download only from the download page or this project's [GitHub Releases](https://github.com/SuperGithubDuo/inkling-notebook/releases). If you're on a release page, ignore the other files (`.zip`, `.blockmap`, `.yml`): Inkling uses them to check for updates.
+Download only from the download page or this project's [GitHub Releases](https://github.com/SuperGithubDuo/inkling-notebook/releases). If you're on a release page, ignore the other files (`.zip`, `.blockmap`, `.yml`, `.json`): Inkling uses them to check for updates.
 
 **Optional, recommended:** check that your download wasn't altered. Compare its SHA-256 with the one on the download page (also on the release page, and in `Inkling-<version>-SHA256SUMS.txt`):
 - Windows (PowerShell): `Get-FileHash .\Downloads\Inkling-Setup-<version>-x64.exe`
@@ -27,7 +27,7 @@ This beta is **not code-signed**. Signing is how Windows and macOS confirm who m
 - don't install it on a computer where you aren't allowed to install your own software (for example, a school- or work-managed computer) without permission;
 - if you're unsure, don't install it, and ask us.
 
-Unsigned builds also can't update themselves. When a new version is out, Inkling tells you and links to the download.
+**Updates.** You install Inkling once. On Windows, new versions download in the background and a small notice offers *Restart & Update* (or *Later*); your notebooks and settings are kept. Each update is checked against the files this project published, but while Inkling is an unsigned beta your computer can't confirm who published it, the same as for the installer you downloaded. On macOS, unsigned builds can't install updates themselves: Inkling tells you a new version is out and links to it, and you install it over the old app. *Settings → Updates* shows your version, checks for updates, and lets you choose the Stable or Beta channel. Versions 0.2.0-beta.3 and earlier don't check for updates: install the next version once by hand, and it updates itself from then on.
 
 ### Windows
 
