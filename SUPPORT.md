@@ -5,7 +5,7 @@ Thank you for trying Inkling. Here's how to get help or tell us what you think.
 ## Send feedback or report a problem
 
 - **In the app:** *Help → Send Feedback or Report a Problem* (also in *Settings*). It fills in your Inkling version and operating system, and you see everything before it's sent. Our no-account feedback form is still being set up: until a build includes it, this opens a new GitHub issue, which needs a free GitHub account and is **public**.
-- **Without the app:** once the form is ready, it's linked from the [download page](https://supergithubduo.github.io/inkling-notebook/#feedback).
+- **Without the app:** once the form is ready, it's linked from the [download page](https://supergithubduo.github.io/inkling-notebook/download/#help).
 - **Have a GitHub account?** You can [open an issue](https://github.com/SuperGithubDuo/inkling-notebook/issues/new) directly. Issues are public.
 
 **Please don't include notebook contents, screenshots of personal notes, names, or anything sensitive.** Describe what happened instead.

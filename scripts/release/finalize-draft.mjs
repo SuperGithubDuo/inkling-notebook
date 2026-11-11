@@ -169,7 +169,7 @@ async function main() {
       sha: process.env.GITHUB_SHA,
       runUrl,
       feedback: process.env.FEEDBACK_URL,
-      downloadPage: process.env.DOWNLOAD_PAGE_URL || `https://${repo.split('/')[0].toLowerCase()}.github.io/${repo.split('/')[1]}/`,
+      downloadPage: process.env.DOWNLOAD_PAGE_URL || `https://${repo.split('/')[0].toLowerCase()}.github.io/${repo.split('/')[1]}/download/`,
       template: readFileSync('.github/release-notes.md', 'utf8'),
       workDir,
       signed: { windows: process.env.WIN_SIGNED === 'true', mac: process.env.MAC_SIGNED === 'true' }

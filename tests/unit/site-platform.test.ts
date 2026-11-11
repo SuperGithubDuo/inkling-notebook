@@ -91,11 +91,11 @@ describe('download page build', () => {
   it('ships the platform script with the page, and the deploy check requires it', () => {
     const out = join(mkdtempSync(join(tmpdir(), 'inkling-site-')), 'site')
     const root = join(import.meta.dirname, '../..')
-    buildSite({ siteDir: join(root, 'site'), outDir: out, releases: [], tagCommits: {}, config: { withdrawn: [] }, feedbackUrl: '', allowPreview: false, generatedAt: '2026-11-03T00:00:00Z' })
-    const html = readFileSync(join(out, 'index.html'), 'utf8')
-    expect(html).toContain('<script src="assets/platform.js"></script>')
+    buildSite({ siteDir: join(root, 'site'), outDir: out, releases: [], tagCommits: {}, config: { withdrawn: [] }, feedbackUrl: '', generatedAt: '2026-11-03T00:00:00Z' })
+    const html = readFileSync(join(out, 'download/index.html'), 'utf8')
+    expect(html).toContain('<script src="../assets/platform.js"></script>')
     // Loaded before the page script that uses it.
-    expect(html.indexOf('assets/platform.js')).toBeLessThan(html.indexOf('window.InklingPlatform'))
+    expect(html.indexOf('../assets/platform.js')).toBeLessThan(html.indexOf('../assets/download.js'))
     expect(checkSite(out)).toEqual([])
   })
 })

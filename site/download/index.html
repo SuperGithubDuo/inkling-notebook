@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download Inkling for Windows or Mac</title>
+<meta name="description" content="Download the free Inkling beta for Windows or Mac, straight from Inkling’s official GitHub release.">
+<meta name="theme-color" content="#f9fafd">
+<link rel="icon" href="../assets/icon.svg" type="image/svg+xml">
+<link rel="preload" href="../assets/fonts/parkinsans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/site.css">
+<script>document.documentElement.classList.add('js');</script>
+</head>
+<body class="dl-page">
+<a class="skip" href="#main">Skip to content</a>
+
+<script id="inkling-release" type="application/json">{"status":"none","reason":"No approved release has been published yet."}</script>
+<script id="inkling-site" type="application/json">{"feedbackUrl":""}</script>
+
+<header class="nav">
+  <div class="container nav-row">
+    <a class="wordmark" href="../" aria-label="Inkling home"><img src="../assets/icon.svg" alt="" width="36" height="36">Inkling</a>
+    <nav aria-label="Main">
+      <ul class="nav-links">
+        <li class="nav-opt"><a href="../#write">Handwriting</a></li>
+        <li class="nav-opt"><a href="../#tutor">AI Tutor</a></li>
+        <li class="nav-opt"><a href="#help">Help</a></li>
+        <li><a class="nav-get" href="./" aria-current="page">Download</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="dl" aria-labelledby="dl-title">
+    <div class="container page">
+      <div class="margin"></div>
+      <div class="dl-main">
+        <h1 id="dl-title">Download Inkling</h1>
+        <!-- if:available -->
+        <p class="dl-meta" id="ver">Free beta, version <span class="num">{{VERSION}}</span>, released {{RELEASED}}. <a href="{{RELEASE_URL}}">What’s new</a></p>
+
+        <div class="dl-primary" id="primary" hidden>
+          <a class="btn btn--primary btn--big" id="primary-btn" href="{{WIN_URL}}" data-platform="windows"><span id="primary-label">Download for Windows</span><small id="primary-size">.exe, {{WIN_SIZE}}</small></a>
+          <p class="hand pick-note">picked for this computer</p>
+        </div>
+
+        <div class="phone-note" id="phone-note" hidden>
+          <p><strong>Inkling runs on Windows and Mac computers.</strong> Open this page on your computer to download it. There’s no phone or tablet version yet.</p>
+          <button class="btn btn--quiet" type="button" id="copy-link">Copy this page’s link</button>
+        </div>
+
+        <div class="choose">
+          <h2 class="choose-title" id="choose">Choose your computer</h2>
+          <ul class="choices" id="choices">
+            <li class="choice" data-platform="windows">
+              <a class="choice-link" href="{{WIN_URL}}" data-platform="windows">
+                <span class="choice-name">Windows</span>
+                <span class="choice-req">Windows 10 or 11, 64-bit</span>
+                <span class="choice-file">{{WIN_FILE}}, {{WIN_SIZE}}</span>
+                <span class="choice-act">Download</span>
+              </a>
+            </li>
+            <li class="choice" data-platform="macArm">
+              <a class="choice-link" href="{{MAC_ARM_URL}}" data-platform="macArm">
+                <span class="choice-name">Mac with Apple silicon</span>
+                <span class="choice-req">M1 or newer, macOS 12 or later</span>
+                <span class="choice-file">{{MAC_ARM_FILE}}, {{MAC_ARM_SIZE}}</span>
+                <span class="choice-act">Download</span>
+              </a>
+            </li>
+            <li class="choice" data-platform="macIntel">
+              <a class="choice-link" href="{{MAC_INTEL_URL}}" data-platform="macIntel">
+                <span class="choice-name">Mac with Intel</span>
+                <span class="choice-req">Intel processor, macOS 12 or later</span>
+                <span class="choice-file">{{MAC_INTEL_FILE}}, {{MAC_INTEL_SIZE}}</span>
+                <span class="choice-act">Download</span>
+              </a>
+            </li>
+          </ul>
+          <details class="aside" id="which-mac">
+            <summary>Which Mac do I have?</summary>
+            <p>Open the Apple menu and choose <em>About This Mac</em>. “Chip: Apple M1” (or M2, M3 and later) means Apple silicon. “Processor: … Intel” means Intel.</p>
+          </details>
+          <details class="aside" id="checksums">
+            <summary>Check a download (SHA-256)</summary>
+            <dl class="sums">
+              <div><dt>{{WIN_FILE}}</dt><dd class="num">{{WIN_SHA}}</dd></div>
+              <div><dt>{{MAC_ARM_FILE}}</dt><dd class="num">{{MAC_ARM_SHA}}</dd></div>
+              <div><dt>{{MAC_INTEL_FILE}}</dt><dd class="num">{{MAC_INTEL_SHA}}</dd></div>
+            </dl>
+            <p>Windows (PowerShell): <code>Get-FileHash .\Downloads\&lt;file&gt;</code>. Mac (Terminal): <code>shasum -a 256 ~/Downloads/&lt;file&gt;</code>. All three are in <a class="nowrap" href="{{CHECKSUMS_URL}}">the checksum file</a> too.</p>
+          </details>
+        </div>
+        <p class="source-note">Every file comes straight from Inkling’s official GitHub release, built and verified from commit <span class="num">{{COMMIT}}</span>.</p>
+        <!-- end:available -->
+        <!-- if:none -->
+        <div class="status" id="status" role="status">
+          <p class="status-title">No version is ready to download right now.</p>
+          <p>A new beta is being tested. When it passes and is approved, it appears on this page by itself.</p>
+        </div>
+        <!-- end:none -->
+        <noscript><p class="source-note">Your browser has JavaScript switched off, so pick your computer from the list yourself.</p></noscript>
+      </div>
+      <figure class="dl-shot">
+        <div class="shot"><img src="../assets/screenshots/write.webp" width="2880" height="1800" alt="Inkling showing a handwritten Physics page about forces on a ramp."></div>
+      </figure>
+    </div>
+  </section>
+
+  <section class="install" id="install" aria-labelledby="install-title">
+    <div class="container page">
+      <div class="margin"><p class="hand">about two minutes</p></div>
+      <div class="content narrow">
+        <h2 id="install-title">Installing</h2>
+        <p class="status-next" id="next" role="status" hidden></p>
+        <p class="caution"><strong>The first time, your computer asks if you trust Inkling.</strong> This beta isn’t code-signed yet, so Windows and macOS can’t confirm who made it. Only install Inkling from this page or its GitHub release, and don’t install it on a school or work computer without permission.</p>
+        <details class="steps-os" id="install-windows">
+          <summary>On Windows</summary>
+          <ol class="install-steps">
+            <li>Open the downloaded <code data-file="windows"><!-- if:available -->{{WIN_FILE}}<!-- end:available --><!-- if:none -->Inkling-Setup-…-x64.exe<!-- end:none --></code>, usually in your <em>Downloads</em> folder.</li>
+            <li>If you see <strong>“Windows protected your PC”</strong>, click <kbd>More info</kbd>, check the file name and <em>Unknown publisher</em>, then click <kbd>Run anyway</kbd>.</li>
+            <li>Inkling installs for your account only (no administrator password), adds Start menu and desktop shortcuts, and opens.</li>
+          </ol>
+        </details>
+        <details class="steps-os" id="install-mac">
+          <summary>On a Mac</summary>
+          <ol class="install-steps">
+            <li>Open the downloaded <code data-file="mac"><!-- if:available -->{{MAC_ARM_FILE}} or {{MAC_INTEL_FILE}}<!-- end:available --><!-- if:none -->Inkling-….dmg<!-- end:none --></code> and drag <strong>Inkling</strong> into <strong>Applications</strong>.</li>
+            <li>Open Inkling from Applications. macOS says it can’t verify the developer and won’t open it yet. Click <kbd>Done</kbd>.</li>
+            <li>Open <strong>System Settings</strong>, then <strong>Privacy &amp; Security</strong>, scroll to the message about Inkling, click <kbd>Open Anyway</kbd> and confirm with your password. You only do this once.</li>
+          </ol>
+        </details>
+        <p class="more-link">Uninstalling, checking a download and help for younger users: <a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/INSTALL.md">the full install guide</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="help" id="help" aria-labelledby="help-title">
+    <div class="container page">
+      <div class="margin"></div>
+      <div class="content narrow">
+        <h2 id="help-title">Stuck, or found a problem?</h2>
+        <div class="help-links">
+          <!-- if:feedback -->
+          <a class="btn btn--quiet" href="{{FEEDBACK_URL}}" id="feedback-btn">Send feedback</a>
+          <!-- end:feedback -->
+          <a class="btn btn--quiet" href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/SUPPORT.md">Help and common questions</a>
+        </div>
+        <!-- if:feedback -->
+        <p class="small">The feedback form takes about 3 minutes and needs no account. Please describe what happened, and don’t include notebook contents or screenshots of personal notes.</p>
+        <!-- end:feedback -->
+        <!-- if:no-feedback -->
+        <p class="small" id="feedback-fallback">Our no-account feedback form is being set up. Until then, <em>Help, then Send Feedback or Report a Problem</em> in the app opens a GitHub issue, which needs a free GitHub account and is public. Please don’t include notebook contents or screenshots of personal notes.</p>
+        <!-- end:no-feedback -->
+      </div>
+    </div>
+  </section>
+
+  <section class="needs" id="needs" aria-labelledby="needs-title">
+    <div class="container page">
+      <div class="margin"></div>
+      <div class="content narrow">
+        <h2 id="needs-title">What you need</h2>
+        <dl class="req">
+          <div><dt>Windows</dt><dd>Windows 10 or 11, 64-bit. ARM PCs run it through Windows’ built-in emulation.</dd></div>
+          <div><dt>Mac</dt><dd>macOS 12 Monterey or later, on Apple silicon (M1 or newer) or Intel.</dd></div>
+          <div><dt>Internet</dt><dd>Only for the AI tutor and update checks. Notebooks work offline.</dd></div>
+          <div><dt>Pen or touch</dt><dd>Optional: a mouse or trackpad works too. Not yet tested on real pens and touch screens.</dd></div>
+          <div><dt>Phones and tablets</dt><dd>Not supported yet: no iPad, Android or web version.</dd></div>
+        </dl>
+        <details class="aside privacy" id="privacy">
+          <summary>Your notebooks and the AI, in full</summary>
+          <ul class="list">
+            <li>Your notebooks are saved on your computer as you write, with a backup every day. There’s no account and no cloud storage.</li>
+            <li>Nothing goes to the AI until you click <em>Allow</em>, not even a check of how many answers are left. Then, when you ask, your question, the part of the page you include and the recent conversation on that page go to Inkling’s AI server and are answered by an AI model (Qwen 3.8 27B) hosted by DeepInfra, with Cloudflare Workers AI as a backup. Inkling’s server doesn’t store them. Both companies say they don’t train on them or keep them after answering, apart from limited exceptions such as support cases and legal obligations.</li>
+            <li>The AI is free, with limits: about 12 answers a day per computer, a monthly limit per computer, and a shared budget for everyone. To share it out, an anonymous installation ID and your internet address go with each question. They’re kept only as scrambled counts: daily counts are replaced every day, and each computer’s monthly count at the end of the month.</li>
+            <li>AI answers can be wrong, so check them. Please don’t send personal information.</li>
+            <li>Under 18? Inkling doesn’t check ages, and clicking <em>Allow</em> isn’t verified parental consent; one <em>Allow</em> covers everyone on that computer account. A parent or guardian should read the privacy notice, install Inkling and decide whether to allow the AI. Children’s privacy rules haven’t been reviewed by a lawyer yet.</li>
+            <li>The app has no ads or analytics. This site sets no cookies and runs no analytics; GitHub, which hosts it, may log visits like any web host.</li>
+          </ul>
+          <p class="small"><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/PRIVACY.md">Privacy notice</a>: a draft pending legal review; who runs Inkling and how to contact them are still to be added.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="container foot-row">
+    <div class="foot-mark">
+      <a class="wordmark" href="../" aria-label="Inkling home"><img src="../assets/icon.svg" alt="" width="28" height="28">Inkling</a>
+      <p>think it, ink it, master it.</p>
+    </div>
+    <ul class="foot-links">
+      <li><a href="../">Home</a></li>
+      <li><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/SUPPORT.md">Help and common questions</a></li>
+      <li><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/PRIVACY.md">Privacy notice</a></li>
+      <li><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/RELEASE_NOTES.md">Release notes</a></li>
+      <li><a href="https://github.com/SuperGithubDuo/inkling-notebook">Source code</a></li>
+      <li><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/LICENSE.txt">Licence</a></li>
+    </ul>
+  </div>
+</footer>
+
+<script src="../assets/platform.js"></script>
+<script src="../assets/download.js"></script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # Inkling documentation
 
-**Just want to use Inkling?** Go to the [download page](https://supergithubduo.github.io/inkling-notebook/) and follow the [install guide](INSTALL.md). Nothing else here is needed to use the app.
+**Just want to use Inkling?** Go to the [download page](https://supergithubduo.github.io/inkling-notebook/download/) and follow the [install guide](INSTALL.md). Nothing else here is needed to use the app.
 
 ## Using Inkling
 

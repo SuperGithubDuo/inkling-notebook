@@ -4,7 +4,7 @@ Installing Inkling and trying it takes about 10 minutes. You don't need an accou
 
 ## 1. Download the right file
 
-The easiest way: open the **[download page](https://supergithubduo.github.io/inkling-notebook/)** and click the button for your computer. It shows the current version and links straight to the official installer on GitHub.
+The easiest way: open the **[download page](https://supergithubduo.github.io/inkling-notebook/download/)** and click the button for your computer. It shows the current version and links straight to the official installer on GitHub.
 
 | Your computer | File (`<version>` is shown on the download page, e.g. `0.2.0-beta.2`) |
 |---|---|
@@ -64,7 +64,7 @@ Inkling is meant for students of every age, but it doesn't check ages, and its h
 
 ## Feedback
 
-Use **Help → Send Feedback or Report a Problem** (also in *Settings*), or the feedback link on the [download page](https://supergithubduo.github.io/inkling-notebook/#feedback). More in [SUPPORT.md](../SUPPORT.md). It takes about 3 minutes. **Please don't paste or upload notebook contents, screenshots of personal notes, or anything sensitive.** Describe what happened instead.
+Use **Help → Send Feedback or Report a Problem** (also in *Settings*), or the feedback link on the [download page](https://supergithubduo.github.io/inkling-notebook/download/#help). More in [SUPPORT.md](../SUPPORT.md). It takes about 3 minutes. **Please don't paste or upload notebook contents, screenshots of personal notes, or anything sensitive.** Describe what happened instead.
 
 ## Uninstall
 

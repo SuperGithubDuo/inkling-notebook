@@ -69,6 +69,7 @@
     "electron-vite": "^6.0.0",
     "esbuild": "^0.28.2",
     "happy-dom": "^21.0.4",
+    "hersheytext": "^2.0.0",
     "katex": "^0.18.10",
     "konva": "^10.9.0",
     "lucide-react": "^1.62.0",

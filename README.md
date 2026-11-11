@@ -8,7 +8,7 @@
 
 Handwritten notes on your computer, with an AI tutor that reads your working and marks it up on the page.
 
-[**⬇ Download Inkling**](https://supergithubduo.github.io/inkling-notebook/)
+[**⬇ Download Inkling**](https://supergithubduo.github.io/inkling-notebook/download/)
 &nbsp;·&nbsp; [Install guide](docs/INSTALL.md)
 &nbsp;·&nbsp; [User guide](docs/USER-GUIDE.md)
 &nbsp;·&nbsp; [Privacy](docs/PRIVACY.md)
@@ -16,7 +16,7 @@ Handwritten notes on your computer, with an AI tutor that reads your working and
 
 Free beta · Windows 10/11 · macOS 12 or later
 
-**Status:** public beta. The latest version is on the [download page](https://supergithubduo.github.io/inkling-notebook/); see [release notes](RELEASE_NOTES.md).
+**Status:** public beta. The latest version is on the [download page](https://supergithubduo.github.io/inkling-notebook/download/); see [release notes](RELEASE_NOTES.md).
 
 </div>
 
@@ -26,7 +26,7 @@ Free beta · Windows 10/11 · macOS 12 or later
 
 ## Download
 
-**[Go to the download page →](https://supergithubduo.github.io/inkling-notebook/)** It suggests the right file for your computer, and every download comes straight from this project's official GitHub releases. It only offers releases that passed the full build and test checks and were approved.
+**[Go to the download page →](https://supergithubduo.github.io/inkling-notebook/download/)** It suggests the right file for your computer, and every download comes straight from this project's official GitHub releases. It only offers releases that passed the full build and test checks and were approved.
 
 | Your computer | What to download |
 |---|---|

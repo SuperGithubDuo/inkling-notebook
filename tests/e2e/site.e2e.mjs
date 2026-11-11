@@ -1,14 +1,18 @@
 /**
- * Download page acceptance test: the built page (scripts/site/build-site.mjs) in a real
- * Chromium (Electron), served over HTTP, as Windows, Mac, phone and Linux visitors see it.
+ * Website acceptance test: the built site (scripts/site/build-site.mjs) in a real Chromium
+ * (Electron), served over HTTP, as Windows, Mac, phone and Linux visitors see it.
  *
- * Covers, for a published verified release and for "no release yet":
- * - which installer is recommended (hero button and "Your computer" card), including an
- *   Intel browser on an Apple-silicon Mac, and an x86 browser with WebGL unavailable, which
- *   gets both Macs (regressions, 2 Nov 2026 audit);
- * - the Mac install steps name the right file, or both when the Mac type is unknown (regression);
+ * Download page (download/), for a published verified release and for "no release yet":
+ * - which installer becomes the big button and which row is marked, including an Intel browser on
+ *   an Apple-silicon Mac, and an x86 browser with WebGL unavailable, which gets both Macs
+ *   (regressions, 2 Nov 2026 audit) and no big button;
+ * - the Mac install step names the right file, or both when the Mac type is unknown (regression);
+ * - starting a download opens the matching install steps;
  * - every download link is one of the three verified installers; none before a release;
- * - no sideways scrolling at 320, 375, 768 and 1280 px.
+ * - the links work with JavaScript switched off.
+ * Homepage: links to the download page only, the tutor steps switch, the hero takes ink from a
+ * mouse, and the old single-page anchors (#install, #feedback) land on the download page.
+ * Both pages: no sideways scrolling at 320, 375, 768, 1280 and 1920 px.
  *
  * The browser is described by stubbing what the page reads: the user agent, User-Agent Client
  * Hints (navigator.userAgentData) and the WebGL renderer name.
@@ -56,11 +60,11 @@ const release = {
 }
 const tmp = mkdtempSync(join(tmpdir(), 'inkling-site-e2e-'))
 const build = (dir, releases) =>
-  buildSite({ siteDir: join(root, 'site'), outDir: join(tmp, dir), releases, tagCommits: { [TAG]: COMMIT }, config: { withdrawn: [] }, feedbackUrl: '', allowPreview: false, generatedAt: '2026-11-10T17:05:00Z' })
+  buildSite({ siteDir: join(root, 'site'), outDir: join(tmp, dir), releases, tagCommits: { [TAG]: COMMIT }, config: { withdrawn: [] }, feedbackUrl: '', generatedAt: '2026-11-10T17:05:00Z' })
 assert.equal(build('released', [release]).release.status, 'available')
 assert.equal(build('none', []).release.status, 'none')
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.woff2': 'font/woff2', '.json': 'application/json' }
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.woff2': 'font/woff2', '.json': 'application/json' }
 const server = createServer((req, res) => {
   const path = decodeURIComponent((req.url ?? '/').split('?')[0])
   const file = join(tmp, path.endsWith('/') ? `${path}index.html` : path)
@@ -110,96 +114,171 @@ delete env.ELECTRON_RUN_AS_NODE
 const app = await electron.launch({ executablePath: electronPath, args: ['--no-sandbox', join(root, 'tests/support/siteBrowser.cjs')], env })
 const page = await app.firstWindow()
 
-async function visit(site, who, width = 1280) {
+async function open(path, who, width = 1280, { js = true } = {}) {
   const v = VISITORS[who]
   await app.evaluate(({ BrowserWindow }, ua) => BrowserWindow.getAllWindows()[0].webContents.setUserAgent(ua), v.ua)
   await page.setViewportSize({ width, height: 900 })
   await page.addInitScript(describeBrowser, v)
-  await page.goto(`${base}/${site}/`)
-  // The page renders after its asynchronous browser check.
-  await page.waitForFunction(() => document.getElementById('platforms').children.length === 3)
+  if (!js) await page.route('**/*.js', (r) => r.abort())
+  await page.goto(`${base}/${path}`)
+  if (!js) await page.unroute('**/*.js')
+}
+
+/** The download page as a visitor sees it once its script has run. */
+async function visit(site, who, width = 1280) {
+  await open(`${site}/download/`, who, width)
+  // The page script runs after its asynchronous browser check.
+  await page.waitForFunction(() => document.documentElement.dataset.ready === '1')
   return page.evaluate(() => {
     const shown = (e) => !!e && !e.closest('[hidden]') && e.getClientRects().length > 0
     const hrefs = [...document.querySelectorAll('a[href]')].map((a) => a.getAttribute('href'))
+    const primary = document.getElementById('primary-btn')
     return {
-      hero: [...document.querySelectorAll('#cta-row a.btn')].filter(shown).map((a) => a.getAttribute('href')),
-      recommended: [...document.querySelectorAll('#platforms .card.recommended h3')].map((h) => h.textContent),
-      cards: [...document.querySelectorAll('#platforms .card a.btn')].map((a) => a.getAttribute('href')),
+      big: shown(primary) ? primary.getAttribute('href') : null,
+      bigLabel: shown(primary) ? primary.textContent.trim() : null,
+      yours: [...document.querySelectorAll('.choice.is-yours')].map((li) => li.dataset.platform),
+      rows: [...document.querySelectorAll('.choice-link')].map((a) => a.getAttribute('href')),
       macGuide: document.querySelector('[data-file="mac"]').textContent,
       winGuide: document.querySelector('[data-file="windows"]').textContent,
-      macTab: document.getElementById('tab-mac').getAttribute('aria-selected') === 'true',
+      whichMacOpen: !!document.getElementById('which-mac')?.open,
       status: shown(document.getElementById('status')),
-      mobileNote: shown(document.getElementById('mobile-note')),
+      phoneNote: shown(document.getElementById('phone-note')),
       downloads: hrefs.filter((h) => /\/releases\/download\//.test(h)),
       sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
   })
 }
 const url = (k) => PREFIX + names[k]
+const sideways = () => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
 
 try {
-  console.log('site')
+  console.log('download page')
   let r = await visit('released', 'windows')
-  assert.deepEqual(r.hero, [url('windows')])
-  assert.deepEqual(r.recommended, ['Windows'])
+  assert.equal(r.big, url('windows'))
+  assert.match(r.bigLabel, /Download for Windows/)
+  assert.deepEqual(r.yours, ['windows'])
   assert.equal(r.winGuide, names.windows)
-  assert.equal(r.macTab, false)
-  await page.screenshot({ path: join(shots, 'site-windows.png'), fullPage: true })
-  step('Windows: the Windows installer first, with its file name in the steps')
+  assert.equal(r.status, false)
+  await page.screenshot({ path: join(shots, 'site-download-windows.png'), fullPage: true })
+  step('Windows: the Windows installer is the big button and its row is marked')
+
+  // Starting a download opens the matching install steps (the download itself is left to the browser).
+  await page.evaluate(() => document.querySelectorAll('a[data-platform]').forEach((a) => a.addEventListener('click', (e) => e.preventDefault())))
+  await page.click('#primary-btn')
+  assert.equal(await page.evaluate(() => document.getElementById('install-windows').open), true)
+  assert.equal(await page.evaluate(() => document.getElementById('install-mac').open), false)
+  assert.match(await page.textContent('#next'), /download has started/)
+  step('clicking Download opens the Windows install steps')
 
   r = await visit('released', 'macArmChrome')
-  assert.deepEqual(r.hero, [url('macArm')])
-  assert.deepEqual(r.recommended, ['Mac with Apple silicon'])
+  assert.equal(r.big, url('macArm'))
+  assert.deepEqual(r.yours, ['macArm'])
   assert.equal(r.macGuide, names.macArm)
-  assert.equal(r.macTab, true)
   r = await visit('released', 'macRosettaChrome')
-  assert.deepEqual(r.hero, [url('macArm')], 'an Intel browser on Apple silicon still gets the Apple-silicon build')
+  assert.equal(r.big, url('macArm'), 'an Intel browser on Apple silicon still gets the Apple-silicon build')
   assert.equal(r.macGuide, names.macArm)
   r = await visit('released', 'macIntelChrome')
-  assert.deepEqual(r.hero, [url('macIntel')])
-  assert.deepEqual(r.recommended, ['Mac with Intel'])
+  assert.equal(r.big, url('macIntel'))
+  assert.deepEqual(r.yours, ['macIntel'])
   assert.equal(r.macGuide, names.macIntel)
   r = await visit('released', 'macX86NoWebgl')
-  assert.deepEqual(r.hero, [url('macArm'), url('macIntel')], 'x86 without a GPU name could be either Mac: both offered')
-  assert.deepEqual(r.recommended, [])
+  assert.equal(r.big, null, 'x86 without a GPU name could be either Mac: no big button')
+  assert.deepEqual(r.yours, ['macArm', 'macIntel'])
+  assert.equal(r.whichMacOpen, true)
   assert.equal(r.macGuide, `${names.macArm} or ${names.macIntel}`)
-  step('Mac: Apple silicon and Intel told apart, including an Intel browser under Rosetta; x86 without WebGL offers both')
+  step('Mac: Apple silicon and Intel told apart, including an Intel browser under Rosetta; x86 without WebGL marks both')
 
   r = await visit('released', 'macSafari')
-  assert.deepEqual(r.hero, [url('macArm'), url('macIntel')], 'unsure which Mac: both offered')
+  assert.equal(r.big, null, 'unsure which Mac: both marked, no big button')
+  assert.deepEqual(r.yours, ['macArm', 'macIntel'])
   assert.equal(r.macGuide, `${names.macArm} or ${names.macIntel}`)
-  assert.equal(r.macTab, true)
-  await page.screenshot({ path: join(shots, 'site-mac-safari.png'), fullPage: true })
-  step('Safari (Mac type hidden): both Mac installers offered; the steps name both files')
+  await page.screenshot({ path: join(shots, 'site-download-mac-safari.png'), fullPage: true })
+  step('Safari (Mac type hidden): both Mac installers marked; the steps name both files')
 
   r = await visit('released', 'iphone', 375)
-  assert.deepEqual(r.hero, [], 'no download button at the top on a phone')
-  assert.equal(r.mobileNote, true)
-  assert.deepEqual(r.recommended, [])
-  await page.screenshot({ path: join(shots, 'site-iphone.png'), fullPage: true })
+  assert.equal(r.big, null, 'no big download button on a phone')
+  assert.equal(r.phoneNote, true)
+  assert.deepEqual(r.yours, [])
+  await page.screenshot({ path: join(shots, 'site-download-iphone.png'), fullPage: true })
   r = await visit('released', 'linux')
-  assert.deepEqual(r.hero, [url('windows'), url('macArm'), url('macIntel')])
+  assert.equal(r.big, null)
+  assert.deepEqual(r.rows, [url('windows'), url('macArm'), url('macIntel')])
   assert.equal(r.macGuide, `${names.macArm} or ${names.macIntel}`)
   step('phones explain there is no phone version; other computers see all three installers')
 
   for (const site of ['released', 'none']) {
-    for (const width of [320, 375, 768, 1280]) {
+    for (const width of [320, 375, 768, 1280, 1920]) {
       r = await visit(site, width < 768 ? 'iphone' : 'windows', width)
-      assert.equal(r.sideways, false, `${site} at ${width} px scrolls sideways`)
-      const allowed = site === 'released' ? Object.keys(names).map(url) : []
+      assert.equal(r.sideways, false, `${site}/download at ${width} px scrolls sideways`)
+      const allowed = site === 'released' ? [...Object.keys(names).map(url), PREFIX + checksumsName(V)] : []
       for (const h of r.downloads) assert.ok(allowed.includes(h), `${site}: unexpected download link ${h}`)
       if (site === 'none') assert.deepEqual(r.downloads, [], 'no download links before a release')
+      await open(`${site}/`, width < 768 ? 'iphone' : 'windows', width)
+      assert.equal(await sideways(), false, `${site} homepage at ${width} px scrolls sideways`)
     }
   }
   r = await visit('none', 'windows')
   assert.equal(r.status, true)
-  assert.deepEqual(r.cards, [null, null, null], 'buttons are disabled before a release')
-  await page.screenshot({ path: join(shots, 'site-none.png'), fullPage: true })
-  step('no sideways scrolling at 320–1280 px; links only to verified installers; none before a release')
+  assert.equal(r.big, null)
+  assert.deepEqual(r.rows, [], 'no installer rows before a release')
+  await page.screenshot({ path: join(shots, 'site-download-none.png'), fullPage: true })
+  step('no sideways scrolling at 320–1920 px; links only to verified installers; none before a release')
 
-  console.log('\nDownload site acceptance: all checks passed')
+  await open('released/download/', 'windows', 1280, { js: false })
+  assert.deepEqual(await page.$$eval('.choice-link', (as) => as.map((a) => a.getAttribute('href'))), [url('windows'), url('macArm'), url('macIntel')])
+  assert.equal(await page.isVisible('.choice-link'), true)
+  step('with JavaScript off, the three verified installers are still listed and linked')
+
+  console.log('homepage')
+  await open('released/', 'windows', 1440)
+  const home = await page.evaluate(() => ({
+    downloads: [...document.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')).filter((h) => /releases\/download/.test(h)),
+    ctas: [...document.querySelectorAll('a.btn--primary')].map((a) => a.getAttribute('href'))
+  }))
+  assert.deepEqual(home.downloads, [], 'the homepage links the download page, never a file')
+  assert.deepEqual(home.ctas, ['download/', 'download/'])
+  await page.screenshot({ path: join(shots, 'site-home.png'), fullPage: false })
+
+  const panel = () => page.evaluate(() => [...document.querySelectorAll('.step-panel')].filter((p) => !p.hidden).map((p) => p.id))
+  assert.deepEqual(await panel(), ['panel-ask'])
+  await page.click('#tab-mark')
+  assert.deepEqual(await panel(), ['panel-mark'])
+  await page.focus('#tab-mark')
+  await page.keyboard.press('ArrowRight')
+  assert.deepEqual(await panel(), ['panel-keep'])
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'tab-keep')
+  step('the tutor steps switch by click and arrow keys')
+
+  const inked = () => page.evaluate(() => {
+    const c = document.getElementById('ink')
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data
+    let n = 0
+    for (let i = 3; i < d.length; i += 4) if (d[i]) n++
+    return n
+  })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  const box = await page.locator('.opening').boundingBox()
+  await page.mouse.move(box.x + box.width - 60, box.y + 20)
+  await page.mouse.down()
+  for (let i = 1; i <= 12; i++) await page.mouse.move(box.x + box.width - 60 + i * 8, box.y + 20 + (i % 4) * 6)
+  await page.mouse.up()
+  assert.ok((await inked()) > 50, 'a mouse stroke leaves ink on the hero')
+  await page.waitForFunction(() => {
+    const c = document.getElementById('ink')
+    return !c.getContext('2d').getImageData(0, 0, c.width, c.height).data.some((v, i) => i % 4 === 3 && v)
+  }, null, { timeout: 6000 })
+  step('the hero takes ink from a mouse, and it fades away')
+
+  for (const [hash, to] of [['#install', '/released/download/#install'], ['#feedback', '/released/download/#help'], ['#download', '/released/download/']]) {
+    await page.goto('about:blank') // a fresh visit, as from a link in old release notes
+    await page.goto(`${base}/released/${hash}`)
+    await page.waitForURL((u) => u.pathname + u.hash === to)
+  }
+  step('old links to #download, #install and #feedback land on the download page')
+
+  console.log('\nWebsite acceptance: all checks passed')
 } catch (err) {
-  console.error('\nDownload site acceptance FAILED:', err)
+  console.error('\nWebsite acceptance FAILED:', err)
   await page.screenshot({ path: join(shots, 'site-failure.png'), fullPage: true }).catch(() => undefined)
   process.exitCode = 1
 } finally {

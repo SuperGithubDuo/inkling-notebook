@@ -74,7 +74,7 @@ If anything failed, the draft says **DO NOT PUBLISH** instead and carries no mar
 |---|---|---|
 | `INKLING_BETA_URL` | Variable | The cloud AI beta server built into the app (`https://inkling-ai-beta.<you>.workers.dev`). Leave unset to ship without cloud AI. |
 | `INKLING_FEEDBACK_URL` | Variable | Where *Send feedback* goes: an `https://` form or a `mailto:` address. The default is a new GitHub issue, which needs a GitHub account. |
-| `INKLING_DOWNLOAD_PAGE_URL` | Variable | Optional. The download page linked from release notes. Default `https://supergithubduo.github.io/inkling-notebook/`. |
+| `INKLING_DOWNLOAD_PAGE_URL` | Variable | Optional. The download page linked from release notes. Default `https://supergithubduo.github.io/inkling-notebook/download/`. |
 | `INKLING_SITE_ENABLED` | Variable | Kill switch: `false` stops the *Download site* workflow from deploying. Deploys otherwise happen only when *Settings → Pages → Source* is *GitHub Actions*. |
 | `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD` | Secrets | Developer ID Application certificate (`.p12`, base64-encoded) and its password. |
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | Secrets | Notarization with Apple. |
@@ -199,13 +199,14 @@ Fallback: push a branch `ops/summary`, `ops/pause` or `ops/resume`, then delete 
 
 How an approved build reaches a first-time user in one click, and why an unapproved or failed build never can.
 
-**Status:** live since 3 Nov 2026 (GitHub Pages, deployed from `main`). It offers the newest approved release (`v0.2.0-beta.2`, published 3 Nov 2026, until the next one is published).
+**Status:** live since 3 Nov 2026 (GitHub Pages, deployed from `main`). It always offers the newest approved release.
 
-- Address (GitHub Pages, free): `https://supergithubduo.github.io/inkling-notebook/`
-- Source: `site/` (one page, no frameworks, no third-party requests, fonts and images self-hosted)
+- Address (GitHub Pages, free): `https://supergithubduo.github.io/inkling-notebook/` (homepage) and `…/download/` (download page). Old links to `#download`, `#install` and `#feedback` on the homepage forward to the download page.
+- Source: `site/` (two pages, no frameworks, no third-party requests, fonts and images self-hosted). `site/index.html` is the homepage, `site/download/index.html` the download page; `site/assets/site.css` styles both (design tokens in `tokens.css`, the design notes in the stamp at the top of `site.css`).
 - Build: `scripts/site/build-site.mjs` · Deploy gate: `scripts/site/check-site.mjs` · Rules: `scripts/release/rules.mjs`
-- Workflow: `.github/workflows/pages.yml` · Tests: `tests/unit/release-site.test.ts` and `tests/unit/site-platform.test.ts` (part of `npm test`); `tests/e2e/site.e2e.mjs` (`npm run test:e2e:site`: the built page in Chromium as Windows, Mac, phone and Linux visitors, 320–1280 px)
+- Workflow: `.github/workflows/pages.yml` · Tests: `tests/unit/release-site.test.ts` and `tests/unit/site-platform.test.ts` (part of `npm test`); `tests/e2e/site.e2e.mjs` (`npm run test:e2e:site`: both built pages in Chromium as Windows, Mac, phone and Linux visitors, 320–1920 px, with and without JavaScript)
 - Which installer is recommended: `site/assets/platform.js` (Windows; Apple-silicon vs Intel Mac from the GPU name, then the browser's own architecture; both Macs when unsure, as in Safari; all three on other computers; none at the top on phones)
+- **A GitHub hiccup can't downgrade the page.** The build fetches every page of releases and retries network errors, server errors and rate limits; if GitHub still doesn't answer, the build fails and the last good page stays live. Only an answer from GitHub (a tag that doesn't exist) counts as a reason to refuse a release. Before Nov 2026 a failed tag lookup was silently treated as "unverifiable", so one bad API call could deploy an older release or "no download yet" over a good page.
 
 ### From commit to download
 
@@ -230,7 +231,7 @@ How an approved build reaches a first-time user in one click, and why an unappro
    - `latest.yml` and `latest-mac.yml` name this version, and every file they point at exists with the SHA-512 and size they claim (so in-app update checks won't break).
    Then it replaces the two per-OS checksum files with **one** `Inkling-<version>-SHA256SUMS.txt` and writes the notes (below) with a hidden marker recording version, commit, run and the three SHA-256s.
 3. **Approve.** You press **Publish** on the draft. Nothing in any workflow publishes; the `draft` job refuses to modify an already published release.
-4. **Site follows.** Publishing (or editing, unpublishing, deleting) a release triggers the *Download site* workflow, which hands over to a run on `main`, rebuilds the page and deploys it. A 3-hourly run is a safety net. The page embeds the chosen release at build time; visitors' browsers never query GitHub.
+4. **Site follows.** Publishing (or editing, unpublishing, deleting) a release triggers the *Download site* workflow, which hands over to a run on `main`, rebuilds the pages and deploys them. A 3-hourly run is a safety net. The download page has the chosen release written into it at build time, as plain links that work without JavaScript; visitors' browsers never query GitHub. GitHub Pages caches pages for up to 10 minutes, so a just-published release can take that long to appear.
 
 ### Why a bad build can't be downloaded from the site
 
@@ -242,19 +243,26 @@ How an approved build reaches a first-time user in one click, and why an unappro
 | Installer replaced after verification | GitHub's digest no longer matches the marker → not offered |
 | Tag moved to another commit | Tag commit ≠ verified commit → not offered |
 | Release later found bad | Add its tag to `withdrawn` in `site/config.json` (or write WITHDRAWN in its notes): the page falls back to the previous good release, or to "no download yet" |
-| Anything else on the page | `check-site.mjs` fails the deploy if the page links to workflow runs/artifacts, draft (`untagged-`) URLs, any download link outside the verified data, or has preview mode on |
+| Anything else on the pages | `check-site.mjs` fails the deploy if any page links to workflow runs/artifacts, draft (`untagged-`) URLs or any release file other than the three verified installers and the checksum file, if the homepage links a release file at all, or if a template part was left unfilled |
+| GitHub's API fails during the build | The build stops and nothing is deployed: the current page stays |
 
 Every row is a unit test in `tests/unit/release-site.test.ts`, including the real shape of the failed Beta 2 draft of 31 Oct.
 
 ### What users see
 
-**Page** (`site/index.html`):
-- Hero with the version, a *Beta* label, release date and release-notes link, and **one big button for the visitor's computer** (Windows, or the right Mac when the browser can tell; otherwise both Mac buttons with "Which Mac do I have?").
-- Three platform cards with file name, size, requirements and SHA-256.
-- Install guide (Windows and Mac tabs) with the unsigned-build warning, system requirements, privacy summary, feedback.
-- No approved release: buttons are shown disabled with "No download is available yet" and a plain explanation.
+**Homepage** (`site/index.html`): the slogan beside a real screenshot of the AI Tutor marking up a page (visitors can write on the hero with a mouse or pen; the ink fades), handwriting, the tutor's three steps (ask, see the marks, keep what helps), the demo film, notebooks and PDFs, and a closing *Download Inkling*. Every download button goes to the download page; the homepage never links a file.
+
+**Download page** (`site/download/index.html`):
+- The version, *free beta*, release date and *What's new* link; **one big button for the visitor's computer** (Windows, or the right Mac when the browser can tell). When it can't tell which Mac, both Mac rows are marked and *Which Mac do I have?* opens.
+- *Choose your computer*: the three installers with requirements, file name and size; checksums folded away.
+- Install steps for Windows and Mac, folded until needed; they open by themselves when a download starts. The unsigned-build warning, help and feedback, requirements, and the full AI and privacy notes (folded).
+- No approved release: "No version is ready to download right now", no links at all.
 - Phones and tablets: a note that Inkling is for Windows and Mac, with *Copy this page's link*; the downloads stay listed.
-- Light and dark themes, keyboard navigation, no horizontal scrolling at phone width.
+- Keyboard navigation, no horizontal scrolling from 320 px to 1920 px, and it works with JavaScript switched off.
+
+**Screenshots** (`site/assets/screenshots/`): `write`, `notebooks` and `pdf` are captured from the real app by `npm run build && xvfb-run -a node scripts/site/capture-screenshots.mjs` (a throwaway data folder; ink drawn with the real pen tool). The `tutor-*` files are real tutor answers (local Qwen3-VL 4B); the page uses crops of them (`hero-tutor`, `step-*`). Recapture them with the cloud tutor when convenient.
+
+**Demo film:** put the video (MP4, H.264) and a poster under `site/assets/demo/` and set `"demoVideo": { "src": "assets/demo/<file>.mp4", "poster": "assets/demo/<poster>.webp" }` in `site/config.json`. Until then the homepage says the demo is being filmed.
 
 **Release page** (`.github/release-notes.md`): a download table with direct links at the top, then the security-prompt explanation, checksums folded away, privacy and feedback. It tells readers to ignore `.zip`, `.blockmap` and `.yml` files. Those must stay on the release: electron-updater reads `latest*.yml`, signed macOS updates need the `.zip`, and `.blockmap` files make updates smaller.
 
@@ -262,11 +270,11 @@ Every row is a unit test in `tests/unit/release-site.test.ts`, including the rea
 
 ```bash
 node scripts/site/build-site.mjs --out _site     # live data from GitHub
-# then open site/index.html in a browser and add ?preview=sample to the address
-# to see the layout with made-up data (download buttons switched off)
+node scripts/site/check-site.mjs _site
+cd _site && python3 -m http.server 8000           # then open http://localhost:8000/ and /download/
 ```
 
-The `?preview=sample` mode exists only in the unbuilt source; the build turns it off and `check-site.mjs` enforces that.
+To see the "no release" page, build from an empty list: `echo '[]' > /tmp/none.json && node scripts/site/build-site.mjs --releases-file /tmp/none.json --out _site`.
 
 ### Settings
 
