@@ -1,6 +1,6 @@
 # Developing Inkling
 
-This page is for people who build Inkling from source. **To use Inkling you don't need any of this:** download the installer from the [download page](https://supergithubduo.github.io/inkling-notebook/) instead.
+This page is for people who build Inkling from source. **To use Inkling you don't need any of this:** download the installer from the [download page](https://supergithubduo.github.io/inkling-notebook/download/) instead.
 
 - [Requirements](#requirements) · [Install and run](#install-and-run) · [Testing](#testing) · [Continuous integration](#continuous-integration)
 - Related: [Architecture](ARCHITECTURE.md) · [AI providers](AI.md) · [Building and releasing](RELEASING.md) · [Known limitations](USER-GUIDE.md#known-limitations)

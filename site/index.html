@@ -1,530 +1,205 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-GB">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Download Inkling</title>
-<meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="Inkling is a handwriting notebook for Windows and Mac with a free AI tutor that reads your working. Download the free beta.">
-<meta property="og:title" content="Inkling — write by hand, get unstuck">
-<meta property="og:description" content="Handwritten notes on your computer, with an AI tutor that reads your working and marks it up on the page.">
-<meta property="og:image" content="https://supergithubduo.github.io/inkling-notebook/assets/screenshots/tutor-markup.webp">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inkling: a handwriting notebook with an AI tutor</title>
+<meta name="description" content="Inkling is a handwriting notebook for Windows and Mac with a free AI tutor that reads your working and marks it up on your page.">
+<meta property="og:title" content="Inkling: think it, ink it, master it.">
+<meta property="og:description" content="A handwriting notebook with an AI tutor that reads your working. Free beta for Windows and Mac.">
+<meta property="og:image" content="assets/screenshots/hero-tutor.webp">
+<meta name="theme-color" content="#f9fafd">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-<!--INKLING_PREVIEW_HEAD-->
-<style>
-/* Layout: one column of "pages" on paper; the hero sits on the app's grid paper with handwritten (Caveat) margin notes, like the tutor's own markup. */
-@font-face { font-family: "Inter"; font-weight: 400; font-display: swap; src: url("assets/fonts/inter-latin-400-normal.woff2") format("woff2"); }
-@font-face { font-family: "Inter"; font-weight: 500; font-display: swap; src: url("assets/fonts/inter-latin-500-normal.woff2") format("woff2"); }
-@font-face { font-family: "Inter"; font-weight: 600; font-display: swap; src: url("assets/fonts/inter-latin-600-normal.woff2") format("woff2"); }
-@font-face { font-family: "Inter"; font-weight: 700; font-display: swap; src: url("assets/fonts/inter-latin-700-normal.woff2") format("woff2"); }
-@font-face { font-family: "Caveat"; font-weight: 600; font-display: swap; src: url("assets/fonts/caveat-latin-600-normal.woff2") format("woff2"); }
-
-:root {
-  /* Inkling's own app palette (src/renderer/src/index.css) */
-  --paper: #fdfcfa;
-  --shell: #f6f6f7;
-  --panel: #ffffff;
-  --ink: #1f2430;
-  --ink-soft: #5b6170;
-  --line: #e7e7ea;
-  --grid: #eceef3;
-  --accent: #2f6be4;
-  --accent-strong: #2459c9;
-  --accent-soft: #e6eefc;
-  --lav: #6d63f0;
-  --lav-soft: #eceafd;
-  --mark: #e5484d;
-  --warn-bg: #fff6e5;
-  --warn-line: #f1d7a6;
-  --warn-ink: #6b4a0f;
-  --on-accent: #ffffff;
-  --shadow: 0 1px 2px rgb(31 36 48 / .06), 0 8px 24px rgb(31 36 48 / .06);
-  --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-hand: "Caveat", "Segoe Print", "Bradley Hand", cursive;
-  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
-  --r: 14px;
-}
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --paper: #15171c; --shell: #1b1e24; --panel: #20242b; --ink: #eceef2; --ink-soft: #a3a9b6; --line: #2e333c; --grid: #22262e;
-  --accent: #6b9bff; --accent-strong: #8db2ff; --accent-soft: #1f2c47; --lav: #9a93ff; --lav-soft: #2a2849; --mark: #ff7a7e;
-  --warn-bg: #2d2516; --warn-line: #574423; --warn-ink: #f2d39a; --on-accent: #0f1320; --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 8px 24px rgb(0 0 0 / .25);
-  color-scheme: dark } }
-:root[data-theme="dark"] {
-  --paper: #15171c; --shell: #1b1e24; --panel: #20242b; --ink: #eceef2; --ink-soft: #a3a9b6; --line: #2e333c; --grid: #22262e;
-  --accent: #6b9bff; --accent-strong: #8db2ff; --accent-soft: #1f2c47; --lav: #9a93ff; --lav-soft: #2a2849; --mark: #ff7a7e;
-  --warn-bg: #2d2516; --warn-line: #574423; --warn-ink: #f2d39a; --on-accent: #0f1320; --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 8px 24px rgb(0 0 0 / .25);
-  color-scheme: dark }
-
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
-@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; animation: none !important; } }
-body { margin: 0; background: var(--paper); color: var(--ink); font: 400 16px/1.6 var(--font-ui); }
-img { max-width: 100%; height: auto; }
-a { color: var(--accent); text-underline-offset: 3px; }
-a:hover { color: var(--accent-strong); }
-:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
-code, .mono { font-family: var(--font-mono); font-size: .88em; }
-h1, h2, h3 { text-wrap: balance; line-height: 1.15; margin: 0; }
-p { margin: 0; }
-[hidden] { display: none !important; }
-
-.wrap { width: 100%; max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
-.hand { font-family: var(--font-hand); font-weight: 600; }
-
-/* Top bar */
-.top { border-bottom: 1px solid var(--line); background: var(--paper); }
-.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 14px; }
-.brand { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font-weight: 700; font-size: 1.15rem; letter-spacing: -.01em; }
-.brand img { width: 32px; height: 32px; }
-.nav { display: flex; gap: 20px; flex-wrap: wrap; font-size: .94rem; }
-.nav a { color: var(--ink-soft); text-decoration: none; font-weight: 500; }
-.nav a:hover { color: var(--ink); }
-@media (max-width: 560px) { .nav .opt { display: none; } }
-
-/* Preview banner (local preview only) */
-.preview-bar { background: var(--lav-soft); color: var(--ink); font-size: .9rem; }
-.preview-bar .wrap { padding-block: 8px; }
-
-/* Hero on grid paper */
-.hero { background-color: var(--paper); background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 28px 28px; background-position: -1px -1px; border-bottom: 1px solid var(--line); }
-.hero .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 48px; align-items: center; padding-block: 56px 64px; }
-@media (max-width: 900px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 36px; padding-block: 36px 44px; } }
-.hero h1 { font-size: clamp(2.3rem, 5.4vw, 3.6rem); font-weight: 700; letter-spacing: -.035em; }
-.hero h1 .hand { color: var(--lav); font-size: 1.12em; letter-spacing: 0; display: inline-block; transform: rotate(-2deg); }
-.lede { margin-top: 18px; font-size: 1.15rem; color: var(--ink-soft); max-width: 34em; }
-
-.nowrap { white-space: nowrap; }
-.ver { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 24px; font-size: .88rem; color: var(--ink-soft); }
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; font-size: .82rem; }
-.chip.beta { background: var(--lav-soft); color: var(--lav); }
-
-.cta { margin-top: 22px; display: grid; gap: 12px; }
-.cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.btn { display: inline-flex; align-items: center; gap: 12px; padding: 14px 22px; border-radius: 12px; background: var(--accent); color: var(--on-accent); text-decoration: none; font-weight: 600; font-size: 1.04rem; border: 1px solid transparent; transition: background .15s, transform .15s; }
-.btn:hover { background: var(--accent-strong); color: var(--on-accent); transform: translateY(-1px); }
-.btn small { display: block; font-weight: 400; font-size: .8rem; opacity: .85; }
-.btn svg { flex: none; }
-.btn.secondary { background: var(--panel); color: var(--ink); border-color: var(--line); }
-.btn.secondary:hover { border-color: var(--accent); color: var(--ink); }
-.btn[data-preview] { pointer-events: none; }
-.btn[aria-disabled="true"]:not([data-preview]) { background: var(--shell); color: var(--ink-soft); border-color: var(--line); pointer-events: none; }
-.cta-note { font-size: .9rem; color: var(--ink-soft); }
-.cta-note a { font-weight: 500; }
-.scribble { font-family: var(--font-hand); font-weight: 600; color: var(--mark); font-size: 1.35rem; line-height: 1.1; display: inline-flex; align-items: center; gap: 4px; transform: rotate(-3deg); }
-@media (max-width: 560px) { .scribble { display: none; } }
-
-.status { margin-top: 22px; padding: 16px 18px; border-radius: var(--r); background: var(--panel); border: 1px dashed var(--line); display: grid; gap: 6px; max-width: 36em; }
-.status strong { font-size: 1.02rem; }
-.status p { color: var(--ink-soft); font-size: .95rem; }
-
-.shot { position: relative; margin: 0; }
-.shot img { display: block; border-radius: 12px; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--panel); aspect-ratio: 1536 / 960; width: 100%; }
-.shot figcaption { font-family: var(--font-hand); font-weight: 600; color: var(--lav); font-size: 1.3rem; margin-top: 10px; text-align: right; transform: rotate(-1.5deg); }
-
-.mobile-note { margin-top: 22px; padding: 14px 16px; border-radius: var(--r); background: var(--accent-soft); color: var(--ink); font-size: .95rem; display: grid; gap: 10px; }
-.mobile-note button { justify-self: start; }
-
-/* Sections */
-section { padding-block: 64px; }
-section + section { border-top: 1px solid var(--line); }
-.sec-head { display: grid; gap: 8px; margin-bottom: 28px; max-width: 42em; }
-.sec-head h2 { font-size: clamp(1.6rem, 3vw, 2.1rem); letter-spacing: -.02em; }
-.sec-head p { color: var(--ink-soft); }
-.eyebrow { text-transform: uppercase; letter-spacing: .09em; font-size: .76rem; font-weight: 600; color: var(--accent); }
-
-/* Platform cards */
-.platforms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-@media (max-width: 900px) { .platforms { grid-template-columns: minmax(0, 1fr); } }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 22px; display: grid; grid-template-rows: auto auto 1fr auto auto; gap: 12px; min-width: 0; }
-.card.recommended { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.card-icon { width: 44px; height: 44px; border-radius: 11px; background: var(--accent-soft); color: var(--accent-strong); display: grid; place-items: center; }
-.card h3 { font-size: 1.2rem; letter-spacing: -.01em; }
-.card .req { color: var(--ink-soft); font-size: .93rem; }
-.card .file { font-family: var(--font-mono); font-size: .8rem; color: var(--ink-soft); overflow-wrap: anywhere; }
-.card .btn { justify-content: center; width: 100%; }
-.badge-rec { font-size: .74rem; font-weight: 600; color: var(--accent-strong); background: var(--accent-soft); padding: 3px 9px; border-radius: 999px; }
-details.sum { font-size: .82rem; color: var(--ink-soft); }
-details.sum summary { cursor: pointer; }
-details.sum code { display: block; margin-top: 6px; overflow-wrap: anywhere; color: var(--ink); background: var(--shell); padding: 8px 10px; border-radius: 8px; }
-
-.which-mac { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; font-size: .94rem; color: var(--ink-soft); }
-.which-mac strong { color: var(--ink); }
-
-.no-need { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 8px; }
-.no-need span { font-size: .88rem; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-soft); }
-.no-need span s { text-decoration-color: var(--mark); text-decoration-thickness: 2px; color: var(--ink); }
-
-/* Install guide */
-.callout { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; padding: 18px 20px; border-radius: var(--r); background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-ink); margin-bottom: 28px; max-width: 52em; }
-.callout strong { color: var(--warn-ink); }
-.callout p + p { margin-top: 8px; }
-.tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--shell); border: 1px solid var(--line); margin-bottom: 20px; flex-wrap: wrap; }
-.tabs button { font: 500 .95rem var(--font-ui); border: 0; background: transparent; color: var(--ink-soft); padding: 8px 16px; border-radius: 9px; cursor: pointer; }
-.tabs button[aria-selected="true"] { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
-ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; display: grid; gap: 14px; max-width: 46em; }
-ol.steps li { counter-increment: s; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; align-items: start; }
-ol.steps li::before { content: counter(s); width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; font-size: .95rem; }
-ol.steps li > div { padding-top: 5px; }
-.kbd { font-weight: 600; }
-.more { margin-top: 22px; font-size: .95rem; }
-
-/* Requirements */
-.req-table { width: 100%; border-collapse: collapse; font-size: .95rem; }
-.req-table th, .req-table td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
-.req-table th { font-weight: 600; width: 32%; }
-.table-scroll { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); }
-.table-scroll tr:last-child th, .table-scroll tr:last-child td { border-bottom: 0; }
-
-/* Two-column info */
-.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; }
-@media (max-width: 800px) { .cols { grid-template-columns: minmax(0, 1fr); gap: 48px; } }
-.list { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; color: var(--ink); }
-.list li::marker { color: var(--accent); }
-
-footer { border-top: 1px solid var(--line); background: var(--shell); font-size: .88rem; color: var(--ink-soft); }
-footer .wrap { padding-block: 28px; display: flex; flex-wrap: wrap; gap: 12px 28px; justify-content: space-between; }
-footer nav { display: flex; flex-wrap: wrap; gap: 8px 18px; }
-footer a { color: var(--ink-soft); }
-</style>
+<link rel="preload" href="assets/fonts/parkinsans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/site.css">
+<script>
+  document.documentElement.classList.add('js');
+  // The old single-page download site used these anchors; release notes and docs still link them.
+  (function () {
+    var moved = { '#download': '', '#install': '#install', '#feedback': '#help', '#requirements': '#needs' };
+    if (Object.prototype.hasOwnProperty.call(moved, location.hash)) location.replace('download/' + moved[location.hash]);
+  })();
+</script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 
-<script id="inkling-release" type="application/json">{"status":"none","reason":"No approved release has been published yet."}</script>
-<script id="inkling-site" type="application/json">{"feedbackUrl":"","allowPreview":true}</script>
-
-<div class="preview-bar" id="preview-bar" hidden><div class="wrap"><strong>Preview with sample data.</strong> Version, sizes and checksums are made up and the download buttons are switched off. <a href="./">Show the real status</a></div></div>
-
-<header class="top">
-  <div class="wrap">
-    <a class="brand" href="#top" aria-label="Inkling home"><img src="assets/icon.svg" alt="" width="32" height="32">Inkling</a>
-    <nav class="nav" aria-label="Page">
-      <a href="#download">Download</a>
-      <a href="#install">Install guide</a>
-      <a class="opt" href="#feedback">Feedback</a>
-      <a class="opt" href="https://github.com/SuperGithubDuo/inkling-notebook">Source</a>
+<header class="nav">
+  <div class="container nav-row">
+    <a class="wordmark" href="./" aria-label="Inkling home"><img src="assets/icon.svg" alt="" width="36" height="36">Inkling</a>
+    <nav aria-label="Main">
+      <ul class="nav-links">
+        <li class="nav-opt"><a href="#write">Handwriting</a></li>
+        <li class="nav-opt"><a href="#tutor">AI Tutor</a></li>
+        <li class="nav-opt"><a href="download/#help">Help</a></li>
+        <li><a class="nav-get" href="download/">Download</a></li>
+      </ul>
     </nav>
   </div>
 </header>
 
-<main id="top">
-  <div class="hero">
-    <div class="wrap">
-      <div>
-        <h1>Write by hand. <span class="hand">Get unstuck.</span></h1>
-        <p class="lede">Inkling is a handwriting notebook for your computer. Circle your working and ask the AI tutor: it reads your handwriting, gives a hint or checks your steps, and shows corrections right on your page.</p>
-
-        <div class="ver" id="ver" hidden></div>
-
-        <div class="cta" id="cta" hidden>
-          <div class="cta-row" id="cta-row"></div>
-          <p class="cta-note" id="cta-note"></p>
-        </div>
-
-        <div class="status" id="status" hidden role="status">
-          <span class="chip beta" style="justify-self:start">Coming soon</span>
-          <strong>No download is available yet.</strong>
-          <p id="status-reason">Inkling is in beta testing. When a version passes testing and is approved, it appears here.</p>
-          <p>Check back soon, or see the <a href="#feedback">feedback page</a> to get in touch.</p>
-        </div>
-
-        <div class="mobile-note" id="mobile-note" hidden>
-          <span><strong>Inkling runs on Windows and Mac computers.</strong> Open this page on your computer to download it. There's no phone or tablet version yet.</span>
-          <button class="btn secondary" type="button" id="copy-link">Copy this page's link</button>
-        </div>
-
-        <noscript><p class="cta-note" style="margin-top:20px">Downloads are listed on the <a href="https://github.com/SuperGithubDuo/inkling-notebook/releases">GitHub releases page</a>.</p></noscript>
+<main id="main">
+  <section class="hero" aria-labelledby="hero-title">
+    <canvas class="ink" id="ink" aria-hidden="true"></canvas>
+    <div class="container page">
+      <div class="margin">
+        <p class="hand hand--hint" id="ink-hint" hidden>go on, write on this page</p>
       </div>
-      <figure class="shot">
-        <picture><img src="assets/screenshots/tutor-markup.webp" width="1536" height="960" alt="An Inkling page with the handwritten equation x² + 5x + 6 = 0. The tutor has found that the solutions should be −2 and −3 and previews its corrections on the page, each with a checkbox."></picture>
-        <figcaption>you choose which corrections to keep ✓</figcaption>
+      <div class="opening settle">
+        <h1 id="hero-title">think it,<br>ink it,<br>master it.</h1>
+        <div class="opening-side">
+        <p class="lede">A handwriting notebook with an AI tutor that reads your working.</p>
+        <div class="actions">
+          <a class="btn btn--primary" href="download/">Download Inkling</a>
+          <p class="note">Free beta for Windows and Mac.</p>
+        </div>
+        </div>
+      </div>
+      <figure class="hero-shot">
+        <div class="shot">
+          <picture>
+            <source media="(max-width: 40rem)" srcset="assets/screenshots/hero-tutor-phone.webp" width="690" height="310">
+            <img src="assets/screenshots/hero-tutor.webp" width="1536" height="650" fetchpriority="high" alt="Inkling with a handwritten equation, x² + 5x + 6 = 0, factored to x = 2, 3. The AI Tutor has crossed out the wrong answer, written x = −2, −3 beside it, and lists each mark with a checkbox.">
+          </picture>
+        </div>
+        <figcaption class="hand">the tutor’s marks, previewed on your page. you choose which to keep</figcaption>
       </figure>
     </div>
-  </div>
+  </section>
 
-  <section id="download">
-    <div class="wrap">
-      <div class="sec-head">
-        <span class="eyebrow">Download</span>
-        <h2>Choose your computer</h2>
-        <p>One file, straight from Inkling's official GitHub release. No sign-in needed.</p>
-      </div>
-      <div class="platforms" id="platforms"></div>
-      <p class="which-mac" id="which-mac"><strong>Which Mac do I have?</strong> <span>Apple menu → <em>About This Mac</em>. "Chip: Apple M1" (or M2, M3…) means Apple silicon. "Processor: … Intel" means Intel.</span></p>
-      <div class="no-need" aria-label="You don't need">
-        <span>No <s>account</s></span><span>No <s>Node.js or npm</s></span><span>No <s>GitHub account</s></span><span>No <s>API key</s></span><span>No <s>credit card</s></span>
+  <section class="write" id="write" aria-labelledby="write-title">
+    <div class="container page">
+      <div class="margin"><p class="hand">a mouse or trackpad works too</p></div>
+      <div class="content">
+        <div class="head">
+          <h2 id="write-title">Write your working by hand</h2>
+          <p class="intro">Pen and highlighter on grid, lined, dotted or blank paper, saved as you write.</p>
+        </div>
+        <figure class="shot shot--wide">
+          <picture>
+            <source media="(max-width: 40rem)" srcset="assets/screenshots/write-phone.webp" width="1940" height="1390">
+            <img src="assets/screenshots/write.webp" width="2880" height="1800" loading="lazy" alt="A Physics page in Inkling: a handwritten title, a diagram of a block on a 30° ramp with the forces W, N and f drawn in blue, five lines of working with one highlighted in yellow, and a red note asking why the block does not slide.">
+          </picture>
+        </figure>
+        <dl class="facts">
+          <div><dt>Tools</dt><dd>Pen, highlighter, eraser, shapes, text and pictures</dd></div>
+          <div><dt>Lasso</dt><dd>Circle anything to move, resize or recolour it</dd></div>
+          <div><dt>Paper</dt><dd>A4 (portrait or landscape), Letter, square or 16:9</dd></div>
+          <div><dt>Saved</dt><dd>On your computer as you write, backed up daily</dd></div>
+        </dl>
       </div>
     </div>
   </section>
 
-  <section id="install">
-    <div class="wrap">
-      <div class="sec-head">
-        <span class="eyebrow">Install guide</span>
-        <h2>Install in about two minutes</h2>
+  <section class="tutor" id="tutor" aria-labelledby="tutor-title">
+    <div class="container page">
+      <div class="margin"><p class="hand">nothing is sent until you click Allow</p></div>
+      <div class="content">
+        <div class="head">
+          <h2 id="tutor-title">A tutor that reads your working</h2>
+          <p class="intro">Circle what you wrote and ask. It answers about your handwriting, then marks up the page.</p>
+        </div>
+        <div class="steps" id="steps">
+          <ol class="step-tabs" role="tablist" aria-label="How the tutor helps">
+            <li role="presentation"><button type="button" role="tab" id="tab-ask" aria-controls="panel-ask" aria-selected="true">Ask the tutor</button></li>
+            <li role="presentation"><button type="button" role="tab" id="tab-mark" aria-controls="panel-mark" aria-selected="false" tabindex="-1">See the marks</button></li>
+            <li role="presentation"><button type="button" role="tab" id="tab-keep" aria-controls="panel-keep" aria-selected="false" tabindex="-1">Keep what helps</button></li>
+          </ol>
+          <div class="step-panels">
+            <div class="step-panel" role="tabpanel" id="panel-ask" aria-labelledby="tab-ask">
+              <p class="step-text">Lasso part of the page and ask. The answer explains the mistake step by step, with the maths typeset.</p>
+              <div class="shot shot--step">
+                <picture>
+                  <source media="(max-width: 40rem)" srcset="assets/screenshots/step-ask-phone.webp" width="776" height="968">
+                  <img src="assets/screenshots/step-ask.webp" width="2292" height="1296" loading="lazy" alt="The handwritten equation x² + 5x + 6 = 0, factored to x = 2, 3, beside the AI Tutor’s answer: the solutions are x = −2 and x = −3, with why the signs were wrong and how to fix it.">
+                </picture>
+              </div>
+            </div>
+            <div class="step-panel" role="tabpanel" id="panel-mark" aria-labelledby="tab-mark">
+              <p class="step-text">Choose Show this on my page. Ticks, crosses and corrections appear on your page as a preview.</p>
+              <div class="shot shot--step">
+                <picture>
+                  <source media="(max-width: 40rem)" srcset="assets/screenshots/step-mark-phone.webp" width="1380" height="552">
+                  <img src="assets/screenshots/step-mark.webp" width="2292" height="1296" loading="lazy" alt="The tutor’s proposed marks previewed on the page: a red cross by x = 2, 3, the correction x = −2, −3 and two notes, each listed in the panel with a checkbox and an Add 5 to my page button.">
+                </picture>
+              </div>
+            </div>
+            <div class="step-panel" role="tabpanel" id="panel-keep" aria-labelledby="tab-keep">
+              <p class="step-text">Untick what you don’t want. The rest becomes ordinary ink you can move, edit or undo.</p>
+              <div class="shot shot--step">
+                <picture>
+                  <source media="(max-width: 40rem)" srcset="assets/screenshots/step-keep-phone.webp" width="776" height="380">
+                  <img src="assets/screenshots/step-keep.webp" width="2292" height="1296" loading="lazy" alt="The page after adding the marks, with the tutor panel saying Added 5 marks to your page, and buttons to undo or mark up something else.">
+                </picture>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="tutor-more">
+          <p class="tutor-buttons"><span class="tutor-buttons-lead">Always one tap away:</span> <span>Give me a hint</span> <span>Explain the concept</span> <span>Check my work</span> <span>Try a similar problem</span></p>
+          <p class="note">Free, with about 12 answers a day per computer. AI answers can be wrong, so check them.</p>
+        </div>
       </div>
+    </div>
+  </section>
 
-      <div class="callout" role="note">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+  <section class="more" id="more" aria-labelledby="more-title">
+    <div class="container page">
+      <div class="margin"><p class="hand">no account, no cloud storage</p></div>
+      <div class="content">
+        <div class="head">
+          <h2 id="more-title">Room for every subject</h2>
+        </div>
+        <div class="more-grid">
+          <figure class="more-pdf">
+            <div class="shot"><img src="assets/screenshots/pdf.webp" width="2480" height="1600" loading="lazy" alt="A kinematics worksheet imported as a PDF, with a phrase highlighted and handwritten working in blue under each question."></div>
+            <figcaption>Import a worksheet as a PDF and write your answers on it.</figcaption>
+          </figure>
+          <figure class="more-books">
+            <div class="shot"><img src="assets/screenshots/notebooks.webp" width="2040" height="760" loading="lazy" alt="The Notebooks view: Math Notes, Physics, Chemistry, Biology and Personal, each with a coloured spine and a preview of its first page."></div>
+            <figcaption>A notebook for each subject.</figcaption>
+          </figure>
+          <dl class="more-list">
+            <div><dt>Typed notes</dt><dd>Headings, lists, tables and formulas, with Markdown in and out</dd></div>
+            <div><dt>Search and links</dt><dd>Find typed text, link pages and see them on a graph</dd></div>
+            <div><dt>Export</dt><dd>A notebook’s handwritten and PDF pages to one PDF, with your annotations</dd></div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band close" id="get" aria-labelledby="get-title">
+    <div class="container page">
+      <div class="margin"></div>
+      <div class="content close-row">
         <div>
-          <p><strong>This beta isn't code-signed yet, so you'll see a security prompt the first time.</strong> Signing is how Windows and macOS confirm who made an app. Without it, your computer can't verify the publisher and asks you to confirm.</p>
-          <p>Only install Inkling from this page or its GitHub release, and don't install it on a school- or work-managed computer without permission. If you're unsure, don't install it and <a href="#feedback">ask us</a>.</p>
+          <h2 id="get-title">Try Inkling free</h2>
+          <p class="intro">The beta runs on Windows 10 and 11, and on Macs with macOS 12 or later. No account needed.</p>
         </div>
+        <a class="btn btn--primary" href="download/">Download Inkling</a>
       </div>
-
-      <div class="tabs" role="tablist" aria-label="Your computer">
-        <button role="tab" id="tab-win" aria-controls="panel-win" aria-selected="true" type="button">Windows</button>
-        <button role="tab" id="tab-mac" aria-controls="panel-mac" aria-selected="false" type="button">Mac</button>
-      </div>
-
-      <div role="tabpanel" id="panel-win" aria-labelledby="tab-win">
-        <ol class="steps">
-          <li><div>Open the downloaded <code data-file="windows">Inkling-Setup-…-x64.exe</code> (usually in your <em>Downloads</em> folder).</div></li>
-          <li><div>If you see <strong>"Windows protected your PC"</strong>, click <span class="kbd">More info</span>, check the file name and <em>Unknown publisher</em>, then click <span class="kbd">Run anyway</span>.</div></li>
-          <li><div>Inkling installs for your account only (no administrator password), adds Start menu and desktop shortcuts, and opens.</div></li>
-        </ol>
-      </div>
-      <div role="tabpanel" id="panel-mac" aria-labelledby="tab-mac" hidden>
-        <ol class="steps">
-          <li><div>Open the downloaded <code data-file="mac">Inkling-….dmg</code> and drag <strong>Inkling</strong> into <strong>Applications</strong>.</div></li>
-          <li><div>Open Inkling from Applications. macOS says it can't verify the developer and won't open it yet. Click <span class="kbd">Done</span>.</div></li>
-          <li><div>Open <strong>System Settings → Privacy &amp; Security</strong>, scroll to the message about Inkling, click <span class="kbd">Open Anyway</span> and confirm with your password. You only do this once.</div></li>
-        </ol>
-      </div>
-
-      <p class="more">Checking a download, uninstalling, and help for younger users: <a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/INSTALL.md">full install guide</a>.</p>
-    </div>
-  </section>
-
-  <section id="requirements">
-    <div class="wrap cols">
-      <div>
-        <div class="sec-head">
-          <span class="eyebrow">System requirements</span>
-          <h2>What you need</h2>
-        </div>
-        <div class="table-scroll">
-          <table class="req-table">
-            <tbody>
-              <tr><th scope="row">Windows</th><td>Windows 10 or 11, 64-bit. ARM PCs (Surface Pro X, Snapdragon laptops) run it through Windows' built-in emulation.</td></tr>
-              <tr><th scope="row">Mac</th><td>macOS 12 Monterey or later, on Apple silicon (M1 or newer) or Intel.</td></tr>
-              <tr><th scope="row">Internet</th><td>Only for the AI tutor and update checks. Notebooks work offline.</td></tr>
-              <tr><th scope="row">Pen or touch</th><td>Optional. A mouse or trackpad works too. Not yet tested on physical pens and touch screens, so your feedback helps.</td></tr>
-              <tr><th scope="row">Phones and tablets</th><td>Not supported yet: no iPad, Android or web version.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div>
-        <div class="sec-head">
-          <span class="eyebrow">Privacy in plain words</span>
-          <h2>Your notebooks stay on your computer</h2>
-        </div>
-        <ul class="list">
-          <li>Your notebooks are saved on your computer as you write, with a backup every day. There's no account and no cloud storage.</li>
-          <li>Nothing goes to the AI until you click <em>Allow</em> — not even a check of how many answers are left. Then, when you ask, your question, the part of the page you include and the recent conversation on that page go to Inkling's AI server and are answered by an AI model (Qwen 3.8 27B) hosted by DeepInfra, with Cloudflare Workers AI as a backup. Inkling's server doesn't store them. Both companies say they don't train on them or keep them after answering, apart from limited exceptions such as support cases and legal obligations.</li>
-          <li>The AI is free, with limits: about 12 answers a day per computer, a monthly limit per computer, and a shared budget for everyone. To share it out, an anonymous installation ID and your internet address go with each question. They're kept only as scrambled counts: daily counts are replaced every day, and each computer's monthly count at the end of the month.</li>
-          <li>AI answers can be wrong, so check them. Please don't send personal information.</li>
-          <li>Under 18? Inkling doesn't check ages, and clicking <em>Allow</em> isn't verified parental consent; one <em>Allow</em> covers everyone on that computer account. A parent or guardian should read the privacy notice, install Inkling and decide whether to allow the AI. Children's privacy rules haven't been reviewed by a lawyer yet.</li>
-          <li>The app has no ads or analytics. This page sets no cookies and runs no analytics; GitHub, which hosts it, may log visits like any web host.</li>
-        </ul>
-        <p class="more"><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/PRIVACY.md">Privacy notice</a>: a draft pending legal review; who runs Inkling and how to contact them are still to be added.</p>
-      </div>
-    </div>
-  </section>
-
-  <section id="feedback">
-    <div class="wrap">
-      <div class="sec-head">
-        <span class="eyebrow">Feedback &amp; help</span>
-        <h2>Tell us how it went</h2>
-        <p>Please describe what happened, and don't include notebook contents or screenshots of personal notes.</p>
-      </div>
-      <div class="cta-row">
-        <a class="btn" id="feedback-btn" href="#feedback" hidden>Send feedback</a>
-        <a class="btn secondary" href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/SUPPORT.md">Help &amp; common questions</a>
-      </div>
-      <p class="cta-note" id="feedback-form-note" style="margin-top:14px" hidden>The form takes about 3 minutes and needs no account.</p>
-      <p class="cta-note" id="feedback-fallback" style="margin-top:14px">Our no-account feedback form is being set up. Until then, <em>Help → Send Feedback or Report a Problem</em> in the app opens a GitHub issue, which needs a free GitHub account and is public.</p>
     </div>
   </section>
 </main>
 
-<footer>
-  <div class="wrap">
-    <span id="foot-ver">Inkling · free beta</span>
-    <nav aria-label="Footer">
-      <a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/RELEASE_NOTES.md">Release notes</a>
-      <a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/PRIVACY.md">Privacy</a>
-      <a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/LICENSE.txt">Licence</a>
-      <a href="https://github.com/SuperGithubDuo/inkling-notebook">GitHub</a>
-    </nav>
+<footer class="foot">
+  <div class="container foot-row">
+    <div class="foot-mark">
+      <a class="wordmark" href="./" aria-label="Inkling home"><img src="assets/icon.svg" alt="" width="28" height="28">Inkling</a>
+      <p>think it, ink it, master it.</p>
+    </div>
+    <ul class="foot-links">
+      <li><a href="download/">Download</a></li>
+      <li><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/SUPPORT.md">Help and common questions</a></li>
+      <li><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/docs/PRIVACY.md">Privacy notice</a></li>
+      <li><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/RELEASE_NOTES.md">Release notes</a></li>
+      <li><a href="https://github.com/SuperGithubDuo/inkling-notebook">Source code</a></li>
+      <li><a href="https://github.com/SuperGithubDuo/inkling-notebook/blob/main/LICENSE.txt">Licence</a></li>
+    </ul>
   </div>
 </footer>
 
-<script src="assets/platform.js"></script>
-<script>
-(function () {
-  'use strict';
-  var REPO = 'https://github.com/SuperGithubDuo/inkling-notebook';
-  function readJson(id, fallback) { try { return JSON.parse(document.getElementById(id).textContent); } catch (e) { return fallback; } }
-  var site = readJson('inkling-site', {});
-  var release = readJson('inkling-release', { status: 'none' });
-  var preview = false;
-  try { preview = site.allowPreview === true && new URLSearchParams(location.search).get('preview') === 'sample'; } catch (e) {}
-  if (preview) {
-    // Made-up values for checking the layout. Links stay switched off.
-    var v = '0.0.0-preview';
-    release = { status: 'available', version: v, tag: 'v' + v, prerelease: true, publishedAt: '2026-11-07T17:00:00Z', commit: '0000000000000000000000000000000000000000', releaseUrl: '#', checksumsUrl: '#', downloads: {
-      windows: { file: 'Inkling-Setup-' + v + '-x64.exe', url: '#', size: 128636974, sha256: '0'.repeat(64) },
-      macArm: { file: 'Inkling-' + v + '-arm64.dmg', url: '#', size: 131000000, sha256: '0'.repeat(64) },
-      macIntel: { file: 'Inkling-' + v + '-x64.dmg', url: '#', size: 136000000, sha256: '0'.repeat(64) } } };
-    document.getElementById('preview-bar').hidden = false;
-  }
-
-  // Only real GitHub release asset links for this repository are ever used.
-  function safeUrl(d) {
-    if (preview || !d || typeof d.url !== 'string') return null;
-    var prefix = REPO + '/releases/download/' + release.tag + '/';
-    return d.url.indexOf(prefix) === 0 && d.url.indexOf('..') < 0 ? d.url : null;
-  }
-  var available = release && release.status === 'available' && release.downloads &&
-    ['windows', 'macArm', 'macIntel'].every(function (k) { return release.downloads[k] && (preview || safeUrl(release.downloads[k])); });
-
-  var PLATFORMS = [
-    { key: 'windows', name: 'Windows', req: 'Windows 10 or 11 · 64-bit', ext: '.exe', icon: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>' },
-    { key: 'macArm', name: 'Mac with Apple silicon', req: 'M1 or newer · macOS 12+', ext: '.dmg', icon: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>' },
-    { key: 'macIntel', name: 'Mac with Intel', req: 'Intel processor · macOS 12+', ext: '.dmg', icon: '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9H4z"/><path d="M2 19h20"/>' }
-  ];
-  function el(tag, attrs, html) { var e = document.createElement(tag); for (var k in attrs || {}) e.setAttribute(k, attrs[k]); if (html != null) e.innerHTML = html; return e; }
-  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function mb(n) { return n > 0 ? Math.round(n / 1e6) + ' MB' : ''; }
-  function icon(p) { return '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + p + '</svg>'; }
-  var DL = '<path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/>';
-
-  function button(p, primary) {
-    var d = available ? release.downloads[p.key] : null;
-    var href = safeUrl(d);
-    var a = el('a', { class: 'btn' + (primary ? '' : ' secondary') });
-    if (href) a.setAttribute('href', href); else { a.setAttribute('aria-disabled', 'true'); a.setAttribute('role', 'link'); if (preview) a.setAttribute('data-preview', ''); }
-    a.innerHTML = icon(DL) + '<span>Download for ' + esc(p.name) + (d ? '<small>' + esc(p.ext) + ' · ' + mb(d.size) + '</small>' : '<small>Not available yet</small>') + '</span>';
-    return a;
-  }
-
-  var P = window.InklingPlatform;
-
-  async function detect() {
-    var os = P.classifyOs(navigator.userAgent, navigator.maxTouchPoints);
-    var arch = 'unknown';
-    if (os === 'mac') {
-      var uaArch = '', renderer = '';
-      try {
-        var uad = navigator.userAgentData;
-        if (uad && uad.getHighEntropyValues) uaArch = String((await uad.getHighEntropyValues(['architecture'])).architecture || '');
-      } catch (e) {}
-      try {
-        var gl = document.createElement('canvas').getContext('webgl');
-        var ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
-        renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
-      } catch (e) {}
-      arch = P.macArch({ uaArch: uaArch, renderer: renderer });
-    }
-    return { os: os, arch: arch };
-  }
-
-  function render(env) {
-    var rec = P.recommend(env.os, env.arch);
-
-    // Version line
-    if (available) {
-      var ver = document.getElementById('ver');
-      var date = '';
-      try { date = new Date(release.publishedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); } catch (e) {}
-      ver.innerHTML = '<span class="chip">Version ' + esc(release.version) + '</span>' + (release.prerelease ? '<span class="chip beta">Beta</span>' : '') +
-        (date ? '<span>Released ' + esc(date) + '</span>' : '') + '<a class="nowrap" href="' + (preview ? '#' : esc(release.releaseUrl)) + '">Release notes</a>';
-      ver.hidden = false;
-      document.getElementById('foot-ver').textContent = 'Inkling ' + release.version + ' · built from ' + String(release.commit).slice(0, 7);
-    } else {
-      var st = document.getElementById('status');
-      if (release && release.reason) document.getElementById('status-reason').textContent = 'Inkling is in beta testing. ' + release.reason + ' When a version passes testing and is approved, it appears here.';
-      st.hidden = false;
-    }
-
-    // Hero call to action
-    if (available && env.os !== 'mobile' && env.os !== 'other') {
-      var row = document.getElementById('cta-row');
-      var note = document.getElementById('cta-note');
-      if (rec === 'mac') {
-        row.appendChild(button(PLATFORMS[1], true));
-        row.appendChild(button(PLATFORMS[2], false));
-        note.innerHTML = 'Not sure which Mac you have? <a href="#which-mac">Here’s how to check</a>.';
-      } else {
-        var p = PLATFORMS.filter(function (x) { return x.key === rec; })[0];
-        row.appendChild(button(p, true));
-        row.appendChild(el('span', { class: 'scribble', 'aria-hidden': 'true' }, '← this one is for your computer'));
-        note.innerHTML = 'Free beta · Not on ' + esc(p.name) + '? <a href="#download">See all downloads</a>.';
-      }
-      document.getElementById('cta').hidden = false;
-    }
-    if (env.os === 'mobile' || env.os === 'other') document.getElementById('mobile-note').hidden = env.os === 'other' && available ? true : false;
-    if (env.os === 'other' && available) {
-      var row2 = document.getElementById('cta-row');
-      PLATFORMS.forEach(function (p, i) { row2.appendChild(button(p, i === 0)); });
-      document.getElementById('cta').hidden = false;
-    }
-
-    // Platform cards
-    var wrap = document.getElementById('platforms');
-    PLATFORMS.forEach(function (p) {
-      var d = available ? release.downloads[p.key] : null;
-      var isRec = rec === p.key;
-      var card = el('article', { class: 'card' + (isRec ? ' recommended' : ''), 'aria-label': p.name });
-      card.appendChild(el('div', { class: 'card-top' }, '<span class="card-icon">' + icon(p.icon) + '</span>' + (isRec ? '<span class="badge-rec">Your computer</span>' : '')));
-      card.appendChild(el('h3', null, esc(p.name)));
-      card.appendChild(el('p', { class: 'req' }, esc(p.req)));
-      card.appendChild(el('p', { class: 'file' }, d ? esc(d.file) + ' · ' + mb(d.size) : 'No approved release yet'));
-      card.appendChild(button(p, isRec || rec === null || (rec === 'mac' && p.key !== 'windows')));
-      if (d) card.appendChild(el('details', { class: 'sum' }, '<summary>SHA-256 checksum</summary><code>' + esc(d.sha256) + '</code>'));
-      else card.appendChild(el('span'));
-      wrap.appendChild(card);
-    });
-
-    // Install guide: file names and the visitor's tab
-    if (available) {
-      document.querySelector('[data-file="windows"]').textContent = release.downloads.windows.file;
-      document.querySelector('[data-file="mac"]').textContent = P.macGuideFile(rec, release.downloads);
-    }
-    if (env.os === 'mac') select('mac');
-
-    // Feedback
-    var fb = typeof site.feedbackUrl === 'string' && /^(https:|mailto:)/.test(site.feedbackUrl) ? site.feedbackUrl : '';
-    if (fb) { var b = document.getElementById('feedback-btn'); b.href = fb; b.hidden = false; document.getElementById('feedback-form-note').hidden = false; document.getElementById('feedback-fallback').hidden = true; }
-  }
-
-  // Tabs
-  function select(which) {
-    ['win', 'mac'].forEach(function (k) {
-      var on = (which === 'mac') === (k === 'mac');
-      document.getElementById('tab-' + k).setAttribute('aria-selected', on ? 'true' : 'false');
-      document.getElementById('panel-' + k).hidden = !on;
-    });
-  }
-  document.getElementById('tab-win').addEventListener('click', function () { select('win'); });
-  document.getElementById('tab-mac').addEventListener('click', function () { select('mac'); });
-  document.querySelector('.tabs').addEventListener('keydown', function (e) {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    var mac = document.getElementById('tab-mac').getAttribute('aria-selected') === 'true';
-    select(mac ? 'win' : 'mac'); document.getElementById(mac ? 'tab-win' : 'tab-mac').focus();
-  });
-
-  document.getElementById('copy-link').addEventListener('click', function () {
-    var btn = this, url = location.href.split('?')[0].split('#')[0];
-    function done(t) { btn.textContent = t; }
-    try { navigator.clipboard.writeText(url).then(function () { done('Link copied'); }, function () { done(url); }); } catch (e) { done(url); }
-  });
-
-  detect().then(render, function () { render({ os: 'other', arch: 'unknown' }); });
-})();
-</script>
+<script src="assets/home.js" defer></script>
 </body>
 </html>

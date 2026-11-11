@@ -19,7 +19,7 @@ import {
   renderMarker
 } from '../../scripts/release/rules.mjs'
 import { finalizeDraft } from '../../scripts/release/finalize-draft.mjs'
-import { buildSite, injectData } from '../../scripts/site/build-site.mjs'
+import { buildSite, fetchReleaseData, injectData, keepBlocks, renderPage } from '../../scripts/site/build-site.mjs'
 import { checkSite } from '../../scripts/site/check-site.mjs'
 
 const root = resolve(import.meta.dirname, '..', '..')
@@ -241,34 +241,147 @@ describe('draft finalization (Release workflow)', () => {
 })
 
 describe('download site build', () => {
-  const build = (releases: unknown[], tagCommits: Record<string, string> = {}) => {
+  const build = (releases: unknown[], tagCommits: Record<string, string> = {}, config: Record<string, unknown> = { withdrawn: [] }, feedbackUrl = 'javascript:alert(1)') => {
     const outDir = mkdtempSync(join(tmpdir(), 'site-'))
-    const res = buildSite({ siteDir: join(root, 'site'), outDir, releases: releases as never[], tagCommits, config: { withdrawn: [] }, feedbackUrl: 'javascript:alert(1)', generatedAt: '2026-11-07T00:00:00Z' })
+    const res = buildSite({ siteDir: join(root, 'site'), outDir, releases: releases as never[], tagCommits, config, feedbackUrl, generatedAt: '2026-11-07T00:00:00Z' })
     return { outDir, ...res }
   }
-  it('builds the "no release yet" page, which passes the deploy check', () => {
+  const page = (outDir: string, p = 'download/index.html') => readFileSync(join(outDir, p), 'utf8')
+  const downloadLinks = (html: string) => [...html.replace(/<script id="inkling-release"[\s\S]*?<\/script>/, '').matchAll(/href="([^"]*\/releases\/download\/[^"]*)"/g)].map((m) => m[1])
+
+  it('builds the "no release yet" pages, which pass the deploy check', () => {
     const { outDir, release } = build([])
     expect(release.status).toBe('none')
     expect(checkSite(outDir)).toEqual([])
-    const html = readFileSync(join(outDir, 'index.html'), 'utf8')
-    expect(html).toContain('"allowPreview":false')
+    const html = page(outDir)
+    expect(html).toContain('No version is ready to download right now.')
+    expect(downloadLinks(html)).toEqual([])
     expect(html).not.toContain('javascript:')
+    expect(html).not.toMatch(/\{\{|<!-- (if|end):/)
   })
-  it('builds the page for a verified release, which passes the deploy check', () => {
+  it('writes the verified release into the download page as plain links, so it works without JavaScript', () => {
     const { outDir, release } = build([goodRelease()], { [TAG]: SHA })
     expect(release.version).toBe(V)
     expect(checkSite(outDir)).toEqual([])
+    const html = page(outDir)
+    const names = installerNames(V)
+    for (const n of Object.values(names)) expect(downloadLinks(html)).toContain(PREFIX + n)
+    expect(new Set(downloadLinks(html))).toEqual(new Set([...Object.values(names).map((n) => PREFIX + n), PREFIX + checksumsName(V)]))
+    expect(html).toContain(`version <span class="num">${V}</span>, released 7 November 2026`)
+    expect(html).not.toContain('No version is ready')
+    expect(html).not.toMatch(/\{\{|<!-- (if|end):/)
   })
-  it('the deploy check catches a link to anything but a verified installer', () => {
+  it('the homepage never links release files: it sends visitors to the download page', () => {
     const { outDir } = build([goodRelease()], { [TAG]: SHA })
-    const p = join(outDir, 'index.html')
+    const home = page(outDir, 'index.html')
+    expect(home).not.toMatch(/\/releases\/download\//)
+    expect(home).toContain('href="download/"')
+  })
+  it('shows the feedback form only for a safe link', () => {
+    let { outDir } = build([], {}, { withdrawn: [] }, 'https://forms.example/f')
+    expect(page(outDir)).toContain('href="https://forms.example/f"')
+    expect(page(outDir)).not.toContain('feedback-fallback')
+    ;({ outDir } = build([], {}, { withdrawn: [] }, 'javascript:alert(1)'))
+    expect(page(outDir)).not.toContain('feedback-btn')
+    expect(page(outDir)).toContain('feedback-fallback')
+  })
+  it('the homepage shows no unfinished demo video', () => {
+    const { outDir } = build([])
+    expect(page(outDir, 'index.html')).not.toMatch(/<video|demo/i)
+  })
+  it('escapes release values written into the page', () => {
+    const r = goodRelease({ html_url: 'https://github.com/x?a=1&b="2"<script>' })
+    const { outDir } = build([r], { [TAG]: SHA })
+    expect(page(outDir)).toContain('https://github.com/x?a=1&amp;b=&quot;2&quot;&lt;script&gt;')
+  })
+  it('refuses unbalanced or unknown template parts instead of shipping them', () => {
+    expect(() => keepBlocks('<!-- if:available -->x', ['available'])).toThrow(/unbalanced/)
+    expect(() => renderPage('<p>{{NOPE}}</p>', { status: 'none' }, { feedbackUrl: '' })).toThrow(/unknown/)
+  })
+  it('the deploy check catches a link to anything but a verified installer, on any page', () => {
+    const { outDir } = build([goodRelease()], { [TAG]: SHA })
+    const p = join(outDir, 'download/index.html')
     const html = readFileSync(p, 'utf8')
     writeFileSync(p, html.replace('</main>', '<a href="https://github.com/SuperGithubDuo/inkling-notebook/actions/runs/1/artifacts/2">x</a></main>'))
     expect(checkSite(outDir).join()).toMatch(/workflow runs or artifacts/)
+    writeFileSync(p, html.replace('</main>', `<a href="${PREFIX}Inkling-${V}-arm64-mac.zip">x</a></main>`))
+    expect(checkSite(outDir).join()).toMatch(/other than a verified installer/)
+    writeFileSync(p, html)
+    const home = join(outDir, 'index.html')
+    writeFileSync(home, readFileSync(home, 'utf8').replace('</main>', `<a href="${PREFIX}${installerNames(V).windows}">x</a></main>`))
+    expect(checkSite(outDir).join()).toMatch(/only linked from the download page/)
+  })
+  it('the deploy check catches release data that was changed after the build', () => {
+    const { outDir } = build([goodRelease()], { [TAG]: SHA })
+    const p = join(outDir, 'download/index.html')
+    const html = readFileSync(p, 'utf8')
     const rel = JSON.parse(readFileSync(join(outDir, 'release.json'), 'utf8'))
     delete rel.generatedAt
     rel.downloads.windows.url = `https://github.com/SuperGithubDuo/inkling-notebook/releases/download/untagged-0fa5bf6150053251849f/Inkling-Setup-${V}-x64.exe`
     writeFileSync(p, injectData(html, 'inkling-release', rel))
     expect(checkSite(outDir).join('\n')).toMatch(/unexpected link|draft release/)
+  })
+  it('the deploy check catches a missing page or asset', () => {
+    const { outDir } = build([])
+    const home = join(outDir, 'index.html')
+    writeFileSync(home, readFileSync(home, 'utf8').replace('assets/site.css', 'assets/nope.css'))
+    expect(checkSite(outDir).join()).toMatch(/missing file assets\/nope\.css/)
+  })
+})
+
+describe('reading releases from GitHub (the "Coming soon" fix)', () => {
+  const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
+  const fake = (routes: (url: string) => Response | Promise<Response>) => {
+    const calls: string[] = []
+    const fetchImpl = (async (url: string) => { calls.push(url); return routes(url) }) as unknown as typeof fetch
+    return { calls, opts: { fetchImpl, retries: 2, delayMs: 0, sleep: async () => {} } }
+  }
+  const published = goodRelease()
+
+  it('a GitHub outage while checking a tag fails the build instead of offering an older release or nothing', async () => {
+    const { opts } = fake((url) => (url.includes('/releases') ? json(200, [published]) : json(502, { message: 'Bad gateway' })))
+    await expect(fetchReleaseData('SuperGithubDuo/inkling-notebook', opts)).rejects.toThrow(/502/)
+  })
+  it('a network error or rate limit also fails the build, after retrying', async () => {
+    let n = 0
+    const net = fake(() => { n++; throw new Error('socket hang up') })
+    await expect(fetchReleaseData('SuperGithubDuo/inkling-notebook', net.opts)).rejects.toThrow(/socket hang up/)
+    expect(n).toBe(3)
+    const limited = fake((url) => (url.includes('/releases') ? json(200, [published]) : json(403, { message: 'API rate limit exceeded' }, { 'x-ratelimit-remaining': '0' })))
+    await expect(fetchReleaseData('SuperGithubDuo/inkling-notebook', limited.opts)).rejects.toThrow(/403/)
+  })
+  it('recovers from a brief hiccup and offers the newest verified release', async () => {
+    let first = true
+    const { opts } = fake((url) => {
+      if (url.includes('/releases')) return json(200, [published])
+      if (first) { first = false; return json(503, {}) }
+      return json(200, { sha: SHA })
+    })
+    const data = await fetchReleaseData('SuperGithubDuo/inkling-notebook', opts)
+    expect(data.tagCommits).toEqual({ [TAG]: SHA })
+    expect(pickRelease(data.releases, { tagCommits: data.tagCommits }).manifest?.version).toBe(V)
+  })
+  it('a tag GitHub says does not exist is refused, not retried, and never offered', async () => {
+    const { opts, calls } = fake((url) => (url.includes('/releases') ? json(200, [published]) : json(404, { message: 'No commit found' })))
+    const data = await fetchReleaseData('SuperGithubDuo/inkling-notebook', opts)
+    expect(data.tagCommits).toEqual({})
+    expect(calls.filter((c) => c.includes('/commits/'))).toHaveLength(1)
+    const { manifest, rejected } = pickRelease(data.releases, { tagCommits: data.tagCommits })
+    expect(manifest).toBeNull()
+    expect(rejected[0]?.reasons.join()).toMatch(/could not confirm which commit/)
+  })
+  it('reads every page of releases and skips tag lookups for drafts', async () => {
+    const older = goodRelease({ tag_name: 'v0.1.0', published_at: '2026-10-01T00:00:00Z' })
+    const draft = goodRelease({ draft: true, tag_name: 'v0.3.0' })
+    const { opts, calls } = fake((url) => {
+      if (url.endsWith('per_page=100')) return json(200, [draft, published], { link: '<https://api.github.com/repos/x/releases?per_page=100&page=2>; rel="next"' })
+      if (url.includes('page=2')) return json(200, [older])
+      return json(200, { sha: SHA })
+    })
+    const data = await fetchReleaseData('SuperGithubDuo/inkling-notebook', opts)
+    expect(data.releases).toHaveLength(3)
+    expect(calls.some((c) => c.includes('v0.3.0'))).toBe(false)
+    expect(Object.keys(data.tagCommits).sort()).toEqual([TAG, 'v0.1.0'].sort())
   })
 })
