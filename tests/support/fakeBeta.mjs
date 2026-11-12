@@ -153,6 +153,7 @@ export async function startBetaServer(options = {}) {
   const adminToken = 'admin-token-for-tests-0123456789abcdef'
   const config = {
     model: options.model ?? '@cf/qwen/qwen3.8-27b',
+    allowedOrigins: options.allowedOrigins ?? [],
     provider: options.provider ?? 'workers-ai',
     publicModel: options.publicModel,
     minNoticeVersion: options.minNoticeVersion ?? 0,

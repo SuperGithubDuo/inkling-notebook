@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { FolderOpen, Info, MessageSquare, ShieldCheck, X } from 'lucide-react'
 import { BackupSettings } from '@/app/BackupSettings'
+import { AccountSettings } from '@/app/Account'
 import { UpdateSettings } from '@/app/Updates'
 import { useApp } from '@/app/appStore'
 import { useStore } from '@/store/store'
@@ -11,6 +12,7 @@ import { useAi } from '@/ai/aiStore'
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const dataDir = useStore((s) => s.dataDir)
   const ref = useRef<HTMLDivElement>(null)
+  const web = window.inkling.platform === 'web'
   const section = useApp((s) => s.settingsSection)
   useEffect(() => {
     ref.current?.focus()
@@ -32,10 +34,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </IconButton>
         </div>
 
+        <section className="mb-5" id="settings-account">
+          <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-ink-3 uppercase">Account and sync</h3>
+          <AccountSettings />
+        </section>
+
         <section className="mb-5" id="settings-storage">
           <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-ink-3 uppercase">Storage</h3>
-          <p className="mb-2 text-[13.5px] text-ink-2">Notebooks are saved automatically as files on this computer.</p>
-          <div className="flex items-center gap-2 rounded-xl border border-line bg-[#fafafb] px-3 py-2.5">
+          <p className="mb-2 text-[13.5px] text-ink-2">
+            {web ? 'Notebooks are saved automatically in this browser, and work offline. Clearing this site’s data in the browser deletes them unless you are signed in or have a backup.' : 'Notebooks are saved automatically as files on this computer.'}
+          </p>
+          <div className={web ? 'hidden' : 'flex items-center gap-2 rounded-xl border border-line bg-[#fafafb] px-3 py-2.5'}>
             <code className="min-w-0 flex-1 truncate text-[12.5px] text-ink-2" title={dataDir}>
               {dataDir}
             </code>
@@ -50,7 +59,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <BackupSettings />
         </section>
 
-        <section id="settings-updates" className="mb-5">
+        <section id="settings-updates" className={web ? 'hidden' : 'mb-5'}>
           <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-ink-3 uppercase">Updates</h3>
           <UpdateSettings />
         </section>

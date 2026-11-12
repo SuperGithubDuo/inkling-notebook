@@ -15,6 +15,7 @@ import { HISTORY_LIMIT, applyTransaction, invertTransaction, type PageHistory, t
 import { buildTransaction, pasteCommands, CommandError, type CanvasCommand, type CommandContext } from '@/canvas/commands'
 import { SaveQueue, type SaveStatus } from '@/services/saveQueue'
 import type { FlushResult } from '@shared/ipc'
+import { merge3 } from '@shared/sync/merge'
 
 export type Section = 'notebooks' | 'all' | 'favorites' | 'graph' | 'shared' | 'trash'
 export type View = { kind: 'library'; section: Section } | { kind: 'notebook' }
@@ -79,6 +80,8 @@ interface State {
 interface Actions {
   init(): Promise<void>
   flush(): Promise<FlushResult>
+  /** Sync replaced these documents in storage: bring the open copies up to date without losing edits in progress. */
+  reload(paths: string[]): Promise<void>
   showSection(section: Section): void
   openNotebook(notebookId: string, pageId?: string): Promise<void>
   selectPage(pageId: string): void
@@ -142,6 +145,8 @@ const notebookOf = (lib: Library | null, id: string | null): NotebookMeta | unde
   lib?.notebooks.find((n) => n.id === id)
 
 export const livePages = (nb: NotebookMeta | undefined) => nb?.pages.filter((p) => p.deletedAt === null) ?? []
+
+const isWeb = typeof window !== 'undefined' && window.inkling?.platform === 'web'
 
 export const useStore = create<Store>()((set, get) => {
   const saver = new SaveQueue({
@@ -263,9 +268,11 @@ export const useStore = create<Store>()((set, get) => {
     clipboard: null,
     notice: null,
 
-    sidebarOpen: true,
-    navigatorOpen: true,
-    tutorOpen: true,
+    // The desktop window is never narrower than 960px. In a browser the side panels start closed
+    // where they would crowd the page (tablets) or cover it (phones).
+    sidebarOpen: !isWeb || window.innerWidth >= 1100,
+    navigatorOpen: !isWeb || window.innerWidth >= 768,
+    tutorOpen: !isWeb || window.innerWidth >= 1280,
     searchOpen: false,
 
     async init() {
@@ -283,6 +290,50 @@ export const useStore = create<Store>()((set, get) => {
     },
 
     flush: () => saver.flush(),
+
+    async reload(paths) {
+      // Each open copy is the stored one plus, perhaps, edits not yet saved. Save those first (storage merges
+      // them with what sync brought), read the result, and re-apply anything edited while that was happening.
+      const settle = <T,>(before: T | undefined, now: T | undefined, fresh: T): { value: T; edited: boolean } =>
+        now === before || !before || !now ? { value: fresh, edited: false } : { value: merge3(before, now, fresh).merged, edited: true }
+      for (const path of paths) {
+        const [kind, notebookId, pageId] = path.split('/') as [string, string?, string?]
+        try {
+          if (kind === 'library') {
+            const before = get().library ?? undefined
+            await saver.flush()
+            const { library } = await window.inkling.loadLibrary()
+            const next = settle(before, get().library ?? undefined, library)
+            set({ library: next.value })
+            if (next.edited) saver.markLibrary()
+            // The notebook or page on screen may have been deleted on another device.
+            const nb = next.value.notebooks.find((n) => n.id === get().activeNotebookId && n.deletedAt === null)
+            if (get().view.kind === 'notebook' && !nb) set({ view: { kind: 'library', section: 'notebooks' }, activeNotebookId: null, activePageId: null, selection: [] })
+            else if (nb && !livePages(nb).some((p) => p.id === get().activePageId)) await get().openNotebook(nb.id)
+          } else if (kind === 'page' && notebookId && pageId && get().pages[pageId]) {
+            const before = get().pages[pageId]
+            await saver.flush()
+            const { page, newer } = await window.inkling.loadPage(notebookId, pageId)
+            if (newer) set((s) => ({ lockedPages: { ...s.lockedPages, [pageId]: true } }))
+            if (!page) continue
+            const next = settle(before, get().pages[pageId], page)
+            const ids = new Set(next.value.objects.map((o) => o.id))
+            set((s) => ({ pages: { ...s.pages, [pageId]: next.value }, selection: s.activePageId === pageId ? s.selection.filter((id) => ids.has(id)) : s.selection }))
+            if (next.edited) saver.markPage(pageId)
+          } else if (kind === 'note' && notebookId && pageId && get().notes[pageId]) {
+            const before = get().notes[pageId]
+            await saver.flush()
+            const { note } = await window.inkling.loadNote(notebookId, pageId)
+            if (!note) continue
+            const next = settle(before, get().notes[pageId], note)
+            set((s) => ({ notes: { ...s.notes, [pageId]: next.value }, noteRevision: { ...s.noteRevision, [pageId]: (s.noteRevision[pageId] ?? 0) + 1 } }))
+            if (next.edited) saver.markNote(pageId)
+          }
+        } catch (err) {
+          set({ notice: `Couldn’t show changes from another device: ${(err as Error).message}` })
+        }
+      }
+    },
 
     showSection(section) {
       set({ view: { kind: 'library', section } })

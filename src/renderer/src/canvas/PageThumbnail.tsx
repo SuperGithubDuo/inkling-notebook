@@ -1,7 +1,7 @@
 /** Live SVG preview of a page, rendered from the same vector data as the canvas. */
 import { memo } from 'react'
 import type { CanvasObject, PageDoc } from '@shared/schema'
-import { assetUrl } from '@shared/ipc'
+import { assetSrc, assetUrl } from '@shared/ipc'
 import { strokePathData } from './ink'
 import { shapeD } from './shapes'
 import { FONT_FAMILY, wrapLines } from './text'
@@ -46,7 +46,7 @@ function ThumbObject({ o, notebookId }: { o: CanvasObject; notebookId: string })
     case 'image':
       return (
         <image
-          href={assetUrl(notebookId, o.asset)}
+          href={assetSrc(assetUrl(notebookId, o.asset))}
           width={o.width}
           height={o.height}
           transform={`translate(${o.x} ${o.y}) rotate(${o.rotation})`}

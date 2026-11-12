@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, powerMonitor, protocol, safeStorage, shell, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, promises as fs, realpathSync, renameSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
 import { z } from 'zod'
@@ -19,6 +19,10 @@ import { autoBackupIfDue, backupsDirFor, createBackup, listBackups, pruneBackups
 import { buildMenu } from './menu'
 import { Updater } from './updater'
 import { FEEDBACK_URL, RELEASES_URL, feedbackLink } from '@shared/product'
+import { Account, fileDocs } from './account'
+import { LIBRARY_PATH, notePath, pagePath } from '@shared/sync/engine'
+import { parsePath, PATH_RE } from '@shared/sync/docs'
+import { supabaseConfig } from '@shared/sync/supabase'
 
 /**
  * One fixed data folder, whatever the build: `npm run dev` used to run as
@@ -125,6 +129,7 @@ const ai = new AiService({
     if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.aiEvent, event)
   }
 })
+let accountReady: Promise<void> = Promise.resolve()
 const aiReady = aiConfig.load().then(() => ai.ensureAllowedProvider())
 
 // Image assets are served from the notebook folder through a read-only scheme.
@@ -176,9 +181,25 @@ function registerAssetProtocol(): void {
   })
 }
 
+/** Stores a new image or PDF in the notebook and queues it for the account. */
+async function saveAsset(notebookId: string, bytes: Uint8Array, type: 'image' | 'pdf' = 'image'): Promise<string> {
+  const asset = await storage.saveAsset(notebookId, bytes, type)
+  await sync.assetAdded(`${notebookId}/${asset}`)
+  account.changed()
+  return asset
+}
+
+/** The sync path of a page or note being saved (ids are validated again by the storage). */
+function docPath(kind: 'page' | 'note', doc: unknown): string {
+  const d = doc as { notebookId?: unknown; id?: unknown } | null
+  const path = `${kind}/${String(d?.notebookId)}/${String(d?.id)}`
+  if (!PATH_RE.test(path)) throw new Error('Refused to save invalid data: invalid id')
+  return path
+}
+
 async function storeImage(notebookId: string, read: () => Promise<Uint8Array>): Promise<ImportImageResult> {
   try {
-    return { asset: await storage.saveAsset(notebookId, await read()) }
+    return { asset: await saveAsset(notebookId, await read()) }
   } catch (err) {
     return { error: (err as Error).message }
   }
@@ -322,6 +343,52 @@ const updater = new Updater({
   }
 })
 
+// Accounts and sync (optional). The server's address and public key come with the build
+// (MAIN_VITE_SUPABASE_URL / MAIN_VITE_SUPABASE_ANON_KEY); without them Inkling works as before, signed out.
+// Every save and delete goes through its engine, which is a plain pass-through until someone signs in.
+const account = new Account({
+  config: supabaseConfig(
+    (testHooks ? process.env.INKLING_SUPABASE_URL : undefined) ?? import.meta.env.MAIN_VITE_SUPABASE_URL,
+    (testHooks ? process.env.INKLING_SUPABASE_ANON_KEY : undefined) ?? import.meta.env.MAIN_VITE_SUPABASE_ANON_KEY
+  ),
+  storage,
+  dataDir,
+  dir: join(configDir, 'sync'),
+  cipher: safeStorage,
+  openExternal: (url) => shell.openExternal(url),
+  flush: async () => (mainWindow ? flushRenderer(mainWindow) : { ok: true }),
+  onState: (state) => {
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.accountChanged, state)
+  },
+  onDocsChanged: (paths) => void docsChanged(paths)
+})
+const sync = account.engine
+
+/** Sync changed files on disk: bring the search index up to date, then tell the window. */
+async function docsChanged(paths: string[]): Promise<void> {
+  for (const path of paths) {
+    const p = parsePath(path)
+    if (!p) continue
+    try {
+      if (p.kind === 'library') {
+        const { library } = await storage.loadLibrary()
+        if (library) index.setLibrary(library)
+      } else if (p.kind === 'page') {
+        const { page } = await storage.loadPage(p.notebookId, p.pageId, { background: true })
+        if (page) index.upsertPage(page)
+        else index.remove(p.pageId)
+      } else {
+        const { note } = await storage.loadNote(p.notebookId, p.pageId, { background: true })
+        if (note) index.upsertNote(note)
+        else index.remove(p.pageId)
+      }
+    } catch {
+      /* reported when the page is opened */
+    }
+  }
+  if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.docsChanged, paths)
+}
+
 /** Takes the daily snapshot when due. Never throws. */
 async function autoBackup(): Promise<void> {
   try {
@@ -347,6 +414,7 @@ function handle<A extends unknown[], R>(channel: string, args: z.ZodType<A>, fn:
 
 function registerIpc(): void {
   handle(IPC.loadLibrary, z.tuple([]), async (): Promise<LoadLibraryResult> => {
+    sync.seen(LIBRARY_PATH)
     const { library, recovered, newer } = await storage.loadLibrary()
     // Checked at startup too; never replace a newer library.
     if (newer) throw new Error('This library was saved by a newer version of Inkling. Update Inkling to open it.')
@@ -357,7 +425,7 @@ function registerIpc(): void {
     if (library) {
       // Restored from library.json.bak, which may be a save behind: add back any pages it doesn't list.
       const adopted = await adoptOrphans(dataDir, library)
-      await storage.saveLibrary(library)
+      await sync.save(LIBRARY_PATH, library)
       indexReady = buildIndex(library)
       return { library, recovered: [`the notebook list (from its backup${adopted ? `, plus ${adopted} page${adopted === 1 ? '' : 's'} it didn’t list` : ''})`], dataDir }
     }
@@ -365,42 +433,47 @@ function registerIpc(): void {
       // The index is gone but notebooks are on disk: rebuild it rather than start over.
       const snapshots = (await listBackups(backupsDir)).map((b) => b.path)
       const r = await recoverLibrary(dataDir, snapshots)
-      await storage.saveLibrary(r.library)
+      await sync.save(LIBRARY_PATH, r.library)
       indexReady = buildIndex(r.library)
       const from = r.source === 'snapshot' ? `the backup of ${new Date((await readBackup(r.snapshot!)).createdAt).toLocaleString()}` : 'the notebook folders'
       return { library: r.library, recovered: [`the notebook list, rebuilt from ${from}${r.adopted ? ` (${r.adopted} page${r.adopted === 1 ? '' : 's'} added back as “Recovered”)` : ''}`], dataDir }
     }
     // First run: start with the starter shelf and persist it immediately.
     const fresh = createStarterLibrary()
-    await storage.saveLibrary(fresh)
+    await sync.save(LIBRARY_PATH, fresh)
     index.setLibrary(fresh)
     return { library: fresh, recovered: [], dataDir }
   })
   // Payloads are validated inside Storage against the full schemas.
   // The index follows whatever is actually on disk: saved data, or loaded data.
   handle(IPC.saveLibrary, z.tuple([z.unknown()]), async (library) => {
-    const result = await storage.saveLibrary(library as never)
+    const result = await sync.save(LIBRARY_PATH, library)
     if (result.status === 'saved') index.setLibrary(library as Library)
+    account.changed()
     return result
   })
   handle(IPC.loadPage, z.tuple([idSchema, idSchema]), async (nb, id) => {
+    sync.seen(pagePath(nb, id))
     const result = await storage.loadPage(nb, id)
     if (result.page) index.upsertPage(result.page)
     return result
   })
   handle(IPC.savePage, z.tuple([z.unknown()]), async (page) => {
-    const result = await storage.savePage(page as never)
+    const result = await sync.save(docPath('page', page), page)
     if (result.status === 'saved') index.upsertPage(page as never)
+    account.changed()
     return result
   })
   handle(IPC.loadNote, z.tuple([idSchema, idSchema]), async (nb, id) => {
+    sync.seen(notePath(nb, id))
     const result = await storage.loadNote(nb, id)
     if (result.note) index.upsertNote(result.note)
     return result
   })
   handle(IPC.saveNote, z.tuple([z.unknown()]), async (note) => {
-    const result = await storage.saveNote(note as never)
+    const result = await sync.save(docPath('note', note), note)
     if (result.status === 'saved') index.upsertNote(note as never)
+    account.changed()
     return result
   })
   const searchOptions = z.object({ notebookId: idSchema.optional(), limit: z.number().int().min(1).max(200).optional() })
@@ -427,7 +500,7 @@ function registerIpc(): void {
     try {
       if ((await fs.stat(path)).size > MAX_MARKDOWN_BYTES) throw new Error('File is larger than 10 MB.')
       const raw = await fs.readFile(path, 'utf8')
-      const markdown = await importMarkdownImages(raw, path, notebookId, (bytes) => storage.saveAsset(notebookId, bytes))
+      const markdown = await importMarkdownImages(raw, path, notebookId, (bytes) => saveAsset(notebookId, bytes))
       return { name: basename(path, extname(path)), markdown }
     } catch (err) {
       return { error: `Could not import: ${(err as Error).message}` }
@@ -449,11 +522,17 @@ function registerIpc(): void {
   })
   handle(IPC.deletePageFile, z.tuple([idSchema, idSchema]), async (nb, page) => {
     index.remove(page)
+    await sync.remove(pagePath(nb, page))
+    await sync.remove(notePath(nb, page))
     await storage.deletePageFile(nb, page)
+    account.changed()
   })
   handle(IPC.deleteNotebookFiles, z.tuple([idSchema]), async (nb) => {
     index.removeNotebook(nb)
+    for (const path of await fileDocs(storage, dataDir).list()) if (parsePath(path)?.notebookId === nb) await sync.remove(path)
+    // The account keeps the notebook's files (another device may still show them); this computer's copies go.
     await storage.deleteNotebookFiles(nb)
+    account.changed()
   })
   handle(IPC.importImage, z.tuple([idSchema]), async (notebookId) => {
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -474,7 +553,11 @@ function registerIpc(): void {
   )
   handle(IPC.copyAssets, z.tuple([idSchema, idSchema, z.array(assetNameSchema).max(5000)]), async (from, to, assets) => {
     try {
-      for (const asset of new Set(assets)) await storage.copyAsset(from, to, asset)
+      for (const asset of new Set(assets)) {
+        await storage.copyAsset(from, to, asset)
+        await sync.assetAdded(`${to}/${asset}`)
+      }
+      account.changed()
       return { ok: true as const }
     } catch (err) {
       return { error: `Could not copy an image between notebooks: ${(err as Error).message}` }
@@ -490,7 +573,7 @@ function registerIpc(): void {
     if (result.canceled || !path) return { canceled: true as const }
     try {
       if ((await fs.stat(path)).size > MAX_PDF_BYTES) throw new Error('PDF is larger than 200 MB.')
-      const asset = await storage.saveAsset(notebookId, new Uint8Array(await fs.readFile(path)), 'pdf')
+      const asset = await saveAsset(notebookId, new Uint8Array(await fs.readFile(path)), 'pdf')
       return { asset, name: basename(path, extname(path)) }
     } catch (err) {
       return { error: `Could not import PDF: ${(err as Error).message}` }
@@ -623,6 +706,8 @@ function registerIpc(): void {
       if (response !== 0) return { restored: false as const }
       const saved = await flushRenderer(mainWindow!)
       if (!saved.ok) return { restored: false as const, error: `Your latest changes couldn’t be saved first, so nothing was restored: ${saved.message}` }
+      // After the restart, the restored notebooks are merged with the account's rather than overwritten by them.
+      await account.noteRestore()
       await restoreBackup(dataDir, dir, backupsDir, app.getVersion())
     } catch (err) {
       return { restored: false as const, error: (err as Error).message }
@@ -636,6 +721,28 @@ function registerIpc(): void {
     }, 100)
     return { restored: true as const }
   })
+  const docPathSchema = z.string().regex(PATH_RE)
+  handle(IPC.accountState, z.tuple([]), async () => {
+    await accountReady
+    return account.state()
+  })
+  handle(IPC.accountGoogle, z.tuple([]), async () => account.signInWithGoogle())
+  handle(IPC.accountEmail, z.tuple([z.string().email().max(254)]), async (email) => account.signInWithEmail(email))
+  handle(IPC.accountVerify, z.tuple([z.string().email().max(254), z.string().regex(/^\d{6,10}$/)]), async (email, code) => account.verifyEmailCode(email, code))
+  handle(IPC.accountMigrate, z.tuple([z.boolean()]), async (accept) => account.confirmMigration(accept))
+  handle(IPC.accountSignOut, z.tuple([]), async () => {
+    await flushRenderer(mainWindow!)
+    return account.signOut()
+  })
+  handle(IPC.accountSync, z.tuple([]), async () => account.syncNow())
+  handle(IPC.accountVersions, z.tuple([docPathSchema]), async (path) => sync.versions(path).catch((err: Error) => ({ error: err.message })))
+  handle(IPC.accountRestore, z.tuple([docPathSchema, z.string().uuid()]), async (path, id) => {
+    await flushRenderer(mainWindow!)
+    const result = await sync.restoreVersion(path, id)
+    account.changed()
+    return result
+  })
+  handle(IPC.accountDismiss, z.tuple([docPathSchema]), async (path) => sync.dismissConflict(path))
   handle(IPC.updateState, z.tuple([]), async () => updater.current)
   handle(IPC.updateCheck, z.tuple([]), async () => updater.check())
   handle(IPC.updateInstall, z.tuple([]), async () => updater.install())
@@ -657,9 +764,12 @@ app.whenReady().then(async () => {
   }
   Menu.setApplicationMenu(buildMenu({ send: sendCommand, dev: !app.isPackaged || testHooks, checkForUpdates: updater.current.enabled ? () => (sendCommand('updates'), void updater.check()) : undefined }))
   registerAssetProtocol()
+  accountReady = account.start().catch((err) => console.warn('account not started:', (err as Error).message))
   registerIpc()
   createWindow()
   void updater.start()
+  powerMonitor.on('resume', () => account.wake())
+  mainWindow?.on('focus', () => account.wake())
   // The daily snapshot, shortly after startup and then every few hours while Inkling is open.
   setTimeout(() => void autoBackup(), Number(process.env.INKLING_AUTO_BACKUP_DELAY_MS) || 20_000)
   setInterval(() => void autoBackup(), 3 * 60 * 60 * 1000)

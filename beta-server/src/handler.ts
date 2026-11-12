@@ -15,7 +15,7 @@
  * conversation, in Inkling's validated request format. The instructions,
  * output format, token caps, temperature and model are the server's (the
  * tutor prompts in src/main/ai/prompts.ts); nothing else is passed through.
- * Browsers on other sites can't call it (no CORS headers).
+ * Browsers on other sites can't call it (CORS headers only for the Inkling web app's origin, WEB_ORIGINS).
  *
  * Provider: the answer comes from Workers AI (through the `AI` binding) or
  * from an external OpenAI-compatible provider (provider.ts); the app can't
@@ -36,6 +36,11 @@ import { chooseModel, type TextModelConfig } from './route'
 export type { AiBinding } from './provider'
 
 export interface ServerConfig {
+  /**
+   * Web origins whose pages may call /v1/* from a browser (the Inkling web app). Empty: none, as before.
+   * Any other site's page gets no CORS headers, so its browser refuses the call. /admin/* never gets them.
+   */
+  allowedOrigins?: string[]
   /** The provider's identifier for the model (sent upstream). */
   model: string
   /** Which provider answers. Default 'workers-ai'. */
@@ -102,14 +107,32 @@ export const EXPECTED_OUTPUT_TOKENS: Record<AiRequest['task'], number> = { chat:
 /** The app's random installation ID. */
 export const INSTALL_ID = /^inst_[A-Za-z0-9_-]{22,64}$/
 
+/** Adds CORS for the Inkling web app's own origin(s) to the public API; everything else is answered as before. */
 export async function handle(request: Request, deps: Deps): Promise<Response> {
+  const origin = request.headers.get('origin')
+  const allowed = !!origin && new URL(request.url).pathname.startsWith('/v1/') && (deps.config.allowedOrigins ?? []).includes(origin)
+  if (!allowed) return route(request, deps)
+  const cors = { 'access-control-allow-origin': origin, vary: 'origin' }
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: { ...cors, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type, x-inkling-install, x-inkling-notice', 'access-control-max-age': '86400' }
+    })
+  }
+  const res = await route(request, deps)
+  const out = new Response(res.body, res)
+  for (const [k, v] of Object.entries(cors)) out.headers.set(k, v)
+  return out
+}
+
+async function route(request: Request, deps: Deps): Promise<Response> {
   const url = new URL(request.url)
   try {
     if (url.pathname === '/v1/status' && request.method === 'GET') return await status(request, deps)
     if (url.pathname === '/v1/tutor' && request.method === 'POST') return await tutor(request, deps)
     if (url.pathname.startsWith('/admin/')) return await admin(request, url, deps)
     if (url.pathname === '/' && request.method === 'GET') return new Response('Inkling AI server\n', { headers: { 'content-type': 'text/plain; charset=utf-8' } })
-    // No CORS: a cross-site preflight (OPTIONS) gets no Access-Control-Allow-* headers, so browsers won't send the request.
+    // No CORS for other sites: their preflight (OPTIONS) gets no Access-Control-Allow-* headers, so browsers won't send the request.
     if (request.method === 'OPTIONS') return new Response(null, { status: 405 })
     return problem(404, 'bad_request', 'Not found.')
   } catch (err) {

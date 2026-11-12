@@ -1,6 +1,6 @@
 /** Loads stored image assets once and shares the decoded element. */
 import { useEffect, useState } from 'react'
-import { assetUrl } from '@shared/ipc'
+import { assetSrc, assetUrl } from '@shared/ipc'
 
 const cache = new Map<string, Promise<HTMLImageElement>>()
 
@@ -17,7 +17,7 @@ export function loadAsset(notebookId: string, asset: string): Promise<HTMLImageE
         cache.delete(url)
         reject(new Error(`Could not load image ${asset}`))
       }
-      img.src = url
+      img.src = assetSrc(url)
     })
     cache.set(url, p)
   }

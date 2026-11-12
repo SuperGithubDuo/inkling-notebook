@@ -56,7 +56,7 @@ export async function preflight(): Promise<AiError | null> {
   const status = ai.status ?? (await ai.load())
   if (status.provider === 'ollama') return null
   if (status.provider === 'cloud') {
-    if (!status.cloud.url) return { code: 'model_unavailable', message: 'This version of Inkling has no cloud AI. Choose the tutor on this computer (Ollama) in AI settings.' }
+    if (!status.cloud.url) return { code: 'model_unavailable', message: window.inkling.platform === 'web' ? 'The AI tutor isn’t switched on for this copy of the web app yet.' : 'This version of Inkling has no cloud AI. Choose the tutor on this computer (Ollama) in AI settings.' }
     if (!(await ai.ensureConsent())) return { code: 'consent_required', message: 'Nothing was sent. The tutor needs your permission to send this to Inkling’s AI server.' }
     return null
   }

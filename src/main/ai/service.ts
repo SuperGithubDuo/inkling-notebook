@@ -15,7 +15,6 @@
  * daily limits itself. It never changes provider or model by itself; it may
  * only suggest one.
  */
-import { createHash, randomUUID } from 'node:crypto'
 import {
   CLOUD_MODEL,
   GEMINI_MODELS,
@@ -55,8 +54,15 @@ export interface LocalProvider extends AiProvider {
   version(signal?: AbortSignal): Promise<string>
 }
 
+/** The settings the service reads and changes: files and the OS keychain on the desktop, browser storage on the web. */
+export type AiConfigApi = Pick<
+  AiConfig,
+  | 'provider' | 'model' | 'apiKey' | 'keyHint' | 'keyProtection' | 'consented' | 'cloudConsented' | 'cloudUrl' | 'cloudUrlFromBuild'
+  | 'ollamaModel' | 'installId' | 'setProvider' | 'setKey' | 'clearKey' | 'setModel' | 'setConsent' | 'setCloudConsent'
+>
+
 export interface AiServiceOptions {
-  config: AiConfig
+  config: AiConfigApi
   /** Creates the Gemini provider for a key. */
   makeProvider: (apiKey: string) => AiProvider
   /** Creates the local Ollama provider (default: 127.0.0.1:11434). */
@@ -94,7 +100,7 @@ interface Cooldown {
 }
 
 export class AiService {
-  private readonly config: AiConfig
+  private readonly config: AiConfigApi
   private readonly geminiEnabled: boolean
   private readonly makeProvider: (apiKey: string) => AiProvider
   private readonly local: LocalProvider
@@ -395,11 +401,12 @@ export class AiService {
     const provider = this.config.provider === 'cloud' ? this.getCloud() : this.getProvider()
     if (!provider) return { error: this.config.provider === 'cloud' ? noCloud() : noKey() }
     const model = this.config.model
-    const hash = createHash('sha256').update(this.config.provider).update(model).update(JSON.stringify(request)).digest('hex')
+    // Only compared with the previous request (an accidental repeat), so the text itself serves as its own fingerprint.
+    const hash = `${this.config.provider}\n${model}\n${JSON.stringify(request)}`
     const blocked = this.admit(hash)
     if (blocked) return { error: blocked }
 
-    const id = randomUUID()
+    const id = crypto.randomUUID()
     const controller = new AbortController()
     this.active = { id, controller }
     this.started.push(this.now())

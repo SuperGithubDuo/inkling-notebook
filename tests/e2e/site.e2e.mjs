@@ -204,7 +204,7 @@ try {
   assert.equal(r.big, null)
   assert.deepEqual(r.rows, [url('windows'), url('macArm'), url('macIntel')])
   assert.equal(r.macGuide, `${names.macArm} or ${names.macIntel}`)
-  step('phones explain there is no phone version; other computers see all three installers')
+  step('phones are pointed to the web app; other computers see all three installers')
 
   for (const site of ['released', 'none']) {
     for (const width of [320, 375, 768, 1280, 1920]) {
@@ -236,7 +236,8 @@ try {
     ctas: [...document.querySelectorAll('a.btn--primary')].map((a) => a.getAttribute('href'))
   }))
   assert.deepEqual(home.downloads, [], 'the homepage links the download page, never a file')
-  assert.deepEqual(home.ctas, ['download/', 'download/'])
+  assert.deepEqual(home.ctas, ['app/', 'app/'], '“Open Inkling” is the primary action')
+  assert.ok(await page.evaluate(() => [...document.querySelectorAll('a[href="download/"]')].length >= 2), 'downloads are still offered, as the secondary choice')
   await page.screenshot({ path: join(shots, 'site-home.png'), fullPage: false })
 
   const panel = () => page.evaluate(() => [...document.querySelectorAll('.step-panel')].filter((p) => !p.hidden).map((p) => p.id))

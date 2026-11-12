@@ -3,7 +3,7 @@
  * server settings. No Workers runtime imports, so the rules are unit-tested (tests/unit/bridge.test.ts).
  */
 import { sha256Hex, type ServerConfig } from './handler'
-import type { inference, Env } from './config'
+import { webOrigins, type inference, type Env } from './config'
 import { textModelFrom } from './route'
 
 type WorkerEnv = Env
@@ -12,6 +12,7 @@ type WorkerEnv = Env
 export async function serverConfig(env: WorkerEnv, inf: Exclude<ReturnType<typeof inference>, string>, legacy: boolean): Promise<ServerConfig> {
   return {
     model: inf.model,
+    allowedOrigins: webOrigins(env.WEB_ORIGINS),
     provider: inf.provider,
     publicModel: inf.publicModel,
     // The bridge answers apps whose notice names only Cloudflare: no notice gate there.

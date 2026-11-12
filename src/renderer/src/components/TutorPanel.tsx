@@ -54,7 +54,7 @@ export function TutorPanel({ onOpenSettings, inputId }: { onOpenSettings: () => 
     <aside
       aria-label="AI Tutor"
       data-testid="tutor-panel"
-      className="m-3 ml-0 flex w-[clamp(300px,27vw,392px)] shrink-0 flex-col overflow-hidden rounded-[18px] border border-line bg-white shadow-[0_1px_3px_rgb(30_36_60/0.05)]"
+      className="m-3 ml-0 flex w-[clamp(300px,27vw,392px)] shrink-0 flex-col overflow-hidden rounded-[18px] border border-line bg-white shadow-[0_1px_3px_rgb(30_36_60/0.05)] max-[767px]:m-0 max-[767px]:w-full max-[767px]:rounded-none max-[767px]:border-0"
     >
       <header className="flex items-center gap-2.5 px-5 pt-4 pb-3">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-lav-soft text-lav">
@@ -191,7 +191,9 @@ export function AiStatusCard({ onOpenSettings, compact }: { onOpenSettings: () =
     title = ready ? `Inkling AI · ${modelLabel(status!.model)}` : 'Choose an AI for the tutor'
     body = ready
       ? 'Free and ready to use, with a daily limit. Only what you ask about is sent, after you allow it.'
-      : 'This version of Inkling has no cloud AI. Use the tutor on this computer (Ollama) in AI settings.'
+      : window.inkling.platform === 'web'
+        ? 'The AI tutor isn’t switched on for this copy of the web app yet. Everything else works.'
+        : 'This version of Inkling has no cloud AI. Use the tutor on this computer (Ollama) in AI settings.'
   } else if (local) {
     const missing = status?.models.find((m) => m.id === status.model)?.status === 'missing'
     title = ready ? `On this computer · ${modelLabel(status!.model)}` : status?.ollama.running === false ? 'Start Ollama to use the tutor' : missing ? `Install ${modelLabel(status!.model)}` : 'Set up the AI Tutor'

@@ -1,6 +1,6 @@
 # Inkling documentation
 
-**Just want to use Inkling?** Go to the [download page](https://supergithubduo.github.io/inkling-notebook/download/) and follow the [install guide](INSTALL.md). Nothing else here is needed to use the app.
+**Just want to use Inkling?** [Open it in your browser](https://supergithubduo.github.io/inkling-notebook/app/), or go to the [download page](https://supergithubduo.github.io/inkling-notebook/download/) and follow the [install guide](INSTALL.md). Nothing else here is needed to use the app.
 
 ## Using Inkling
 
@@ -17,6 +17,7 @@
 | | |
 |---|---|
 | [Developing Inkling](DEVELOPMENT.md) | Requirements, running from source, every test suite, CI |
+| [Web app, accounts and sync](WEB.md) | The web platform, the sync design, Supabase/OAuth/hosting setup, tests, free-tier limits |
 | [Architecture](ARCHITECTURE.md) | Storage, command layer, rendering, AI requests, security |
 | [Building and releasing](RELEASING.md) | Installers, signing, the approval-gated release flow, the download site, operating the AI server |
 | [AI server](../beta-server/README.md) | The Cloudflare Worker behind the free tutor |

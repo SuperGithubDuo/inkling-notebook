@@ -31,6 +31,12 @@ export function App() {
   const openSettings = useCallback(() => useAi.getState().openSettings(true), [])
 
   useShortcuts()
+  const activeNotebookId = useStore((s) => s.activeNotebookId)
+  const activePageId = useStore((s) => s.activePageId)
+  useEffect(() => {
+    // On a phone the side panels cover the page: put them away once something was chosen from them.
+    if (window.matchMedia('(max-width: 767px)').matches) useStore.setState({ sidebarOpen: false, navigatorOpen: false })
+  }, [activeNotebookId, activePageId, view])
   useEffect(() => {
     // Wait for the UI font so canvas text is measured with the right metrics.
     void Promise.all([document.fonts.load('16px Inter'), document.fonts.load('500 16px Caveat')]).finally(() => useStore.getState().init())
@@ -59,10 +65,18 @@ export function App() {
     <div className="flex h-full flex-col bg-white">
       <TopBar onOpenSettings={openSettings} />
       <div className="flex min-h-0 flex-1">
-        {sidebarOpen && <Sidebar />}
+        {sidebarOpen && (
+          <Drawer onClose={() => useStore.getState().toggle('sidebarOpen')}>
+            <Sidebar />
+          </Drawer>
+        )}
         {view.kind === 'notebook' ? (
           <>
-            {navigatorOpen && <PageNavigator />}
+            {navigatorOpen && (
+              <Drawer onClose={() => useStore.getState().toggle('navigatorOpen')}>
+                <PageNavigator />
+              </Drawer>
+            )}
             <main className="@container relative min-w-0 flex-1 bg-paper">
               <Notices />
               <ActivePage />
@@ -73,7 +87,7 @@ export function App() {
           <LibraryView section={view.section} />
         )}
         {tutorOpen && (
-          <div className="flex bg-paper">
+          <div className="flex bg-paper max-[767px]:fixed max-[767px]:inset-0 max-[767px]:z-40">
             <TutorPanel onOpenSettings={openSettings} inputId={TUTOR_INPUT_ID} />
           </div>
         )}
@@ -82,6 +96,16 @@ export function App() {
       <ConsentDialog />
       <AppDialogs />
       {searchOpen && <SearchPalette onClose={() => useStore.getState().setSearchOpen(false)} />}
+    </div>
+  )
+}
+
+/** A side panel: part of the layout normally; on a phone, a drawer over the page that a tap outside closes. */
+function Drawer({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="contents max-[767px]:fixed max-[767px]:inset-0 max-[767px]:z-40 max-[767px]:flex">
+      {children}
+      <button type="button" aria-label="Close panel" onClick={onClose} className="hidden flex-1 bg-[#1f2430]/25 max-[767px]:block" />
     </div>
   )
 }

@@ -14,7 +14,7 @@ interface AppState {
   info: AppInfo | null
   update: UpdateState | null
   /** A settings section to scroll to when Settings opens. */
-  settingsSection: 'storage' | 'updates' | 'ai' | 'privacy' | null
+  settingsSection: 'account' | 'storage' | 'updates' | 'ai' | 'privacy' | null
   open(dialog: AppDialog): void
   openSettings(section?: AppState['settingsSection']): void
   loadInfo(): Promise<AppInfo>

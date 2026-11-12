@@ -125,6 +125,9 @@ jobs:
       # The cloud AI beta server built into the app, and where feedback goes (repository variables, not secrets).
       MAIN_VITE_INKLING_BETA_URL: ${{ vars.INKLING_BETA_URL }}
       MAIN_VITE_INKLING_FEEDBACK_URL: ${{ vars.INKLING_FEEDBACK_URL }}
+      # Accounts and sync (public values; see docs/WEB.md). Unset: the build has no accounts, as before.
+      MAIN_VITE_SUPABASE_URL: ${{ vars.INKLING_SUPABASE_URL }}
+      MAIN_VITE_SUPABASE_ANON_KEY: ${{ vars.INKLING_SUPABASE_ANON_KEY }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v5

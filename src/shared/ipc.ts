@@ -1,5 +1,6 @@
 import type { Library, NoteDoc, PageDoc } from './schema'
 import type { Connections, GraphData, SearchHit } from './search'
+import type { RemoteVersion, SyncStatus } from './sync/engine'
 import type { AiEvent, AiModelId, AiProviderId, AiRequest, AiStartResult, AiStatus, AiTestResult, AiError, ModelAvailability } from './ai'
 
 /** Outcome of a save. `conflict` means the file changed on disk since we last
@@ -13,11 +14,27 @@ export type LoadLibraryResult = { library: Library; recovered: string[]; dataDir
 export type ImportImageResult = { asset: string } | { canceled: true } | { error: string }
 export type ImportPdfResult = { asset: string; name: string } | { canceled: true } | { error: string }
 
-/** URL the renderer uses to display a stored image asset. */
+/**
+ * The address a stored image asset is saved under in notes and looked up by. The same on every
+ * platform, so notebooks move between the desktop and web apps unchanged.
+ */
 export const ASSET_SCHEME = 'inkling-asset'
 export const assetUrl = (notebookId: string, asset: string): string => `${ASSET_SCHEME}://asset/${notebookId}/${asset}`
-/** Base URL of pdf.js runtime resources (fonts, CMaps, decoders) served by the main process. */
-export const PDFJS_RESOURCE_URL = `${ASSET_SCHEME}://pdfjs/`
+
+/**
+ * Where those addresses are actually loaded from. The desktop app serves the scheme itself; a
+ * browser can't, so the web app's service worker serves the same files under its own origin.
+ */
+let webBase: string | null = null
+export function serveAssetsFrom(base: string): void {
+  webBase = base
+}
+/** The loadable URL for an `inkling-asset://` address (other URLs pass through). */
+export const assetSrc = (url: string): string => (webBase && url.startsWith(`${ASSET_SCHEME}://`) ? webBase + url.slice(ASSET_SCHEME.length + 3) : url)
+/** The reverse: the stored address for a URL this platform loaded an asset from (copy and paste within notes). */
+export const assetAddress = (src: string): string => (webBase && src.startsWith(webBase) ? `${ASSET_SCHEME}://${src.slice(webBase.length)}` : src)
+/** Base URL of pdf.js runtime resources (fonts, CMaps, decoders). */
+export const pdfjsResourceUrl = (): string => assetSrc(`${ASSET_SCHEME}://pdfjs/`)
 
 /** `newer`: the file was saved by a newer version of Inkling; it was left untouched and must not be overwritten. */
 export type LoadPageResult = { page: PageDoc | null; recovered: boolean; newer?: boolean }
@@ -81,12 +98,51 @@ export interface AppInfo {
   skipWelcome: boolean
 }
 
+/** Where the app is running: the installed desktop app, or the web app in a browser. */
+export type Platform = 'desktop' | 'web'
+
+export interface AccountState {
+  /** False when this build has no sync server configured: Inkling then works without accounts. */
+  available: boolean
+  user: { id: string; email: string | null } | null
+  /**
+   * Notebooks on this device from before signing in. They are only added to the account once the
+   * user says so (confirmMigration).
+   */
+  pendingMigration: { notebooks: number; pages: number; otherAccount?: boolean } | null
+  sync: SyncStatus
+}
+
+export type AccountResult = { ok: true } | { error: string }
+
 /** Result of flushing unsaved edits (Ctrl+S, quitting). */
 export type FlushResult = { ok: true } | { ok: false; message: string }
 export type ImportMarkdownResult = { name: string; markdown: string } | { canceled: true } | { error: string }
 
 /** The complete, deliberately narrow API exposed to the renderer. */
 export interface InklingApi {
+  platform: Platform
+  /** Optional sign-in. Without it everything is saved on this device only. */
+  account: {
+    state(): Promise<AccountState>
+    /** Web: leaves for Google and comes back signed in. Desktop: opens the browser and waits for it. */
+    signInWithGoogle(): Promise<AccountResult>
+    /** Emails a sign-in link and a 6-digit code. */
+    signInWithEmail(email: string): Promise<AccountResult>
+    /** Signs in with the code from that email (for the desktop app and installed web apps, where the link opens elsewhere). */
+    verifyEmailCode(email: string, code: string): Promise<AccountResult>
+    /** Adds this device's earlier notebooks to the account (true), or leaves them on this device only. */
+    confirmMigration(accept: boolean): Promise<AccountState>
+    signOut(): Promise<AccountState>
+    syncNow(): Promise<AccountState>
+    /** Earlier versions of a document kept by the server (`library`, `page/<notebook>/<page>`, `note/<notebook>/<page>`). */
+    versions(path: string): Promise<RemoteVersion[] | { error: string }>
+    restoreVersion(path: string, versionId: string): Promise<SaveResult>
+    dismissConflict(path: string): Promise<void>
+    onState(handler: (state: AccountState) => void): () => void
+  }
+  /** Sync replaced these documents on this device; reload the ones that are open. */
+  onDocsChanged(handler: (paths: string[]) => void): () => void
   /** True only when launched by the acceptance tests (INKLING_TEST_HOOKS=1). */
   testHooks: boolean
   loadLibrary(): Promise<LoadLibraryResult>
@@ -207,6 +263,18 @@ export const IPC = {
   updateInstall: 'update:install',
   updateSetChannel: 'update:set-channel',
   updateChanged: 'update:changed',
+  accountState: 'account:state',
+  accountGoogle: 'account:google',
+  accountEmail: 'account:email',
+  accountVerify: 'account:verify',
+  accountMigrate: 'account:migrate',
+  accountSignOut: 'account:sign-out',
+  accountSync: 'account:sync',
+  accountVersions: 'account:versions',
+  accountRestore: 'account:restore',
+  accountDismiss: 'account:dismiss',
+  accountChanged: 'account:changed',
+  docsChanged: 'docs:changed',
   flushRequest: 'app:flush-request',
   flushDone: 'app:flush-done'
 } as const
