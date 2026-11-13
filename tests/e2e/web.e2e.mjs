@@ -115,6 +115,8 @@ const shown = (page) =>
     const id = document.querySelector('[data-testid="page-surface"]').dataset.pageId
     return (await window.__inkling.notebookContext.page(id)).objects.filter((o) => o.type === 'stroke').length
   })
+const guestDbExists = (page) => page.evaluate(() => indexedDB.databases().then((d) => d.some((x) => x.name === 'inkling-guest')))
+const cloud0 = () => supabase.docsOf(EMAIL).size
 const syncNow = (page) => page.evaluate(() => window.inkling.account.syncNow())
 
 async function signIn(page, email = EMAIL) {
@@ -169,6 +171,111 @@ try {
   await second.close()
   step('a second tab does not open the same notebooks at once')
 
+  // ---------------------------------------------------------------- every width from 320 to 1920
+  // Regression: at 768–900px the tools ran under the title and the sync status; on phones Undo, Redo and More were off-screen.
+  for (const width of [320, 360, 390, 480, 600, 768, 805, 860, 900, 1024, 1280, 1920]) {
+    const p = await open({ width, height: 800 })
+    const problems = await p.evaluate(async () => {
+      const out = []
+      const name = (el) => el?.getAttribute?.('aria-label') || el?.dataset?.testid || el?.tagName
+      for (const el of document.querySelectorAll('header button, header [role=status], main button')) {
+        if (!el.getBoundingClientRect().width || el.disabled) continue
+        el.scrollIntoView({ block: 'nearest', inline: 'center' })
+        await new Promise((r) => requestAnimationFrame(r))
+        const r = el.getBoundingClientRect()
+        if (r.right > innerWidth + 1 || r.left < -1) out.push(`${name(el)} is off-screen`)
+        else {
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+          if (!(hit && (el.contains(hit) || hit.contains(el)))) out.push(`${name(el)} is covered by ${name(hit)}`)
+        }
+      }
+      if (document.documentElement.scrollWidth > innerWidth) out.push('the page scrolls sideways')
+      return out
+    })
+    assert.deepEqual(problems, [], `at ${width}px: ${problems.join('; ')}`)
+    if (width <= 480) {
+      // Without scrolling the tool row: Undo and More are on screen.
+      for (const id of ['undo', 'more-menu-canvas']) {
+        const box = await p.getByTestId(id).boundingBox()
+        assert.ok(box && box.x >= 0 && box.x + box.width <= width, `${id} is visible at ${width}px`)
+      }
+    }
+    if (width === 320) {
+      await draw(p, [0.2, 0.3], [0.6, 0.4])
+      await p.getByTestId('undo').click()
+      assert.equal(await shown(p), 0, 'Undo works on the smallest phone')
+      await p.getByTestId('more-menu-canvas').click()
+      await p.getByText('Add page', { exact: true }).waitFor()
+      await p.keyboard.press('Escape')
+      await p.screenshot({ path: join(shots, 'web-320.png') })
+
+      // Regression: the library screen had no way to make a notebook (only the sidebar, which is closed on a phone).
+      await p.getByRole('button', { name: 'Back to library' }).click()
+      const before = (await stored(p)).library.notebooks.length
+      await p.getByTestId('library-new-notebook').click()
+      await p.waitForSelector('[data-testid="page-surface"]')
+      await saved(p)
+      assert.equal((await stored(p)).library.notebooks.length, before + 1)
+    }
+    if (width === 805) await p.screenshot({ path: join(shots, 'web-805.png') })
+    if (width === 1280) {
+      // Regression: declining the AI permission threw away the question that had been typed.
+      await p.getByTestId('tutor-input').fill('why does x equal 4 here?')
+      await p.getByTestId('tutor-input').press('Enter')
+      await p.getByTestId('ai-consent').waitFor()
+      await p.getByRole('button', { name: 'Not now' }).click()
+      await p.waitForFunction(() => document.querySelector('[data-testid="tutor-input"]').value === 'why does x equal 4 here?')
+      assert.ok(!beta.requests.some((r) => r.path === '/v1/tutor' && r.method === 'POST'), 'and nothing was sent')
+    }
+    await p.context().close()
+  }
+  step('320–1920px: every control reachable, nothing overlapping; Undo and More stay visible on phones')
+  step('library screen has New Notebook; a typed tutor question survives declining permission')
+
+  // ---------------------------------------------------------------- an interrupted move into an account
+  // Regression: accepting deleted the originals at once, before anything had reached the server.
+  {
+    const OTHER = 'interrupted@example.com'
+    const m = await open({ width: 1280, height: 800 })
+    await draw(m, [0.2, 0.2], [0.5, 0.3])
+    await saved(m)
+    await signIn(m, OTHER)
+    await m.waitForSelector('[data-testid="migration-dialog"]')
+    supabase.setDown(true) // the connection drops just as the user agrees
+    await Promise.all([m.waitForEvent('load'), m.getByTestId('migration-accept').click()])
+    await ready(m)
+    await syncNow(m)
+    assert.equal(supabase.docsOf(OTHER).size, 0)
+    assert.equal(await guestDbExists(m), true, 'nothing reached the server, so the originals are still there')
+    assert.equal(await strokes(m), 1, 'and the notebook is usable meanwhile')
+    assert.equal(await m.locator('[data-testid="migration-dialog"]').count(), 0, 'without asking again')
+
+    // Signing out now: the unsynced copy and the originals both stay.
+    m.once('dialog', (d) => void d.accept())
+    await m.getByRole('button', { name: 'Settings', exact: true }).click()
+    await Promise.all([m.waitForEvent('load'), m.getByTestId('sign-out').click()])
+    await ready(m)
+    assert.equal(await strokes(m), 1, 'signed out: the notebooks from before are still here')
+    assert.ok((await m.evaluate(() => indexedDB.databases())).some((d) => d.name.startsWith('inkling-u-')), 'and the unsynced account copy was kept')
+
+    // Back online, signing in again finishes the move — once, not twice.
+    supabase.setDown(false)
+    await signIn(m, OTHER)
+    await m.waitForSelector('[data-testid="migration-dialog"]')
+    await Promise.all([m.waitForEvent('load'), m.getByTestId('migration-accept').click()])
+    await ready(m)
+    await syncNow(m)
+    await m.waitForFunction(() => indexedDB.databases().then((d) => !d.some((x) => x.name === 'inkling-guest')), null, { timeout: 15_000 })
+    const lib = supabase.docsOf(OTHER).get('library').content
+    assert.equal(new Set(lib.notebooks.map((n) => n.id)).size, lib.notebooks.length)
+    assert.equal(lib.notebooks.filter((n) => n.name === 'Math Notes').length, 1, 'no duplicate notebooks')
+    const nb = lib.notebooks.find((n) => n.name === 'Math Notes')
+    assert.equal(supabase.docsOf(OTHER).get(`page/${nb.id}/${nb.pages[0].id}`).content.objects.length, 1)
+    assert.equal(await strokes(m), 1)
+    await m.context().close()
+    step('a move interrupted by a lost connection keeps the originals, survives sign-out, and completes once later')
+  }
+
   // ---------------------------------------------------------------- offline (PWA)
   const manifest = await a.evaluate(() => fetch(document.querySelector('link[rel=manifest]').href).then((r) => r.json()))
   assert.equal(manifest.display, 'standalone')
@@ -196,6 +303,7 @@ try {
   await Promise.all([a.waitForEvent('load'), a.getByTestId('migration-accept').click()])
   await ready(a)
   assert.equal(await a.locator('[data-testid="migration-dialog"]').count(), 0)
+  assert.ok(await guestDbExists(a) || cloud0() > 0, 'the originals are still in the browser until the account has them')
   assert.equal(await shown(a), 3, 'the notebook that was open is open again, with its ink')
   await syncNow(a)
   await synced(a)
@@ -205,7 +313,7 @@ try {
   assert.equal(cloud.get(`page/${math.id}/${math.pages[0].id}`).content.objects.length, 4, 'three strokes and the picture')
   assert.ok([...supabase.assets.keys()].some((k) => k === `${supabase.uidOf(EMAIL)}/${asset.nb}/${asset.asset}`), 'the picture was uploaded under the user’s own folder')
   assert.equal(await strokes(a), 3)
-  assert.equal(await a.evaluate(() => indexedDB.databases().then((d) => d.some((x) => x.name === 'inkling-guest'))), false, 'the guest copy is gone only after it was moved')
+  await a.waitForFunction(() => indexedDB.databases().then((d) => !d.some((x) => x.name === 'inkling-guest')), null, { timeout: 15_000 })
   step('signs in with an email code; earlier notebooks join the account only after confirming')
 
   // ---------------------------------------------------------------- a second device: a phone
@@ -293,6 +401,36 @@ try {
   assert.equal(await shown(b), restored)
   step('an earlier version can be restored, and the restore syncs')
 
+  // ---------------------------------------------------------------- PDFs: import, sync, offline
+  const { PDFDocument, StandardFonts } = await import('pdf-lib')
+  const pdf = await PDFDocument.create()
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  for (const text of ['Kinematics worksheet', 'Question two']) pdf.addPage([595, 842]).drawText(text, { x: 60, y: 760, size: 24, font })
+  const [pdfChooser] = await Promise.all([a.waitForEvent('filechooser'), a.getByTestId('more-menu-canvas').click().then(() => a.getByText('Import PDF…').click())])
+  await pdfChooser.setFiles({ name: 'Worksheet.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await pdf.save()) })
+  await a.waitForSelector('[data-testid="pdf-layer"][data-render-scale]', { timeout: 30_000 })
+  assert.equal(await a.locator('[data-testid="pdf-loading"]').count(), 0)
+  await saved(a)
+  const pdfPages = Object.entries(await stored(a)).filter(([, d]) => d.background?.type === 'pdf')
+  assert.equal(pdfPages.length, 2)
+  assert.match(pdfPages.map(([, d]) => d.background.text).join(' '), /Kinematics worksheet/)
+  await syncNow(a)
+  await synced(a)
+  await syncNow(b)
+  const pdfAsset = `asset/${pdfPages[0][0].split('/')[1]}/${pdfPages[0][1].background.asset}`
+  const onPhone = await b.evaluate((p) => fetch(p).then(async (r) => ({ status: r.status, type: r.headers.get('content-type'), head: new TextDecoder().decode((await r.arrayBuffer()).slice(0, 5)) })), pdfAsset)
+  assert.deepEqual(onPhone, { status: 200, type: 'application/pdf', head: '%PDF-' }, 'the PDF itself reached the phone')
+  assert.equal(Object.values(await stored(b)).filter((d) => d.background?.type === 'pdf').length, 2)
+  await a.context().setOffline(true)
+  await a.reload()
+  await ready(a)
+  await a.waitForSelector('[data-testid="pdf-layer"][data-render-scale]', { timeout: 30_000 })
+  await a.screenshot({ path: join(shots, 'web-pdf-offline.png') })
+  await a.context().setOffline(false)
+  // Back to the handwritten page for the checks that follow.
+  await a.locator('[data-testid^="page-thumb"]').first().click().catch(() => undefined)
+  step('a PDF imports with its text, syncs to the phone, and opens offline')
+
   // ---------------------------------------------------------------- the AI tutor from a browser
   const ai = await a.evaluate(async () => {
     const before = await window.inkling.ai.status()
@@ -303,6 +441,16 @@ try {
   assert.equal(ai.test.ok, true, JSON.stringify(ai.test))
   assert.ok(beta.requests.some((r) => r.path === '/v1/status'), 'the browser reached the AI server through its CORS allow-list')
   assert.equal(await a.locator('[data-testid="ai-provider-ollama"]:visible').count(), 0)
+  // A real question through the panel: streamed back from the server.
+  if (!(await a.locator('[data-testid="tutor-panel"]').count())) await a.getByTestId('toggle-tutor').click()
+  await a.getByTestId('tutor-input').fill('What is on this page?')
+  await a.getByTestId('tutor-input').press('Enter')
+  await a.waitForSelector('[data-testid="tutor-message"][data-role="model"][data-status="done"]', { timeout: 30_000 })
+  assert.ok((await a.locator('[data-testid="tutor-message"][data-role="model"]').last().innerText()).trim().length > 5)
+  const asked = beta.requests.find((r) => r.path === '/v1/tutor' && r.method === 'POST')
+  assert.equal(asked?.headers.origin, origin, 'the question went from the web app’s origin')
+  assert.match(asked.headers['x-inkling-install'], /^inst_/)
+  assert.equal(asked.headers.authorization, undefined, 'with the anonymous installation ID only: no account token or key')
   step('the AI tutor works from the browser through the server’s allow-list; no key in the page')
 
   // ---------------------------------------------------------------- tablet
@@ -311,7 +459,7 @@ try {
   assert.equal(await t.locator('[data-testid="tutor-panel"]').count(), 0, 'the tutor starts closed on a tablet')
   const tools = await t.locator('[role="toolbar"][aria-label="Drawing tools"]').boundingBox()
   const status = await t.getByTestId('save-status').boundingBox()
-  assert.ok(tools.x + tools.width <= status.x + 1, 'tools and status don’t overlap on a tablet')
+  assert.ok(tools.x + tools.width <= status.x + 1 || tools.y >= status.y + status.height - 1, 'tools and status don’t overlap on a tablet')
   // A stylus: pressure is recorded.
   const ts = await t.locator('[data-testid="page-surface"]').boundingBox()
   const pen = await t.context().newCDPSession(t)

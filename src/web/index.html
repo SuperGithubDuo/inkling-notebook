@@ -20,7 +20,13 @@
     <title>Inkling</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Shown until the app has loaded its storage and account; replaced when it starts. -->
+    <div id="root">
+      <div role="status" style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; font: 14px system-ui, sans-serif; color: #8a8f9c">
+        <img src="./icon.svg" alt="" width="56" height="56" />
+        <p id="boot-status" style="margin: 0">Opening Inkling…</p>
+      </div>
+    </div>
     <noscript>Inkling needs JavaScript to run.</noscript>
     <script type="module" src="./main.ts"></script>
   </body>

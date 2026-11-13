@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { RotateCcw, Star, Trash2, Users } from 'lucide-react'
+import { Plus, RotateCcw, Star, Trash2, Users } from 'lucide-react'
 import type { NoteDoc, NotebookMeta, PageDoc } from '@shared/schema'
 import { createNoteDoc, createPageDoc } from '@shared/factory'
 import { NoteThumbnail } from '@/notes/NoteThumbnail'
@@ -233,7 +233,19 @@ export function LibraryView({ section }: { section: Section }) {
 
   return (
     <main className="thin-scroll min-w-0 flex-1 overflow-y-auto bg-paper px-10 py-8 max-[767px]:px-4 max-[767px]:py-5" data-testid={`library-${section}`}>
-      <h1 className="mb-6 text-[24px] font-semibold tracking-tight">{TITLES[section]}</h1>
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <h1 className="text-[24px] font-semibold tracking-tight">{TITLES[section]}</h1>
+        {section !== 'trash' && (
+          <button
+            type="button"
+            data-testid="library-new-notebook"
+            onClick={() => void st.openNotebook(st.createNotebook())}
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] bg-accent px-3 text-[13.5px] font-medium text-white hover:bg-accent-strong"
+          >
+            <Plus size={16} /> New Notebook
+          </button>
+        )}
+      </div>
       {content}
     </main>
   )

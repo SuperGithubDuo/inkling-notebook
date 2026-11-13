@@ -65,7 +65,7 @@ Search titles, tags, typed text and PDF text. Link pages with `[[links]]`, see b
 Circle your work and ask. Get a hint instead of the answer, have your steps checked, or practise similar problems. Corrections appear on your page as a preview — you choose what to keep.
 
 **🔒 Your notebooks stay yours**<br>
-Saved on your computer as you write, backed up every day, with one-click restore. No account, no ads, no analytics.
+Saved on your device as you write, backed up every day on the desktop, with one-click restore. No account needed (sign in only if you want your notebooks synced between devices), no ads, no analytics.
 
 </td>
 </tr>

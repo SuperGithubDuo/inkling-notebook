@@ -23,6 +23,8 @@ export async function importPdfIntoNotebook(): Promise<void> {
   if ('error' in result) return s.setNotice(result.error)
   if ('canceled' in result) return
   try {
+    // Shown straight away: loading the PDF reader and a large file can take a few seconds.
+    s.setNotice(`Opening “${result.name}”…`)
     const doc = await loadPdf(notebook.id, result.asset)
     s.setNotice(`Importing “${result.name}”…`)
     const pages = await readPdfPages(doc, (done) => useStore.getState().setNotice(`Importing “${result.name}”… ${done}/${doc.numPages} pages`))
