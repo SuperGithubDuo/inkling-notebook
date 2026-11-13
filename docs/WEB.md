@@ -39,6 +39,8 @@ Local first: every edit is saved on the device, then synced. The engine (`src/sh
 
 **Signing in on a device that already has notebooks** asks first. Yes adds them next to the account's notebooks (nothing is replaced); no leaves them on the device, untouched. Untouched starter notebooks are never copied into an account that has notebooks.
 
+On the web the earlier notebooks live in a separate "guest" database, and the move (`src/web/migrate.ts`) never leaves the account's copy as the only one until the server has it: the notebooks are **copied** into the account's database, synced, and the guest database is deleted only after a sync has completed with nothing left to send. A closed tab, full storage or a lost connection part-way is resumed at the next start (a marker in localStorage records the move); a page the account already has is merged with, never replaced. Signing out before the move is confirmed leaves the originals where they were. Files too large to sync count as unsynced, so signing out never removes them from the browser.
+
 **Signing out** on the web removes the account's notebooks from the browser once everything is synced (unsynced changes are kept and go up at the next sign-in). On the desktop the notebooks stay on the computer.
 
 ## Setting it up (about 20 minutes, $0)
@@ -73,7 +75,7 @@ The Pages workflow builds the web app with them; the Release workflow builds the
 
 ### 4. AI server
 
-Set `WEB_ORIGINS` in `beta-server/wrangler*.jsonc` to the web app's origin (e.g. `"https://supergithubduo.github.io"`) and deploy the Worker as usual (docs/RELEASING.md). Browsers on any other site still can't call it. The provider key stays a Worker secret; the web app only ever sees the server's public address. Usage limits are unchanged: per installation ID and network address.
+`WEB_ORIGINS` in `beta-server/wrangler*.jsonc` is set to the web app's origin (`https://supergithubduo.github.io`; change it if you host elsewhere). It takes effect the next time the Worker is deployed (docs/RELEASING.md); until then the web app's tutor is refused by the browser. `beta-server/scripts/production-verify.mjs` checks the deployed value and a real browser preflight. Browsers on any other site still can't call it. The provider key stays a Worker secret; the web app only ever sees the server's public address. Usage limits are unchanged: per installation ID and network address.
 
 ### 5. Hosting
 

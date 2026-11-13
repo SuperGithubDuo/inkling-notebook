@@ -50,6 +50,17 @@ check('ledgers are Durable Objects', bindings.some((b) => b.type === 'durable_ob
 const deps = await cfApi('/deployments')
 const latest = deps?.result?.deployments?.[0]
 check('one version serves 100% of traffic (no split with an older version)', latest?.versions?.length === 1 && latest.versions[0].percentage === 100, latest ? `deployed ${latest.created_on} by ${latest.source}; versions ${JSON.stringify(latest.versions?.map((v) => v.percentage))}` : 'not readable')
+// The web app (GitHub Pages) can only use the tutor if its origin is on the server's allow-list.
+const WEB_APP = 'https://supergithubduo.github.io'
+check(`WEB_ORIGINS allows the web app (${WEB_APP})`, String(plain.WEB_ORIGINS ?? '').split(',').map((o) => o.trim()).includes(WEB_APP), String(plain.WEB_ORIGINS ?? 'not set: the web app’s tutor is blocked by the browser'))
+const preflight = async (origin) => {
+  const r = await fetch(url + '/v1/tutor', { method: 'OPTIONS', headers: { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type,x-inkling-install,x-inkling-notice' } })
+  return { status: r.status, allow: r.headers.get('access-control-allow-origin') }
+}
+const fromApp = await preflight(WEB_APP).catch((e) => ({ status: 0, allow: String(e) }))
+check('browser preflight from the web app is answered', fromApp.status === 204 && fromApp.allow === WEB_APP, `HTTP ${fromApp.status}, allow-origin ${fromApp.allow}`)
+const fromElsewhere = await preflight('https://not-inkling.example').catch((e) => ({ status: 0, allow: String(e) }))
+check('other sites get no CORS headers', fromElsewhere.allow === null, `HTTP ${fromElsewhere.status}, allow-origin ${fromElsewhere.allow}`)
 lines.push('', `Non-secret settings: ${Object.keys(plain).sort().map((k) => `${k}=${plain[k]}`).join(', ')}`)
 
 // ---- 2. Admin reports (before) -----------------------------------------------------------

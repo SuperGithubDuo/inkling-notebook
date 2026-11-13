@@ -22,7 +22,7 @@
   "vars": {
     // The Inkling web app's origin(s), comma-separated (e.g. "https://supergithubduo.github.io"): the only web
     // pages whose browsers may call this API. Empty: desktop apps only.
-    "WEB_ORIGINS": "",
+    "WEB_ORIGINS": "https://supergithubduo.github.io",
     // ---- DeepInfra answers apps on data notice 4 or later (all tasks: Qwen 3.8 27B, no routing).
     "INFERENCE_PROVIDER": "deepinfra",
     "UPSTREAM_MODEL": "Qwen/Qwen3.8-27B",

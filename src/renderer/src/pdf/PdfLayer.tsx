@@ -99,6 +99,11 @@ export const PdfLayer = memo(function PdfLayer({
   return (
     <>
       <canvas ref={canvas} data-testid="pdf-layer" className="pointer-events-none absolute" style={style} aria-hidden />
+      {!rendered && !error && (
+        <div role="status" data-testid="pdf-loading" className="pointer-events-none absolute top-16 left-1/2 -translate-x-1/2 rounded-lg bg-white px-3 py-2 text-[12.5px] text-ink-2 shadow-float">
+          Loading PDF page…
+        </div>
+      )}
       {error && (
         <div className="pointer-events-none absolute top-16 left-1/2 -translate-x-1/2 rounded-lg bg-white px-3 py-2 text-[12.5px] text-[#c93a3f] shadow-float">
           Could not display this PDF page: {error}

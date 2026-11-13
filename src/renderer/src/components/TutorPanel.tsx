@@ -414,8 +414,12 @@ function Composer({ inputId }: { inputId: string }) {
 
   const send = (): void => {
     if (running || !text.trim()) return
-    void useTutor.getState().send({ text })
+    const draft = text
     setText('')
+    void useTutor
+      .getState()
+      .send({ text: draft })
+      .then((sent) => !sent && setText((now) => now || draft))
   }
   const label = selected && kind === 'canvas' ? `Selection · ${selected} item${selected === 1 ? '' : 's'}` : 'This page'
 

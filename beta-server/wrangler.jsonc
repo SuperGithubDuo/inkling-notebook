@@ -18,7 +18,7 @@
   "vars": {
     // The Inkling web app's origin(s), comma-separated (e.g. "https://supergithubduo.github.io"): the only web
     // pages whose browsers may call this API. Empty: desktop apps only.
-    "WEB_ORIGINS": "",
+    "WEB_ORIGINS": "https://supergithubduo.github.io",
     "MODEL": "@cf/qwen/qwen3.8-27b",
     // Set to "free" only for an account on the Workers Free plan, where Workers AI stops instead of billing.
     "ACCOUNT_PLAN": "free",

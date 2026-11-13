@@ -97,9 +97,9 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   }
 
   return (
-    <header className="relative flex h-[60px] shrink-0 items-center border-b border-line-soft bg-white px-3 max-[767px]:h-auto max-[767px]:flex-wrap max-[767px]:px-1.5 max-[767px]:pt-[env(safe-area-inset-top)]">
+    <header className="relative flex h-[60px] shrink-0 items-center border-b border-line-soft bg-white px-3 max-[899px]:h-auto max-[899px]:flex-wrap max-[899px]:px-1.5 max-[899px]:pt-[env(safe-area-inset-top)]">
       {/* Left: navigation + notebook name */}
-      <div className="flex w-[clamp(190px,19vw,300px)] min-w-0 shrink-0 items-center gap-1 max-[1180px]:w-[168px] max-[767px]:order-1 max-[767px]:h-[52px] max-[767px]:w-auto max-[767px]:flex-1 max-[767px]:shrink">
+      <div className="flex w-[clamp(190px,19vw,300px)] min-w-0 shrink-0 items-center gap-1 max-[1180px]:w-[168px] max-[899px]:order-1 max-[899px]:h-[52px] max-[899px]:w-auto max-[899px]:flex-1 max-[899px]:shrink">
         <IconButton
           label={inNotebook ? 'Back to library' : 'Back to notebook'}
           disabled={!inNotebook && !notebook}
@@ -140,17 +140,19 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
 
       {/* Center: formatting tools for notes, drawing tools for pages */}
       {inNote && (
-        <div className="contents max-[767px]:order-3 max-[767px]:flex max-[767px]:basis-full max-[767px]:items-center max-[767px]:overflow-x-auto max-[767px]:border-t max-[767px]:border-line-soft max-[767px]:py-1 max-[767px]:[scrollbar-width:none]">
+        <div className="contents max-[899px]:order-3 max-[899px]:flex max-[899px]:basis-full max-[899px]:items-center max-[899px]:overflow-x-auto max-[899px]:border-t max-[899px]:border-line-soft max-[899px]:py-1 max-[899px]:[scrollbar-width:none] max-[899px]:[&_[role=presentation]]:hidden">
           <NoteToolbar />
-          <IconButton label="More" onClick={openMore} data-testid="more-menu">
-            <Ellipsis size={19} />
-          </IconButton>
+          <span className="contents max-[899px]:sticky max-[899px]:right-0 max-[899px]:ml-auto max-[899px]:flex max-[899px]:shrink-0 max-[899px]:bg-white max-[899px]:pl-1 max-[899px]:shadow-[-10px_0_8px_-8px_rgb(30_36_60/0.18)]">
+            <IconButton label="More" onClick={openMore} data-testid="more-menu">
+              <Ellipsis size={19} />
+            </IconButton>
+          </span>
         </div>
       )}
       {inNotebook && !inNote && (
         // A size container: as the space between title and status shrinks, the least needed
         // controls fold away (they all have keyboard shortcuts or other places) instead of overlapping.
-        <div className="@container flex min-w-0 flex-1 items-center justify-center gap-0.5 max-[767px]:order-3 max-[767px]:basis-full max-[767px]:justify-start max-[767px]:overflow-x-auto max-[767px]:border-t max-[767px]:border-line-soft max-[767px]:py-1 max-[767px]:[scrollbar-width:none]" role="toolbar" aria-label="Drawing tools">
+        <div className="@container flex min-w-0 flex-1 items-center justify-center gap-0.5 max-[899px]:order-3 max-[899px]:basis-full max-[899px]:justify-start max-[899px]:overflow-x-auto max-[899px]:border-t max-[899px]:border-line-soft max-[899px]:py-1 max-[899px]:[scrollbar-width:none] max-[899px]:[&_[role=presentation]]:hidden" role="toolbar" aria-label="Drawing tools">
           {TOOLS.map(({ tool: t, label, key, icon: Icon }) => (
             <IconButton key={t} label={label} hint={key} active={tool === t} onClick={() => st.setTool(t)} data-testid={`tool-${t}`}>
               <Icon size={19} strokeWidth={1.8} />
@@ -192,6 +194,8 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
             <Hand size={18} strokeWidth={1.8} />
           </IconButton>
           <Divider />
+          {/* In the narrow two-row layout the tools scroll sideways; these three stay put at the right edge. */}
+          <span className="contents max-[899px]:sticky max-[899px]:right-0 max-[899px]:ml-auto max-[899px]:flex max-[899px]:shrink-0 max-[899px]:bg-white max-[899px]:pl-1 max-[899px]:shadow-[-10px_0_8px_-8px_rgb(30_36_60/0.18)]">
           <IconButton label="Undo" hint="Ctrl+Z" disabled={!canUndo} onClick={st.undo} data-testid="undo">
             <Undo2 size={19} strokeWidth={1.8} />
           </IconButton>
@@ -201,12 +205,13 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           <IconButton label="More" onClick={openMore} data-testid="more-menu-canvas">
             <Ellipsis size={19} />
           </IconButton>
+          </span>
         </div>
       )}
       {!inNotebook && <div className="flex-1" />}
 
       {/* Right: status, tutor, export, settings */}
-      <div className="flex min-w-[clamp(250px,19vw,300px)] shrink-0 items-center justify-end gap-1 max-[1180px]:min-w-0 max-[767px]:order-2 max-[767px]:gap-0">
+      <div className="flex min-w-[clamp(250px,19vw,300px)] shrink-0 items-center justify-end gap-1 max-[1180px]:min-w-0 max-[899px]:order-2 max-[899px]:gap-0">
         <SaveIndicator />
         <button
           type="button"

@@ -46,7 +46,8 @@ interface TutorState {
   contextChoice: 'auto' | 'none'
   setTab(tab: TutorTab): void
   setContextChoice(choice: 'auto' | 'none'): void
-  send(input: { text?: string; quick?: QuickAction }): Promise<void>
+  /** Resolves false when nothing was sent because permission was declined: the caller keeps what was typed. */
+  send(input: { text?: string; quick?: QuickAction }): Promise<boolean>
   retry(modelMessageId: string): Promise<void>
   stop(): void
   clear(): void
@@ -107,16 +108,18 @@ export const useTutor = create<TutorState>((set, get) => {
     setContextChoice: (contextChoice) => set({ contextChoice }),
 
     async send({ text, quick }) {
-      if (get().running) return
+      if (get().running) return false
       const question = (text ?? '').trim()
-      if (!question && !quick) return
+      if (!question && !quick) return false
       const key = threadKey()
       const shown = quick ? QUICK[quick].label + (question ? ` — ${question}` : '') : question
       const user: ChatMessage = { id: newId(), role: 'user', text: shown, status: 'done', quick }
       const blocked = await preflight()
       if (blocked) {
-        append(key, user, { id: newId(), role: 'model', text: '', status: 'error', error: blocked })
-        return
+        // Declined permission with a typed question: it goes back to the box instead of becoming a dead message.
+        if (blocked.code === 'consent_required' && question && !quick) append(key, { id: newId(), role: 'model', text: '', status: 'error', error: blocked })
+        else append(key, user, { id: newId(), role: 'model', text: '', status: 'error', error: blocked })
+        return blocked.code !== 'consent_required'
       }
       const kind: ContextKind = get().contextChoice === 'none' ? 'none' : hasSelection() ? 'selection' : 'page'
       let ctx
@@ -124,7 +127,7 @@ export const useTutor = create<TutorState>((set, get) => {
         ctx = await buildContext(kind)
       } catch (err) {
         append(key, user, { id: newId(), role: 'model', text: '', status: 'error', error: { code: 'bad_request', message: (err as Error).message } })
-        return
+        return true
       }
       const prompt = quick ? `${QUICK[quick].prompt}${question ? `\n\n${question}` : ''}` : question
       user.parts = [...(ctx?.parts ?? []), { text: prompt }]
@@ -134,6 +137,7 @@ export const useTutor = create<TutorState>((set, get) => {
       }
       append(key, user)
       await ask(key, user)
+      return true
     },
 
     async retry(modelMessageId) {

@@ -44,8 +44,9 @@ export function App() {
 
   if (!ready) {
     return (
-      <div className="flex h-full items-center justify-center text-ink-3">
+      <div role="status" className="flex h-full flex-col items-center justify-center gap-3 text-ink-3">
         <LoaderCircle className="animate-spin" />
+        <p className="text-[13.5px]">Opening your notebooks…</p>
       </div>
     )
   }

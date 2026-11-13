@@ -12,10 +12,10 @@
 import type { AccountResult, AccountState, FlushResult, InklingApi } from '@shared/ipc'
 import type { Library } from '@shared/schema'
 import { LIBRARY_PATH, SyncEngine, autoSync, type SyncStatus } from '@shared/sync/engine'
-import { assetRefs, checkDoc, countPages, parsePath, withoutPristine } from '@shared/sync/docs'
-import { merge3 } from '@shared/sync/merge'
+import { assetRefs, countPages, withoutPristine } from '@shared/sync/docs'
 import { createSupabase, supabaseConfig, supabaseRemote, type SupabaseClient } from '@shared/sync/supabase'
 import { ASSETS_DB, Db, GUEST_DB, accountDb, localAssets, localDocs, stateStore } from './idb'
+import { abandonMigration, copyGuest, guestContent, migrating, settleMigration } from './migrate'
 
 const ACCOUNT_KEY = 'inkling.account'
 const DECLINED_KEY = 'inkling.guestDeclined'
@@ -55,22 +55,6 @@ function deviceName(): string {
     localStorage.setItem(DEVICE_KEY, id)
   }
   return id
-}
-
-/** The guest database's library, and the part of it the user has actually used (null: nothing used). */
-async function guestContent(): Promise<{ full: Library; used: Library } | null> {
-  if (!(await indexedDB.databases?.())?.some((d) => d.name === GUEST_DB)) return null
-  const guest = await Db.open(GUEST_DB)
-  try {
-    const raw = await guest.get('docs', LIBRARY_PATH)
-    const checked = raw === undefined ? null : checkDoc(LIBRARY_PATH, raw)
-    if (!checked?.ok) return null
-    const full = checked.data as Library
-    const used = await withoutPristine(full, async (path) => (await guest.get('docs', path)) ?? null)
-    return used.notebooks.length ? { full, used } : null
-  } finally {
-    guest.close()
-  }
 }
 
 export async function startSession(appUrl: string): Promise<Session> {
@@ -113,6 +97,8 @@ export async function startSession(appUrl: string): Promise<Session> {
     onStatus: (s) => {
       sync = s
       emit()
+      // A move of earlier notebooks into this account ends here: only once a sync has delivered everything.
+      if (who && s.state === 'idle') void settleMigration(who.id, engine).catch(() => undefined)
     }
   })
   const auto = autoSync(engine)
@@ -121,9 +107,18 @@ export async function startSession(appUrl: string): Promise<Session> {
   if (session && who && client) {
     await engine.link(supabaseRemote(client, who.id, deviceName()), who.id)
     // The first time on this device: fetch the account's notebooks before the app opens the library.
-    if (first) await timeout(engine.sync(), 20_000)
+    if (first) {
+      const status = document.getElementById('boot-status')
+      if (status) status.textContent = 'Signed in. Getting your notebooks…'
+      await timeout(engine.sync(), 20_000)
+    }
     else auto.poke(0)
-    if (localStorage.getItem(DECLINED_KEY) !== who.id) {
+    if (migrating(who.id)) {
+      // A move the user agreed to was interrupted (closed tab, error, no connection): finish copying before the
+      // library opens. The originals stay until the upload is confirmed. If this fails too, it is retried next start.
+      await copyGuest(who.id, db, assets, engine).catch((err: Error) => (message = `Your earlier notebooks are safe in this browser but couldn’t all be added to your account yet: ${err.message}`))
+      auto.poke(0)
+    } else if (localStorage.getItem(DECLINED_KEY) !== who.id) {
       const guest = await guestContent().catch(() => null)
       if (guest) pendingMigration = countPages(guest.used)
     }
@@ -175,32 +170,12 @@ export async function startSession(appUrl: string): Promise<Session> {
         emit()
         return state()
       }
-      const theirs = await guestContent()
-      if (theirs) {
-        await flush()
-        // An account with notebooks of its own gets the used guest notebooks added. An account with nothing yet
-        // (just this browser's fresh starter shelf) takes over the guest's shelf as it was.
-        const mine = (await engine.load(LIBRARY_PATH)) as Library | null
-        const mineUsed = mine ? await withoutPristine(mine, async (p) => (await db.get('docs', p)) ?? null) : null
-        const target = mineUsed?.notebooks.length ? merge3(undefined, mineUsed, theirs.used).merged : theirs.full
-        const moving = new Set((mineUsed?.notebooks.length ? theirs.used : theirs.full).notebooks.map((n) => n.id))
-        const guest = await Db.open(GUEST_DB)
-        for (const path of await guest.keys('docs')) {
-          const p = parsePath(path)
-          if (!p || p.kind === 'library' || !moving.has(p.notebookId)) continue
-          const saved = await engine.save(path, await guest.get('docs', path))
-          if (saved.status !== 'saved') throw new Error(saved.status === 'error' ? saved.message : 'Could not copy a page.')
-        }
-        for (const key of await assets.keys('assets')) if (moving.has(key.split('/')[0]!)) await engine.assetAdded(key)
-        const saved = await engine.save(LIBRARY_PATH, target)
-        if (saved.status !== 'saved') throw new Error(saved.status === 'error' ? saved.message : 'Could not update the notebook list.')
-        guest.close()
-        // Only now that every page is in the account's database does the guest copy go.
-        await Db.delete(GUEST_DB)
-        // Start afresh on the combined library; the notebook that was open before signing in opens again.
-        location.reload()
-        return state()
-      }
+      await flush()
+      // Copies only. The originals are deleted later, once a sync has confirmed the account has them (migrate.ts).
+      await copyGuest(who.id, db, assets, engine)
+      // Start afresh on the combined library; the notebook that was open before signing in opens again.
+      location.reload()
+      return state()
       pendingMigration = null
       emit()
       return state()
@@ -209,7 +184,12 @@ export async function startSession(appUrl: string): Promise<Session> {
     async signOut() {
       await flush()
       if (client && navigator.onLine && session) await timeout(engine.sync(), 10_000)
-      const unsynced = engine.pendingCount()
+      if (who) await settleMigration(who.id, engine).catch(() => undefined)
+      // Files too large to sync exist only here: they count as unsynced, so they are kept too.
+      const unsynced = engine.pendingCount() + engine.current.skipped
+      // Earlier notebooks whose move wasn't confirmed are still in the guest database, with their pictures.
+      abandonMigration()
+      const guest = await guestContent().catch(() => null)
       const library = (await db.get<Library>('docs', LIBRARY_PATH)) ?? null
       await client?.auth.signOut({ scope: 'local' }).catch(() => undefined)
       localStorage.removeItem(ACCOUNT_KEY)
@@ -217,7 +197,8 @@ export async function startSession(appUrl: string): Promise<Session> {
       auto.stop()
       if (who && unsynced === 0) {
         // Everything is in the account: leave nothing of it in this browser.
-        const mine = new Set(library?.notebooks.map((n) => n.id))
+        const keep = new Set(guest?.full.notebooks.map((n) => n.id))
+        const mine = new Set(library?.notebooks.map((n) => n.id).filter((id) => !keep.has(id)))
         for (const key of await assets.keys('assets')) if (mine.has(key.split('/')[0]!)) await assets.del('assets', key)
         db.close()
         await Db.delete(accountDb(who.id)).catch(() => undefined)

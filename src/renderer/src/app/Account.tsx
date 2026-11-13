@@ -198,7 +198,7 @@ export function MigrationDialog() {
     try {
       await window.inkling.account.confirmMigration(accept)
     } catch (err) {
-      setError(`Nothing was changed: ${(err as Error).message}`)
+      setError(`Your notebooks are safe in this browser, but they couldn’t all be added to your account: ${(err as Error).message} Try again.`)
     }
     setBusy(false)
   }
