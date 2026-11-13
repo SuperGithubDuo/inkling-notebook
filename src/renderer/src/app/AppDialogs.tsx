@@ -7,6 +7,8 @@ import { Dialog } from './Dialog'
 import { BrandMark } from './Brand'
 import { PrivacyContent } from './PrivacyContent'
 import { UpdateLine, UpdateNotice } from './Updates'
+import { MigrationDialog, VersionHistory } from './Account'
+import { watchAccount } from './accountStore'
 
 export function AppDialogs() {
   const dialog = useApp((s) => s.dialog)
@@ -17,6 +19,7 @@ export function AppDialogs() {
     const offUpdates = window.inkling.updates.onState((u) => useApp.getState().setUpdate(u))
     void window.inkling.updates.state().then((u) => useApp.getState().setUpdate(u))
     useApp.getState().maybeWelcome()
+    watchAccount()
     return () => {
       off()
       offUpdates()
@@ -26,6 +29,8 @@ export function AppDialogs() {
   return (
     <>
       <UpdateNotice />
+      <MigrationDialog />
+      <VersionHistory />
       {dialog === 'welcome' && <Welcome />}
       {dialog === 'about' && <About onClose={close} />}
       {dialog === 'privacy' && (

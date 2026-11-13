@@ -30,7 +30,7 @@ export function Sidebar() {
   const menuNotebook = menu ? library?.notebooks.find((n) => n.id === menu.id) : undefined
 
   return (
-    <aside className="flex w-[clamp(180px,14vw,208px)] shrink-0 flex-col border-r border-line-soft bg-panel" aria-label="Library">
+    <aside className="flex w-[clamp(180px,14vw,208px)] shrink-0 flex-col max-[767px]:w-[260px] max-[767px]:overflow-y-auto border-r border-line-soft bg-panel" aria-label="Library">
       <div className="px-3 pt-3 pb-1">
         <button
           type="button"

@@ -3,6 +3,8 @@ import {
   FileDown,
   FilePlus2,
   FileText,
+  History,
+  CloudOff,
   ChevronDown,
   ChevronLeft,
   CloudCheck,
@@ -28,11 +30,14 @@ import {
   Undo2,
   Waves
 } from 'lucide-react'
-import { HIGHLIGHT_COLORS, INK_COLORS, PEN_SIZES, selectActiveKind, selectActiveNotebook, selectActivePage, useStore, type Tool } from '@/store/store'
+import { HIGHLIGHT_COLORS, INK_COLORS, PEN_SIZES, selectActiveKind, selectActiveMeta, selectActiveNotebook, selectActivePage, useStore, type Tool } from '@/store/store'
 import { renderPagePng } from '@/canvas/stageRef'
 import { IconButton, InlineEdit, Menu, Popover, Tip, cx } from './ui/primitives'
 import { NotebookIcon } from './NotebookIcon'
 import { useApp } from '@/app/appStore'
+import { syncSummary, useAccount } from '@/app/accountStore'
+import { notePath, pagePath } from '@shared/sync/engine'
+import { displayTitle } from '@shared/library'
 import { BookOpen, Info, MessageSquare } from 'lucide-react'
 import { ImageButton, ShapePicker } from './ToolControls'
 import { NoteToolbar } from '@/notes/NoteToolbar'
@@ -60,6 +65,8 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const canUndo = useStore((s) => !!s.activePageId && (s.history[s.activePageId]?.undo.length ?? 0) > 0)
   const canRedo = useStore((s) => !!s.activePageId && (s.history[s.activePageId]?.redo.length ?? 0) > 0)
   const st = useStore.getState()
+  const signedIn = useAccount((s) => !!s.account?.user)
+  const activeMeta = useStore(selectActiveMeta)
 
   const [nameMenu, setNameMenu] = useState<{ x: number; y: number } | null>(null)
   const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null)
@@ -90,9 +97,9 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   }
 
   return (
-    <header className="relative flex h-[60px] shrink-0 items-center border-b border-line-soft bg-white px-3">
+    <header className="relative flex h-[60px] shrink-0 items-center border-b border-line-soft bg-white px-3 max-[767px]:h-auto max-[767px]:flex-wrap max-[767px]:px-1.5 max-[767px]:pt-[env(safe-area-inset-top)]">
       {/* Left: navigation + notebook name */}
-      <div className="flex w-[clamp(190px,19vw,300px)] min-w-0 shrink-0 items-center gap-1 max-[1180px]:w-[168px]">
+      <div className="flex w-[clamp(190px,19vw,300px)] min-w-0 shrink-0 items-center gap-1 max-[1180px]:w-[168px] max-[767px]:order-1 max-[767px]:h-[52px] max-[767px]:w-auto max-[767px]:flex-1 max-[767px]:shrink">
         <IconButton
           label={inNotebook ? 'Back to library' : 'Back to notebook'}
           disabled={!inNotebook && !notebook}
@@ -133,17 +140,17 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
 
       {/* Center: formatting tools for notes, drawing tools for pages */}
       {inNote && (
-        <>
+        <div className="contents max-[767px]:order-3 max-[767px]:flex max-[767px]:basis-full max-[767px]:items-center max-[767px]:overflow-x-auto max-[767px]:border-t max-[767px]:border-line-soft max-[767px]:py-1 max-[767px]:[scrollbar-width:none]">
           <NoteToolbar />
           <IconButton label="More" onClick={openMore} data-testid="more-menu">
             <Ellipsis size={19} />
           </IconButton>
-        </>
+        </div>
       )}
       {inNotebook && !inNote && (
         // A size container: as the space between title and status shrinks, the least needed
         // controls fold away (they all have keyboard shortcuts or other places) instead of overlapping.
-        <div className="@container flex min-w-0 flex-1 items-center justify-center gap-0.5" role="toolbar" aria-label="Drawing tools">
+        <div className="@container flex min-w-0 flex-1 items-center justify-center gap-0.5 max-[767px]:order-3 max-[767px]:basis-full max-[767px]:justify-start max-[767px]:overflow-x-auto max-[767px]:border-t max-[767px]:border-line-soft max-[767px]:py-1 max-[767px]:[scrollbar-width:none]" role="toolbar" aria-label="Drawing tools">
           {TOOLS.map(({ tool: t, label, key, icon: Icon }) => (
             <IconButton key={t} label={label} hint={key} active={tool === t} onClick={() => st.setTool(t)} data-testid={`tool-${t}`}>
               <Icon size={19} strokeWidth={1.8} />
@@ -199,7 +206,7 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
       {!inNotebook && <div className="flex-1" />}
 
       {/* Right: status, tutor, export, settings */}
-      <div className="flex min-w-[clamp(250px,19vw,300px)] shrink-0 items-center justify-end gap-1 max-[1180px]:min-w-0">
+      <div className="flex min-w-[clamp(250px,19vw,300px)] shrink-0 items-center justify-end gap-1 max-[1180px]:min-w-0 max-[767px]:order-2 max-[767px]:gap-0">
         <SaveIndicator />
         <button
           type="button"
@@ -288,7 +295,20 @@ export function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           { label: 'Export notebook as PDF…', icon: <Share size={15} />, onSelect: () => void exportActiveNotebookPdf() },
           'separator',
           { label: 'Save now', hint: 'Ctrl+S', icon: <CloudCheck size={15} />, onSelect: () => void st.flush() },
-          { label: 'Show data folder', icon: <Settings size={15} />, onSelect: () => void window.inkling.showDataFolder() },
+          ...(window.inkling.platform === 'web' ? [] : [{ label: 'Show data folder', icon: <Settings size={15} />, onSelect: () => void window.inkling.showDataFolder() }]),
+          ...(signedIn && notebook && activeMeta
+            ? [
+                {
+                  label: 'Earlier versions…',
+                  icon: <History size={15} />,
+                  onSelect: () =>
+                    useAccount.getState().showHistory({
+                      path: (activeMeta.kind === 'note' ? notePath : pagePath)(notebook.id, activeMeta.id),
+                      title: displayTitle(notebook, activeMeta)
+                    })
+                }
+              ]
+            : []),
           'separator',
           { label: 'Getting started', icon: <BookOpen size={15} />, onSelect: () => useApp.getState().open('welcome') },
           { label: 'Send feedback…', icon: <MessageSquare size={15} />, onSelect: () => void window.inkling.openFeedback() },
@@ -434,22 +454,34 @@ function SizePicker() {
 function SaveIndicator() {
   const status = useStore((s) => s.saveStatus)
   const conflicts = useStore((s) => s.conflicts.length)
+  const sync = syncSummary(useAccount((s) => s.account))
   const state = conflicts ? 'error' : status.state
-  const text =
-    state === 'saving' ? 'Saving…' : state === 'error' ? (conflicts ? 'Conflict' : 'Save failed') : 'Saved'
+  // Saving to this device comes first; once that is done, where the account's copy stands.
+  const saved = state === 'saved'
+  const text = state === 'saving' ? 'Saving…' : state === 'error' ? (conflicts ? 'Conflict' : 'Save failed') : sync.text
+  const warn = state === 'error' || (saved && sync.state === 'error')
   return (
     <div
       data-testid="save-status"
       data-state={state}
+      data-sync={sync.state}
       role="status"
       className={cx(
         'group relative flex h-8 items-center gap-1.5 rounded-lg px-2 text-[12.5px]',
-        state === 'error' ? 'bg-[#fdf0f0] text-[#c93a3f]' : 'text-ink-3'
+        warn ? 'bg-[#fdf0f0] text-[#c93a3f]' : 'text-ink-3'
       )}
     >
-      {state === 'saving' ? <LoaderCircle size={15} className="animate-spin" /> : state === 'error' ? <TriangleAlert size={15} /> : <CloudCheck size={16} />}
-      <span>{text}</span>
-      <Tip text={status.message ?? (state === 'saved' ? 'All changes saved on this computer' : text)} />
+      {state === 'saving' || (saved && sync.state === 'syncing') ? (
+        <LoaderCircle size={15} className="animate-spin" />
+      ) : warn ? (
+        <TriangleAlert size={15} />
+      ) : saved && sync.state === 'offline' ? (
+        <CloudOff size={16} />
+      ) : (
+        <CloudCheck size={16} />
+      )}
+      <span className="max-[640px]:sr-only">{text}</span>
+      <Tip text={status.message ?? (saved ? sync.detail : text)} />
     </div>
   )
 }

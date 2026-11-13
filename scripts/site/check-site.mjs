@@ -7,7 +7,8 @@
  * - every link to a release file, on every page, must be exactly one of those verified files
  *   (the three installers and the checksum file), and there are none at all when no release is offered;
  * - no workflow artifacts (/actions/), draft-release ("untagged-") or unfilled template parts;
- * - every local file a page references exists.
+ * - every local file a page references exists;
+ * - the web app the pages' "Open Inkling" opens is there (app/).
  *
  *   node scripts/site/check-site.mjs _site
  */
@@ -20,13 +21,15 @@ const PAGES = ['index.html', 'download/index.html']
 
 const unescape = (s) => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')
 
-export function checkSite(dir) {
+export function checkSite(dir, { requireApp = false } = {}) {
   const problems = []
   const pages = {}
   for (const p of PAGES) {
     if (!existsSync(join(dir, p))) problems.push(`missing page ${p}`)
     else pages[p] = readFileSync(join(dir, p), 'utf8')
   }
+  // “Open Inkling” must open something: the web app, its service worker and manifest.
+  if (requireApp) for (const f of ['app/index.html', 'app/sw.js', 'app/manifest.webmanifest']) if (!existsSync(join(dir, f))) problems.push(`missing ${f}: build the web app first (npm run build:web) and pass --app out/web`)
   const html = pages['download/index.html'] ?? ''
   const data = (id) => {
     const m = new RegExp(`<script id="${id}" type="application/json">([\\s\\S]*?)</script>`).exec(html)
@@ -80,7 +83,7 @@ export function checkSite(dir) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const dir = resolve(process.argv[2] || '_site')
-  const problems = checkSite(dir)
+  const problems = checkSite(dir, { requireApp: true })
   if (problems.length) {
     for (const p of problems) console.log(`::error title=Download site::${p}`)
     process.exit(1)

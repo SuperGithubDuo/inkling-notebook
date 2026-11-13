@@ -28,6 +28,7 @@ export function BackupSettings() {
   }
 
   const recent = (backups ?? []).slice(0, 5)
+  const web = window.inkling.platform === 'web'
   return (
     <div className="mt-3 rounded-xl border border-line px-3 py-2.5" data-testid="backups">
       <div className="flex items-start gap-2.5">
@@ -35,7 +36,9 @@ export function BackupSettings() {
         <div className="min-w-0 flex-1 text-[13px]">
           <p className="font-medium">Backups</p>
           <p className="text-[12.5px] text-ink-2">
-            Inkling keeps a copy of your whole library every day (the last 7 days), and before restoring or updating. Use <em>Back up now</em> to save a copy somewhere else, such as a USB drive.
+            {web
+              ? 'Back up now downloads one file with all your notebooks, pictures and PDFs. Keep it somewhere safe; Restore brings it back in any browser. When you are signed in, your account also keeps earlier versions of every page.'
+              : <>Inkling keeps a copy of your whole library every day (the last 7 days), and before restoring or updating. Use <em>Back up now</em> to save a copy somewhere else, such as a USB drive.</>}
           </p>
         </div>
       </div>
@@ -55,7 +58,7 @@ export function BackupSettings() {
           ))}
         </ul>
       ) : (
-        backups && <p className="mt-2 text-[12.5px] text-ink-3">The first daily backup is made a few seconds after Inkling starts.</p>
+        backups && !web && <p className="mt-2 text-[12.5px] text-ink-3">The first daily backup is made a few seconds after Inkling starts.</p>
       )}
       <div className="mt-2 flex flex-wrap gap-1.5">
         <button type="button" data-testid="backup-now" disabled={busy} onClick={() => void backupNow()} className="rounded-lg border border-line px-2.5 py-1 text-[12.5px] font-medium hover:bg-[#fafafb] disabled:opacity-40">
@@ -64,7 +67,7 @@ export function BackupSettings() {
         <button type="button" data-testid="backup-restore" disabled={busy} onClick={() => void restore(null)} className="flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-[12.5px] font-medium hover:bg-[#fafafb] disabled:opacity-40">
           <RotateCcw size={12} /> Restore from a backup…
         </button>
-        <button type="button" onClick={() => void window.inkling.backups.showFolder()} className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[12.5px] text-ink-2 hover:bg-[#fafafb]">
+        <button type="button" onClick={() => void window.inkling.backups.showFolder()} className={web ? 'hidden' : 'flex items-center gap-1 rounded-lg px-2.5 py-1 text-[12.5px] text-ink-2 hover:bg-[#fafafb]'}>
           <FolderOpen size={12} /> Show backups
         </button>
       </div>

@@ -34,6 +34,7 @@ import {
   type PageDoc
 } from '@shared/schema'
 import type { SaveResult } from '@shared/ipc'
+import { assetKind } from '@shared/assets'
 
 const pageFileSchema = z.preprocess(migratePage, pageDocSchema) as unknown as ZodType<PageDoc>
 const libraryFileSchema = z.preprocess(migrateLibrary, librarySchema) as unknown as ZodType<Library>
@@ -48,35 +49,7 @@ export function parseLibraryJson(raw: string): Library | null {
   }
 }
 
-export const MAX_IMAGE_BYTES = 30 * 1024 * 1024
-export const MAX_PDF_BYTES = 200 * 1024 * 1024
-
-/** True if the bytes are a PDF file (by signature, not extension). */
-export function isPdf(bytes: Uint8Array): boolean {
-  // The header may follow a few bytes of junk; PDF readers search the first 1 KB.
-  const head = String.fromCharCode(...bytes.subarray(0, 1024))
-  return head.includes('%PDF-')
-}
-
-/** Identifies an image by its leading bytes; we never trust file extensions. */
-export function sniffImage(bytes: Uint8Array): 'png' | 'jpg' | 'gif' | 'webp' | null {
-  const at = (i: number): number => bytes[i] ?? -1
-  if (at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4e && at(3) === 0x47) return 'png'
-  if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return 'jpg'
-  if (at(0) === 0x47 && at(1) === 0x49 && at(2) === 0x46 && at(3) === 0x38) return 'gif'
-  const ascii = (from: number, to: number): string => String.fromCharCode(...bytes.subarray(from, to))
-  if (bytes.length > 12 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'webp'
-  return null
-}
-
-export const IMAGE_MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  pdf: 'application/pdf'
-}
+export { IMAGE_MIME, MAX_IMAGE_BYTES, MAX_PDF_BYTES, isPdf, sniffImage } from '@shared/assets'
 
 export interface LoadResult<T> {
   data: T | null
@@ -172,20 +145,18 @@ export class Storage {
    * temporary browser URL or the user's original path.
    */
   async saveAsset(notebookId: string, bytes: Uint8Array, type: 'image' | 'pdf' = 'image'): Promise<string> {
-    let kind: string | null
-    if (type === 'pdf') {
-      if (bytes.byteLength > MAX_PDF_BYTES) throw new Error('PDF is larger than 200 MB.')
-      kind = isPdf(bytes) ? 'pdf' : null
-      if (!kind) throw new Error('This file is not a PDF.')
-    } else {
-      if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error('Image is larger than 30 MB.')
-      kind = sniffImage(bytes)
-      if (!kind) throw new Error('Unsupported image format. Use PNG, JPEG, GIF or WebP.')
-    }
+    const kind = assetKind(bytes, type)
     const name = `${randomBytes(12).toString('hex')}.${kind}`
     const file = this.assetPath(notebookId, name)
     await this.atomicWrite(file, bytes)
     return name
+  }
+
+  /** Stores a file that already has its name (one downloaded from the account). */
+  async writeAsset(notebookId: string, asset: string, bytes: Uint8Array): Promise<void> {
+    const file = this.assetPath(notebookId, asset)
+    assetKind(bytes, asset.endsWith('.pdf') ? 'pdf' : 'image')
+    await this.enqueue(file, () => this.atomicWrite(file, bytes))
   }
 
   async readAsset(notebookId: string, asset: string): Promise<Buffer> {

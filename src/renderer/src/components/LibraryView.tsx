@@ -232,7 +232,7 @@ export function LibraryView({ section }: { section: Section }) {
   }
 
   return (
-    <main className="thin-scroll min-w-0 flex-1 overflow-y-auto bg-paper px-10 py-8" data-testid={`library-${section}`}>
+    <main className="thin-scroll min-w-0 flex-1 overflow-y-auto bg-paper px-10 py-8 max-[767px]:px-4 max-[767px]:py-5" data-testid={`library-${section}`}>
       <h1 className="mb-6 text-[24px] font-semibold tracking-tight">{TITLES[section]}</h1>
       {content}
     </main>

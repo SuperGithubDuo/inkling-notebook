@@ -10,6 +10,7 @@ import { TableKit } from '@tiptap/extension-table'
 import Image from '@tiptap/extension-image'
 import { Mathematics } from '@tiptap/extension-mathematics'
 import { Markdown } from '@tiptap/markdown'
+import { assetAddress, assetSrc } from '@shared/ipc'
 import { NoteRef, type NoteRefOptions } from './noteRef'
 
 export interface NoteExtensionOptions {
@@ -36,7 +37,15 @@ export function noteExtensions(options: NoteExtensionOptions = {}): AnyExtension
     TaskList,
     TaskItem.configure({ nested: true }),
     TableKit.configure({ table: { resizable: false } }),
-    Image.configure({ inline: false, allowBase64: false }),
+    // Stored as inkling-asset:// addresses; shown from wherever this platform serves them.
+    Image.extend({
+      addAttributes() {
+        return { ...this.parent?.(), src: { default: null, parseHTML: (el) => assetAddress(el.getAttribute('src') ?? '') } }
+      },
+      renderHTML({ HTMLAttributes }) {
+        return ['img', { ...HTMLAttributes, src: assetSrc(String(HTMLAttributes.src ?? '')) }]
+      }
+    }).configure({ inline: false, allowBase64: false }),
     Mathematics.configure({
       katexOptions: { throwOnError: false, strict: false },
       inlineOptions: { onClick: (node, pos) => options.onMathClick?.('inline', String(node.attrs.latex ?? ''), pos) },

@@ -33,6 +33,8 @@ export interface Env {
    * Workers AI only (route.ts): the text-only model. Empty: every request goes to MODEL. Ignored
    * with an external provider, which answers everything with one model.
    */
+  /** Comma-separated web origins of the Inkling web app, e.g. "https://supergithubduo.github.io". Unset: browsers can't call the API. */
+  WEB_ORIGINS?: string
   MODEL_TEXT?: string
   TEXT_INPUT_NEURONS_PER_M?: string
   TEXT_OUTPUT_NEURONS_PER_M?: string
@@ -223,3 +225,11 @@ export function inference(env: Env): { ai: AiBinding; provider: ProviderId; mode
   }
 }
 
+
+/** The web app origins allowed to call the API from a browser: exact https origins only (http for localhost, for development). */
+export function webOrigins(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => /^https:\/\/[a-z0-9.-]+(:\d+)?$/.test(o) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o))
+}

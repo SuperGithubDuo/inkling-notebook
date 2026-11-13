@@ -5,6 +5,7 @@ import { App } from './App'
 import { useStore } from './store/store'
 
 window.inkling.onFlushRequest(() => useStore.getState().flush())
+window.inkling.onDocsChanged((paths) => void useStore.getState().reload(paths))
 
 if (window.inkling.testHooks) {
   // Lets acceptance tests drive the assistant API the future AI Tutor will use.

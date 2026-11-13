@@ -1,6 +1,6 @@
-name: Download site
+name: Website and web app
 
-# Builds the download page (site/) and, once switched on, deploys it to GitHub Pages.
+# Builds the website (site/) with the web app (src/web, served at /app/) and, once switched on, deploys it to GitHub Pages.
 #
 # What it offers: scripts/site/build-site.mjs picks the newest PUBLISHED release that the
 # Release workflow verified (hidden marker in its notes), whose tag points at the verified
@@ -23,9 +23,9 @@ on:
     types: [published, edited, unpublished, deleted, prereleased, released]
   push:
     branches: [main]
-    paths: ['site/**', 'scripts/site/**', 'scripts/release/rules.mjs', '.github/workflows/pages.yml']
+    paths: ['site/**', 'scripts/site/**', 'scripts/release/rules.mjs', '.github/workflows/pages.yml', 'src/**', 'vite.web.config.mts', 'package.json', 'package-lock.json']
   pull_request:
-    paths: ['site/**', 'scripts/site/**', 'scripts/release/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'scripts/site/**', 'scripts/release/**', '.github/workflows/pages.yml', 'src/web/**', 'vite.web.config.mts']
   workflow_dispatch:
   schedule:
     - cron: '23 */3 * * *'
@@ -72,11 +72,28 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Choose the release and build the page
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      # The web app. These settings are public by design (a project URL and its anon key; what a signed-in
+      # user can reach is decided by the database's row-level security). Never put a service-role key here.
+      # Without them the app is still built and works signed-out, with no sync and no AI tutor.
+      - name: Build the web app
+        env:
+          VITE_SUPABASE_URL: ${{ vars.INKLING_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.INKLING_SUPABASE_ANON_KEY }}
+          VITE_INKLING_BETA_URL: ${{ vars.INKLING_BETA_URL }}
+          VITE_INKLING_FEEDBACK_URL: ${{ vars.INKLING_FEEDBACK_URL }}
+        run: |
+          npm run build:web
+          [ -n "$VITE_SUPABASE_URL" ] && [ -n "$VITE_SUPABASE_ANON_KEY" ] || echo "::warning title=Web app::INKLING_SUPABASE_URL / INKLING_SUPABASE_ANON_KEY are not set: this build has no accounts or sync"
+          [ -n "$VITE_INKLING_BETA_URL" ] || echo "::warning title=Web app::INKLING_BETA_URL is not set: this build has no AI tutor"
+      - name: Choose the release and build the pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FEEDBACK_URL: ${{ vars.INKLING_FEEDBACK_URL }}
-        run: node scripts/site/build-site.mjs --out _site
+        run: node scripts/site/build-site.mjs --out _site --app out/web
       - name: Check the page links only to verified installers
         run: node scripts/site/check-site.mjs _site
       - uses: actions/upload-pages-artifact@v4

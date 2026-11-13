@@ -33,6 +33,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run build:web
       # The cloud beta server (Cloudflare Worker): typecheck and a bundle dry run. Nothing is deployed.
       - run: npm ci
         working-directory: beta-server
@@ -65,6 +66,9 @@ jobs:
       - { name: Cloud beta, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "cloud" node tests/e2e/cloud.e2e.mjs }
       - { name: Layout, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "layout" node tests/e2e/layout.e2e.mjs }
       - { name: Release, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "release" node tests/e2e/release.e2e.mjs }
+      # The web app in Chromium (accounts, sync, offline, phone and tablet), and the desktop app syncing with it.
+      - run: npx playwright-core install --with-deps chromium
+      - { name: Web app and sync, if: always(), run: xvfb-run -a node scripts/ci-run.mjs "web" node tests/e2e/web.e2e.mjs }
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

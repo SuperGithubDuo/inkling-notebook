@@ -4,17 +4,18 @@
 
 # Inkling
 
-**Write by hand. Get unstuck.**
+**think it, ink it, master it.**
 
-Handwritten notes on your computer, with an AI tutor that reads your working and marks it up on the page.
+Handwritten notes in your browser or on your computer, with an AI tutor that reads your working and marks it up on the page.
 
-[**⬇ Download Inkling**](https://supergithubduo.github.io/inkling-notebook/download/)
+[**Open Inkling**](https://supergithubduo.github.io/inkling-notebook/app/)
+&nbsp;·&nbsp; [Download for Windows or Mac](https://supergithubduo.github.io/inkling-notebook/download/)
 &nbsp;·&nbsp; [Install guide](docs/INSTALL.md)
 &nbsp;·&nbsp; [User guide](docs/USER-GUIDE.md)
 &nbsp;·&nbsp; [Privacy](docs/PRIVACY.md)
 &nbsp;·&nbsp; [Feedback &amp; support](SUPPORT.md)
 
-Free beta · Windows 10/11 · macOS 12 or later
+Free beta · any modern browser (computer, tablet, phone) · Windows 10/11 · macOS 12 or later
 
 **Status:** public beta. The latest version is on the [download page](https://supergithubduo.github.io/inkling-notebook/download/); see [release notes](RELEASE_NOTES.md).
 

@@ -1,5 +1,7 @@
 # Inkling architecture
 
+The web app, accounts and sync are described in [WEB.md](WEB.md); this page covers what both platforms share and the desktop app.
+
 How Inkling is put together, for contributors. See also [Developing Inkling](DEVELOPMENT.md) and [AI providers](AI.md).
 
 ## Notebook context API

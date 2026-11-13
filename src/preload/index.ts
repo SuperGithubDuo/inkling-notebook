@@ -1,7 +1,28 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type InklingApi } from '@shared/ipc'
 
+const subscribe = <T,>(channel: string, handler: (value: T) => void): (() => void) => {
+  const listener = (_e: unknown, value: T): void => handler(value)
+  ipcRenderer.on(channel, listener)
+  return () => ipcRenderer.removeListener(channel, listener)
+}
+
 const api: InklingApi = {
+  platform: 'desktop',
+  account: {
+    state: () => ipcRenderer.invoke(IPC.accountState),
+    signInWithGoogle: () => ipcRenderer.invoke(IPC.accountGoogle),
+    signInWithEmail: (email) => ipcRenderer.invoke(IPC.accountEmail, email),
+    verifyEmailCode: (email, code) => ipcRenderer.invoke(IPC.accountVerify, email, code),
+    confirmMigration: (accept) => ipcRenderer.invoke(IPC.accountMigrate, accept),
+    signOut: () => ipcRenderer.invoke(IPC.accountSignOut),
+    syncNow: () => ipcRenderer.invoke(IPC.accountSync),
+    versions: (path) => ipcRenderer.invoke(IPC.accountVersions, path),
+    restoreVersion: (path, id) => ipcRenderer.invoke(IPC.accountRestore, path, id),
+    dismissConflict: (path) => ipcRenderer.invoke(IPC.accountDismiss, path),
+    onState: (handler) => subscribe(IPC.accountChanged, handler)
+  },
+  onDocsChanged: (handler) => subscribe(IPC.docsChanged, handler),
   testHooks: process.argv.includes('--inkling-test-hooks'),
   loadLibrary: () => ipcRenderer.invoke(IPC.loadLibrary),
   saveLibrary: (library) => ipcRenderer.invoke(IPC.saveLibrary, library),

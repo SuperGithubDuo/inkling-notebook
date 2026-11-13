@@ -17,7 +17,7 @@
  * quietly treating a release as unverifiable, so a hiccup can never replace a good page with an
  * older release or "nothing available". The last good deployment stays live until the next run.
  *
- *   node scripts/site/build-site.mjs [--out _site]                  # live: GitHub API (GITHUB_TOKEN optional)
+ *   node scripts/site/build-site.mjs [--out _site] [--app out/web]                  # live: GitHub API (GITHUB_TOKEN optional)
  *   node scripts/site/build-site.mjs --releases-file r.json --tag-commits c.json   # offline/tests
  *
  * Env: GITHUB_REPOSITORY (default SuperGithubDuo/inkling-notebook), GITHUB_TOKEN, FEEDBACK_URL,
@@ -104,7 +104,7 @@ export function renderPage(html, release, site) {
   return out
 }
 
-export function buildSite({ siteDir, outDir, releases, tagCommits, config, feedbackUrl, generatedAt }) {
+export function buildSite({ siteDir, outDir, releases, tagCommits, config, feedbackUrl, generatedAt, appDir }) {
   const { manifest, rejected } = pickRelease(releases, { withdrawn: config.withdrawn ?? [], tagCommits })
   const release = manifest ?? noReleaseManifest()
   const site = { feedbackUrl: safeFeedbackUrl(feedbackUrl), generatedAt }
@@ -117,6 +117,8 @@ export function buildSite({ siteDir, outDir, releases, tagCommits, config, feedb
   }
   writeFileSync(join(outDir, 'release.json'), JSON.stringify({ ...release, generatedAt }, null, 2) + '\n')
   writeFileSync(join(outDir, '.nojekyll'), '')
+  // The web app (npm run build:web), served at /app/: what “Open Inkling” opens.
+  if (appDir) cpSync(appDir, join(outDir, 'app'), { recursive: true })
   return { release, rejected }
 }
 
@@ -201,7 +203,8 @@ async function main() {
     tagCommits,
     config,
     feedbackUrl: process.env.FEEDBACK_URL || config.feedbackUrl,
-    generatedAt: new Date().toISOString()
+    generatedAt: new Date().toISOString(),
+    appDir: arg('--app') ? resolve(arg('--app')) : undefined
   })
   const lines = [
     release.status === 'available'

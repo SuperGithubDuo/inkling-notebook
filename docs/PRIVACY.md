@@ -15,7 +15,11 @@ Your notebooks are saved on your computer:
 
 Tutor chats are kept only while Inkling is open. Marks you add to a page from the tutor are saved in that notebook like your own work.
 
-We have no account system and no cloud storage, and we can't see your notebooks.
+Without an account, nothing above leaves your device, and we can't see your notebooks. In the web app, "your device" means this browser's storage for the Inkling site.
+
+### Optional account and sync
+
+*(Added 12 Nov 2026 with the web app; needs the same legal review.)* If you sign in (email code or link, or Google), your notebooks — pages, notes, images, PDFs — are also stored with **Supabase** [OPERATOR TO SUPPLY: Supabase region and data-processing terms], so they appear on your other devices. We store your email address to identify the account, up to 20 earlier versions of each page for recovery, and a random device label ("web-…", "desktop-…"). Database rules allow only your account to read your rows and files. Notebooks from before you signed in are added only if you confirm. Signing out stops syncing; on the web it also removes the account's notebooks from that browser once they are synced. [OPERATOR DECISION REQUIRED: how users request deletion of their account and synced data; retention after deletion.]
 
 ## What leaves your device, and when
 

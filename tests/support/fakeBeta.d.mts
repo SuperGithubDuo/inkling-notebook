@@ -54,6 +54,8 @@ export interface BetaServerOptions {
   imagePatch?: number
   /** The text-only model for requests without handwriting context (beta-server/src/route.ts). */
   textModel?: { model: string; rates: { inputPerM: number; outputPerM: number }; tasks?: readonly ('chat' | 'practice' | 'check')[] } | null
+  /** Web app origins allowed to call the API from a browser. */
+  allowedOrigins?: string[]
   port?: number
 }
 export interface RecordedRequest {

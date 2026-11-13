@@ -55,7 +55,8 @@ export function AiSettings() {
 
   return (
     <div className="space-y-4" data-testid="ai-settings" data-provider={status.provider}>
-      <div role="radiogroup" aria-label="AI provider" className={cx('grid grid-cols-1 gap-1.5', status.geminiAvailable ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
+      {/* The web app has Inkling's cloud AI only; the tutor on your own computer (Ollama) is a desktop feature. */}
+      <div role="radiogroup" aria-label="AI provider" hidden={window.inkling.platform === 'web'} className={cx(window.inkling.platform === 'web' ? 'hidden' : 'grid', 'grid-cols-1 gap-1.5', status.geminiAvailable ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
         {(status.geminiAvailable ? (['cloud', 'ollama', 'gemini'] as const) : (['cloud', 'ollama'] as const)).map((id) => {
           const selected = status.provider === id
           return (
@@ -138,7 +139,9 @@ function CloudSettings({ status }: { status: AiStatus }) {
   if (!cloud.url) {
     return (
       <p className="rounded-xl border border-line px-3 py-2.5 text-[13px] text-ink-2" data-testid="ai-cloud-unavailable">
-        This version of Inkling has no cloud AI built in. Use the tutor on this computer (Ollama), or Google Gemini with your own key.
+        {window.inkling.platform === 'web'
+          ? 'The AI tutor isn’t switched on for this copy of the web app yet. The desktop app can also run a tutor entirely on your own computer.'
+          : 'This version of Inkling has no cloud AI built in. Use the tutor on this computer (Ollama), or Google Gemini with your own key.'}
       </p>
     )
   }

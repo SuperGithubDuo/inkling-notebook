@@ -10,4 +10,7 @@ interface ImportMetaEnv {
   readonly MAIN_VITE_INKLING_FEEDBACK_URL?: string
   /** '1' offers Google Gemini in a packaged build. Unset: no Gemini (public all-ages builds). Development always has it. */
   readonly MAIN_VITE_INKLING_ENABLE_GEMINI?: string
+  /** Accounts and sync: the Supabase project's URL and public (anon) key. Unset: no accounts; everything stays on this computer. */
+  readonly MAIN_VITE_SUPABASE_URL?: string
+  readonly MAIN_VITE_SUPABASE_ANON_KEY?: string
 }

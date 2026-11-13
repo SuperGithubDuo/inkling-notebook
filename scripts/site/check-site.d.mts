@@ -1,1 +1,1 @@
-export function checkSite(dir: string): string[]
+export function checkSite(dir: string, options?: { requireApp?: boolean }): string[]

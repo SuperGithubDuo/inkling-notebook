@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { PDFJS_RESOURCE_URL, assetUrl } from '@shared/ipc'
+import { assetSrc, assetUrl, pdfjsResourceUrl } from '@shared/ipc'
 
 let pdfjs: Promise<typeof import('pdfjs-dist')> | null = null
 function loadPdfjs(): Promise<typeof import('pdfjs-dist')> {
@@ -26,7 +26,7 @@ function loadPdfjs(): Promise<typeof import('pdfjs-dist')> {
 const docs = new Map<string, Promise<PDFDocumentProxy>>()
 
 export async function readAssetBytes(notebookId: string, asset: string): Promise<Uint8Array> {
-  const res = await fetch(assetUrl(notebookId, asset))
+  const res = await fetch(assetSrc(assetUrl(notebookId, asset)))
   if (!res.ok) throw new Error(`Could not read ${asset}`)
   return new Uint8Array(await res.arrayBuffer())
 }
@@ -39,11 +39,11 @@ export function loadPdf(notebookId: string, asset: string): Promise<PDFDocumentP
       ([data, { getDocument }]) =>
         getDocument({
           data,
-          standardFontDataUrl: `${PDFJS_RESOURCE_URL}standard_fonts/`,
-          cMapUrl: `${PDFJS_RESOURCE_URL}cmaps/`,
+          standardFontDataUrl: `${pdfjsResourceUrl()}standard_fonts/`,
+          cMapUrl: `${pdfjsResourceUrl()}cmaps/`,
           cMapPacked: true,
-          wasmUrl: `${PDFJS_RESOURCE_URL}wasm/`,
-          iccUrl: `${PDFJS_RESOURCE_URL}iccs/`,
+          wasmUrl: `${pdfjsResourceUrl()}wasm/`,
+          iccUrl: `${pdfjsResourceUrl()}iccs/`,
           // Resources are fetched through the app's own protocol by this page.
           useWorkerFetch: false,
           // XFA forms are not rendered (and no PDF scripts are ever run).
