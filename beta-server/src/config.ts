@@ -169,11 +169,19 @@ export function limits(env: Env): LedgerLimits {
   }
 }
 
-/** Verifies signed-in requests against Supabase; undefined (accounts off, all requests anonymous) unless both settings are valid. */
+/**
+ * Verifies signed-in requests against Supabase. Neither setting: accounts off on purpose (undefined,
+ * every request anonymous). Only one, or a bad URL: a mistake, so signed-in requests are refused
+ * ('unavailable') rather than quietly answered without their account; anonymous ones are unaffected.
+ */
 export function accounts(env: Env): Accounts | undefined {
   const url = env.SUPABASE_URL?.trim().replace(/\/+$/, '')
   const anonKey = env.SUPABASE_ANON_KEY?.trim()
-  if (!url || !anonKey || !/^https:\/\/[a-z0-9.-]+$/.test(url)) return undefined
+  if (!url && !anonKey) return undefined
+  if (!url || !anonKey || !/^https:\/\/[a-z0-9.-]+$/.test(url)) {
+    console.error('accounts misconfigured: SUPABASE_URL (https) and SUPABASE_ANON_KEY must both be set')
+    return async () => 'unavailable'
+  }
   return supabaseAccounts({ url, anonKey })
 }
 

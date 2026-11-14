@@ -501,7 +501,8 @@ async function admin(request: Request, url: URL, deps: Deps): Promise<Response> 
   // Without an ADMIN_TOKEN secret the admin API is off.
   if (!config.adminTokenHash || !auth || !timingSafeHexEqual(await sha256Hex(auth[1]!), config.adminTokenHash)) return problem(404, 'bad_request', 'Not found.')
 
-  if (url.pathname === '/admin/summary' && request.method === 'GET') return json(200, await ledger.summary())
+  // accounts: whether signed-in requests are verified ('off': all anonymous), so a rollout can check it.
+  if (url.pathname === '/admin/summary' && request.method === 'GET') return json(200, { ...(await ledger.summary()), accounts: deps.accounts ? 'on' : 'off' })
   if (url.pathname === '/admin/pause' && request.method === 'POST') {
     const body = (await request.json().catch(() => ({}))) as { paused?: unknown }
     await ledger.setPaused(body.paused !== false)

@@ -24,6 +24,10 @@ const SUPABASE_STUB = `
   grant execute on function auth.uid() to anon, authenticated;
   grant all on storage.objects to anon, authenticated;
   insert into auth.users values ('${ALICE}'), ('${BOB}');
+  -- Like a Supabase project: everything new in public is granted to the API roles unless a migration revokes it.
+  alter default privileges in schema public grant all on tables to anon, authenticated;
+  alter default privileges in schema public grant all on sequences to anon, authenticated;
+  alter default privileges in schema public grant execute on functions to anon, authenticated;
 `
 
 export const MIGRATIONS = join(import.meta.dirname, '../../supabase/migrations')

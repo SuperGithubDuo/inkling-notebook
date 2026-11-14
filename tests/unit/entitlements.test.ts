@@ -106,6 +106,24 @@ describe('entitlements in Supabase', () => {
     await expect(entitlementOf(null)).rejects.toThrow(/permission denied/)
   })
 
+  it('the revokes hold against Supabase’s default grants to the API roles', async () => {
+    await db.exec('create table public.probe (x int)')
+    // The stub grants new objects like Supabase does, so a missing revoke would show here.
+    expect((await db.query<{ ok: boolean }>(`select has_table_privilege('anon', 'public.probe', 'insert') as ok`)).rows[0]!.ok).toBe(true)
+    await db.exec('drop table public.probe')
+    const priv = async (sql: string): Promise<boolean> => (await db.query<{ ok: boolean }>(`select ${sql} as ok`)).rows[0]!.ok
+    for (const role of ['anon', 'authenticated']) {
+      for (const p of ['insert', 'update', 'delete', 'truncate', 'references', 'trigger']) expect(await priv(`has_table_privilege('${role}', 'public.subscriptions', '${p}')`), `${role} ${p}`).toBe(false)
+    }
+    expect(await priv(`has_table_privilege('anon', 'public.subscriptions', 'select')`)).toBe(false)
+    expect(await priv(`has_table_privilege('authenticated', 'public.subscriptions', 'select')`)).toBe(true)
+    expect(await priv(`has_function_privilege('anon', 'public.my_entitlement()', 'execute')`)).toBe(false)
+    expect(await priv(`has_function_privilege('authenticated', 'public.my_entitlement()', 'execute')`)).toBe(true)
+    // Security invoker: it runs with the caller's rights (and RLS), never the owner's.
+    expect((await db.query<{ d: boolean }>(`select prosecdef as d from pg_proc where proname = 'my_entitlement'`)).rows[0]!.d).toBe(false)
+    expect((await db.query<{ r: boolean }>(`select relrowsecurity as r from pg_class where relname = 'subscriptions'`)).rows[0]!.r).toBe(true)
+  })
+
   it('no client can grant itself (or anyone) Pro', async () => {
     const future = new Date(Date.now() + 86400_000).toISOString()
     await expect(as(ALICE, `insert into subscriptions (user_id, plan, status, pro_until) values ('${ALICE}', 'pro', 'active', '${future}')`)).rejects.toThrow(/permission denied/)
@@ -217,11 +235,30 @@ describe('account verification in the AI server', () => {
     expect(await verify(short)).toBe('invalid')
   })
 
-  it('is off unless the Worker has a valid https Supabase URL and anon key', () => {
+  it('off only when neither Supabase setting is given; half a configuration refuses signed-in requests', async () => {
     expect(accountsFromEnv({} as Env)).toBeUndefined()
-    expect(accountsFromEnv({ SUPABASE_URL: SUPABASE } as Env)).toBeUndefined()
-    expect(accountsFromEnv({ SUPABASE_URL: 'http://project.supabase.co', SUPABASE_ANON_KEY: ANON_KEY } as Env)).toBeUndefined()
-    expect(typeof accountsFromEnv({ SUPABASE_URL: SUPABASE + '/', SUPABASE_ANON_KEY: ANON_KEY } as Env)).toBe('function')
+    expect(accountsFromEnv({ SUPABASE_URL: ' ', SUPABASE_ANON_KEY: '' } as Env)).toBeUndefined()
+    const errors: unknown[] = []
+    const orig = console.error
+    console.error = (...a: unknown[]) => void errors.push(a.join(' '))
+    try {
+      for (const env of [{ SUPABASE_URL: SUPABASE }, { SUPABASE_ANON_KEY: ANON_KEY }, { SUPABASE_URL: 'http://project.supabase.co', SUPABASE_ANON_KEY: ANON_KEY }, { SUPABASE_URL: 'project.supabase.co', SUPABASE_ANON_KEY: ANON_KEY }]) {
+        const verify = accountsFromEnv(env as Env)
+        expect(verify, JSON.stringify(env)).toBeTypeOf('function')
+        expect(await verify!(sb.token(ALICE))).toBe('unavailable')
+      }
+    } finally {
+      console.error = orig
+    }
+    expect(errors).toHaveLength(4)
+    expect(JSON.stringify(errors)).not.toContain(ANON_KEY)
+    expect(accountsFromEnv({ SUPABASE_URL: SUPABASE + '/', SUPABASE_ANON_KEY: ANON_KEY } as Env)).toBeTypeOf('function')
+  })
+
+  it('refuses an answer for a different account than the token’s subject', async () => {
+    const t = sb.token(ALICE)
+    const swapped = supabaseAccounts({ url: SUPABASE, anonKey: ANON_KEY, fetch: (async () => Response.json(await entitlementOf(BOB))) as unknown as typeof fetch })
+    expect(await swapped(t)).toBe('invalid')
   })
 })
 
@@ -288,6 +325,26 @@ describe('per-account AI allowances', () => {
     expect([withPro.globalDailyNeurons, withPro.globalMonthly]).toEqual([limitsFromEnv(env).globalDailyNeurons, limitsFromEnv(env).globalMonthly])
     expect(limitsFromEnv({ ACCOUNT_PLAN: 'free' } as Env).pro).toBeUndefined()
     expect(limitsFromEnv({ ACCOUNT_PLAN: 'free', PRO_DAILY_NEURONS: '1800' } as Env).pro).toEqual({ daily: 1800 })
+  })
+
+  it('switching between Free and Pro keeps the same account counters: nothing resets', async () => {
+    const ledger = fresh()
+    const as = (plan: 'free' | 'pro'): Identity => ({ install: `acct:${ALICE}`, network: '10.2.2.2', plan })
+    const r = await ledger.reserve(as('free'), 150, 150)
+    if (!r.ok) throw new Error(r.code)
+    await ledger.settle(r.reservationId, 150)
+    expect(await ledger.quota(as('pro'))).toMatchObject({ installUsed: 150, installLimit: 600, plan: 'pro' })
+    const p = await ledger.reserve(as('pro'), 300, 300)
+    if (!p.ok) throw new Error(p.code)
+    await ledger.settle(p.reservationId, 300)
+    // Pro lapses: 450 used counts against Free's 200 (refused), and coming back to Pro finds it too.
+    expect(await ledger.reserve(as('free'), 10, 10)).toMatchObject({ ok: false, code: 'install_quota' })
+    expect((await ledger.quota(as('pro'))).installUsed).toBe(450)
+    // An answer in progress on Free is still in progress on Pro: one at a time per account.
+    const one = fresh({ ...limits, installConcurrent: 1 })
+    const open = await one.reserve(as('free'), 10, 10)
+    expect(open.ok).toBe(true)
+    expect(await one.reserve(as('pro'), 10, 10)).toMatchObject({ ok: false, code: 'busy' })
   })
 
   it('a Free account is counted per account and gets the anonymous allowance', async () => {
@@ -379,6 +436,36 @@ describe('AI server with accounts', () => {
     expect(r.status).toBe(200)
     expect(r.done.quota.plan).toBeUndefined()
     expect(sb.state.calls).toBe(0)
+  })
+
+  it('never logs a token, whatever happens to it; the operator summary says whether accounts are on', async () => {
+    await start()
+    const logs: string[] = []
+    const orig = { log: console.log, info: console.info, warn: console.warn, error: console.error, debug: console.debug }
+    for (const k of Object.keys(orig) as Array<keyof typeof orig>) console[k] = (...a: unknown[]) => void logs.push(a.map(String).join(' '))
+    const tokens = [sb.token(ALICE), sb.token(ALICE, { exp: Math.floor(Date.now() / 1000) - 5 }), jwt({ sub: ALICE, iss: `${SUPABASE}/auth/v1`, exp: Math.floor(Date.now() / 1000) + 99 })]
+    try {
+      for (const t of tokens) await post(chat('hi'), { token: t })
+      sb.state.down = true
+      const t = sb.token(BOB)
+      tokens.push(t)
+      await post(chat('hi'), { token: t })
+      sb.state.down = false
+      sb.state.status = 500
+      const u = sb.token(BOB)
+      tokens.push(u)
+      await post(chat('hi'), { token: u })
+      await server.settled()
+    } finally {
+      Object.assign(console, orig)
+    }
+    expect(logs.length).toBeGreaterThan(0)
+    for (const t of tokens) for (const part of t.split('.')) expect(logs.join('\n')).not.toContain(part)
+    expect(logs.join('\n')).not.toContain(ALICE)
+    expect((await server.admin('GET', '/admin/summary')).body.accounts).toBe('on')
+    await server.close()
+    server = await startBetaServer({})
+    expect((await server.admin('GET', '/admin/summary')).body.accounts).toBe('off')
   })
 
   it('CORS lets the web app send its token', async () => {

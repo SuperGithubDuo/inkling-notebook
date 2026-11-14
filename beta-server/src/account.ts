@@ -25,7 +25,7 @@ const CACHE_MAX = 2000
 const TIMEOUT_MS = 5000
 
 /** The JWT's claims, unverified: only used to refuse early and to bound the cache, never to grant anything. */
-function claims(token: string): { exp?: number; iss?: string } | null {
+function claims(token: string): { exp?: number; iss?: string; sub?: string } | null {
   const part = /^[A-Za-z0-9_-]+\.([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+$/.exec(token)?.[1]
   if (!part) return null
   try {
@@ -65,13 +65,16 @@ export function supabaseAccounts(o: { url: string; anonKey: string; fetch?: type
         signal: AbortSignal.timeout(TIMEOUT_MS)
       })
       if (res.status === 401 || res.status === 403) result = 'invalid'
-      else if (!res.ok) return 'unavailable'
-      else {
+      else if (!res.ok) {
+        console.warn('accounts: Supabase answered', res.status)
+        return 'unavailable'
+      } else {
         const parsed = entitlementSchema.safeParse(await res.json().catch(() => undefined))
-        // null (no session behind the token) or anything malformed: not a verified account.
-        result = parsed.success ? { userId: parsed.data.user_id, plan: parsed.data.plan } : 'invalid'
+        // null (no session behind the token), anything malformed, or another account's row: not verified.
+        result = parsed.success && parsed.data.user_id === c.sub ? { userId: parsed.data.user_id, plan: parsed.data.plan } : 'invalid'
       }
-    } catch {
+    } catch (err) {
+      console.warn('accounts: Supabase unreachable', (err as Error)?.name)
       return 'unavailable'
     }
     if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!)
