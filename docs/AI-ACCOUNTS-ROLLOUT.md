@@ -1,17 +1,17 @@
 # Account-based AI: rollout runbook
 
-Status as of 14 Nov 2026. Nothing here has been run against production yet. Every step needs the operator's approval.
+Status as of 14 Nov 2026: steps 1 and 2 are done (by the operator); steps 3–5 are not started. Every remaining step needs the operator's approval.
 
 ## Where production is
 
 | Piece | State | Evidence |
 |---|---|---|
 | Web app (GitHub Pages) | **Live with #23**: signed-in browsers send `Authorization: Bearer <access token>` | "Website and web app" run 43614526024 deployed `8be522c` at 16:15 UTC; Supabase is configured in that build |
-| AI Worker `inkling-ai-beta` | **Pre-#22 code** (`fa46e27`, "switch provider" run 43535497011): no account verification, and its CORS preflight allows only `content-type, x-inkling-install, x-inkling-notice` | Last production deploy; `beta-server.yml` hasn't deployed since 4 Nov |
+| AI Worker `inkling-ai-beta` | **Updated** (step 1): current code on DeepInfra; the CORS preflight allows `authorization`. Signed-in Inkling Web AI Tutor tested against the live DeepInfra backend. No `SUPABASE_*` settings, so account verification is off: tokens are accepted by the browser check but ignored, and everyone gets the per-computer allowance | Operator, 14 Nov 2026 |
 | Supabase migration `20261114000000_entitlements.sql` | **Applied** by hand (SQL editor), verified by the operator; migration history to reconcile (step 2) | Operator, 14 Nov 2026 |
 | Desktop app | No release since #23; sends no token | `release.yml` not run |
 
-**Live problem.** In a browser, a signed-in user who accepts notice 5 sends an `Authorization` header. The old Worker's preflight doesn't allow that header, so the browser blocks the request and the tutor says it "couldn't reach Inkling's AI server". Anonymous web users, desktop users, notebooks and sync are not affected. Step 1 fixes it.
+**Resolved: signed-in web requests blocked by CORS.** The Worker that ran until step 1 (`fa46e27`, before #22) didn't allow the `Authorization` header that #23's web app sends when signed in, so browsers blocked those requests. Step 1 fixed it; anonymous web users, desktop users, notebooks and sync were never affected.
 
 ## Budget today (`wrangler.deepinfra.jsonc`)
 
@@ -41,36 +41,40 @@ With today's $0.25 a day, two heavy Pro users would use most of everyone's day. 
 
 ## Deployment sequence
 
-Run each step only after the previous one checks out. Steps 1, 3 and 5 are Worker deploys. Do them with *Actions → AI server - switch provider (production) → target `deepinfra`*: it checks the configuration, deploys, verifies, and rolls back to `wrangler.jsonc` by itself if verification fails.
+Run each step only after the previous one checks out. Steps 4 and 5 are production Worker deploys. Do them with *Actions → AI server - switch provider (production) → target `deepinfra`*: it checks the configuration, deploys, verifies, and rolls back to `wrangler.jsonc` by itself if verification fails. Step 3 deploys only the separate staging Worker.
 
-### 1. Fix the live CORS problem (no behaviour change)
-1. Merge this PR.
-2. Run the switch-provider workflow on `main`, target `deepinfra`. Change no settings: Supabase settings stay unset, so accounts stay off.
-3. Check:
-```bash
-curl -si -X OPTIONS https://inkling-ai-beta.shenjonas9.workers.dev/v1/tutor -H 'origin: https://supergithubduo.github.io' -H 'access-control-request-method: POST' | grep -i access-control-allow-headers
-```
-   The answer must include `authorization`.
-```bash
-curl -s https://inkling-ai-beta.shenjonas9.workers.dev/admin/summary -H "Authorization: Bearer $INKLING_ADMIN_TOKEN" | jq '{accounts, globalUsed, globalLimit, monthUsed, monthLimit}'
-```
-   `accounts` must be `"off"`, and the limits must be unchanged.
-4. In the web app, signed in: ask one question. It should be answered, with the allowance shown per computer and no plan badge.
+### 1. Fix the live CORS problem: **done** (operator, 14 Nov 2026)
+The updated Worker was deployed to production with no setting changes, and a signed-in Inkling Web AI Tutor question was answered by the live DeepInfra backend. Nothing to repeat.
 
 ### 2. Apply the Supabase migration: **done** (operator, 14 Nov 2026)
 Applied by hand in the SQL editor. The operator checked: the table and function exist, RLS is on, signed-in users can't write, visitors can't read or call, and `my_entitlement()` is security invoker.
 
-**Reconcile the migration history.** The SQL editor doesn't record migrations, so the Supabase CLI would treat this one as pending. Running it again would be harmless, because the file is idempotent (`tests/unit/supabaseSchema.test.ts` applies every migration twice), but the history should still say what is true. This is read-only except the last command, which writes one history row and runs no SQL from the file.
+**Reconcile the migration history.** What is known:
+
+| | Local file (`supabase/migrations/`) | Remote history (`supabase_migrations.schema_migrations`) | Database |
+|---|---|---|---|
+| Sync schema | `20261112000000_sync.sql` | `20261113000414 inkling_sync` | applied (the app syncs) |
+| Entitlements | `20261114000000_entitlements.sql` | not recorded (SQL editor) | applied and verified |
+
+So the two disagree twice: the sync schema is recorded under a different version than the local file, and the entitlements schema isn't recorded at all. Until they agree, **don't run `supabase db push`**. It would try to apply both local files, and the CLI may refuse because remote version `20261113000414` has no local file. (Both files are idempotent, so a re-run wouldn't damage data, but the history would still be wrong.)
+
+**Entitlements** (verified, so it can be recorded). After `supabase link --project-ref tfsnxihtmsdufjiyfkmv`, which asks for the database password:
 ```bash
-supabase link --project-ref tfsnxihtmsdufjiyfkmv      # asks for the database password; links this folder only
-supabase migration list --linked                       # Local vs Remote columns
+supabase migration list --linked     # read-only: expect 20261114000000 under Local only
+supabase migration repair --status applied 20261114000000 --linked   # writes one history row; runs no SQL from the file
 ```
-- `20261114000000` (and `20261112000000`, if it was also applied by hand) shows under Local with Remote empty: mark each as applied, without running it:
-```bash
-supabase migration repair --status applied 20261114000000 --linked
+Before the repair, confirm that the file you pasted is the repo's: `sha256sum supabase/migrations/20261114000000_entitlements.sql`.
+
+**Sync schema: don't mark anything applied yet.** First check what `20261113000414` actually contains. This is read-only, in the SQL editor:
+```sql
+select version, name, array_length(statements, 1) as statements from supabase_migrations.schema_migrations order by version;
+select statements from supabase_migrations.schema_migrations where version = '20261113000414';
 ```
-  Add `20261112000000` the same way if needed. Then run `supabase migration list --linked` again: both columns show both versions.
-- To confirm the file matches what was pasted, run `sha256sum supabase/migrations/20261114000000_entitlements.sql` and compare it with the copy you ran. From now on, apply migrations with `supabase db push --linked`, which records them, not the SQL editor.
+Compare it with `supabase/migrations/20261112000000_sync.sql`.
+- **If it is the same schema:** the cleanest fix is a separate PR that renames the local file to `20261113000414_inkling_sync.sql`, so local and remote agree without touching the database. The file order stays the same: sync before entitlements.
+- **If it differs:** stop and review the differences before any repair or push. Never run `migration repair --status applied 20261112000000` without that check.
+
+From now on, apply migrations with `supabase db push --linked` (which records them) once `supabase migration list --linked` shows local and remote in agreement, not with the SQL editor.
 
 ### 3. Staging check of account verification
 A temporary Worker, `inkling-ai-accounts-test`, defined in `beta-server/wrangler.accounts-staging.jsonc`. It runs the same code as `main`, against production Supabase with its public values only.
