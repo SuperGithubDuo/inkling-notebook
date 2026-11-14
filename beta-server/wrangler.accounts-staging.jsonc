@@ -1,0 +1,48 @@
+{
+  // TEMPORARY staging Worker for the account-verification checks (docs/AI-ACCOUNTS-ROLLOUT.md, step 3).
+  // Always use it as: npx wrangler <command> -c wrangler.accounts-staging.jsonc
+  // Its own script name, so its own Durable Object (ledger), secrets and deployments: nothing it does
+  // touches inkling-ai-beta. Workers AI on the Free plan (cannot bill), with a tiny daily cap because
+  // the free Neuron allowance is shared by the whole Cloudflare account (production's bridge for older
+  // apps uses it too). Delete it after the checks: npx wrangler delete -c wrangler.accounts-staging.jsonc
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "inkling-ai-accounts-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "alias": { "@shared": "../src/shared" },
+  "ai": { "binding": "AI" },
+  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "LedgerObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LedgerObject"] }],
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
+  "vars": {
+    // No browser may call it: tests use curl.
+    "WEB_ORIGINS": "",
+    "MODEL": "@cf/qwen/qwen3.8-27b",
+    "ACCOUNT_PLAN": "free",
+    // At most 400 Neurons a day for the whole test (4% of the account's free 10,000).
+    "GLOBAL_DAILY_NEURONS": "400",
+    "INSTALL_DAILY_NEURONS": "150",
+    "NETWORK_DAILY_NEURONS": "1000",
+    // Staging only, to see Pro's own allowance: twice Free. Not a production recommendation.
+    "PRO_DAILY_NEURONS": "300",
+    "INSTALL_PER_MINUTE": "6",
+    "NETWORK_PER_MINUTE": "20",
+    "INSTALL_CONCURRENT": "1",
+    "NETWORK_CONCURRENT": "4",
+    "GLOBAL_CONCURRENT": "2",
+    "TYPICAL_NEURONS_PER_ANSWER": "40",
+    "MAX_INPUT_TOKENS": "12000",
+    "INPUT_NEURONS_PER_M": "40909",
+    "OUTPUT_NEURONS_PER_M": "290909",
+    "REASONING_EFFORT": "low",
+    "DISABLE_THINKING": "true",
+    "STRUCTURED": "prompt",
+    "IMAGE_PATCH": "28",
+    "MODEL_TEXT": "",
+    // Production Supabase, public values only (the same ones the web app ships). Never the service-role key.
+    "SUPABASE_URL": "https://tfsnxihtmsdufjiyfkmv.supabase.co",
+    "SUPABASE_ANON_KEY": "sb_publishable_UL1qBPOQnEYay-5u4ZE5Pw_IzBaZIDz"
+  }
+}
