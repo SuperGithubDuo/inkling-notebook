@@ -64,10 +64,12 @@ export async function copyGuest(user: string, account: Db, assets: Db, engine: S
   let target: Library
   if (mine && theirs.used.notebooks.every((n) => have.has(n.id))) target = mine // a repeat: the list is already combined
   else {
-    // An account with notebooks of its own gets the used guest notebooks added. An account with nothing yet
-    // (just this browser's fresh starter shelf) takes over the guest's shelf as it was.
-    const mineUsed = mine ? await withoutPristine(mine, read) : null
-    target = mineUsed?.notebooks.length ? merge3(undefined, mineUsed, theirs.used).merged : theirs.full
+    // Only a brand-new *unsynced* starter shelf may be replaced. Pruning an existing account's
+    // pristine notebooks removes legitimate notebooks that were already saved in the cloud.
+    const cloudLibrary = mine ? await engine.hasCloudVersion(LIBRARY_PATH) : false
+    const localUsed = mine && !cloudLibrary ? await withoutPristine(mine, read) : null
+    const freshStarterOnly = !!mine && !cloudLibrary && !localUsed?.notebooks.length
+    target = !mine || freshStarterOnly ? theirs.full : merge3(undefined, mine, theirs.used).merged
   }
   const moving = new Set(theirs.full.notebooks.map((n) => n.id).filter((id) => target.notebooks.some((n) => n.id === id)))
   const put = async (path: string, content: unknown): Promise<void> => {

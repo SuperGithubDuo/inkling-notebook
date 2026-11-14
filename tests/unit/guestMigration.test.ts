@@ -135,6 +135,46 @@ describe('guest notebooks → account', () => {
     expect(merged.notebooks.map((x) => x.name)).toEqual(['Already mine', library.notebooks[0]!.name, library.notebooks[1]!.name])
   })
 
+  it('preserves every cloud-synced account notebook, including untouched starters', async () => {
+    const server = new FakeServer()
+    const a = await account()
+    await a.engine.link(server.remote(), USER)
+    const mine = createStarterLibrary()
+    const extra = createStarterLibrary().notebooks.slice(0, 2)
+    extra.forEach((nb, i) => {
+      nb.name = `Existing QA ${i + 1}`
+      nb.updatedAt += 1
+    })
+    mine.notebooks.push(...extra)
+    await a.engine.save(LIBRARY_PATH, mine)
+    await a.engine.sync() // These seven notebooks already belong to the account on the server.
+    expect((server.docs.get(LIBRARY_PATH)?.content as Library).notebooks).toHaveLength(7)
+
+    await copyGuest(USER, a.db, a.assets, a.engine, store)
+    await a.engine.sync()
+    const merged = (await a.engine.load(LIBRARY_PATH)) as Library
+    const cloud = server.docs.get(LIBRARY_PATH)?.content as Library
+    const expected = [...mine.notebooks, ...library.notebooks.slice(0, 2)]
+    for (const result of [merged, cloud]) {
+      expect(result.notebooks).toHaveLength(9)
+      expect(new Set(result.notebooks.map((nb) => nb.id))).toEqual(new Set(expected.map((nb) => nb.id)))
+    }
+  })
+
+  it('keeps a cloud account containing only untouched notebooks when importing used guest notes', async () => {
+    const server = new FakeServer()
+    const a = await account()
+    await a.engine.link(server.remote(), USER)
+    const mine = createStarterLibrary()
+    await a.engine.save(LIBRARY_PATH, mine)
+    await a.engine.sync()
+
+    await copyGuest(USER, a.db, a.assets, a.engine, store)
+    const merged = (await a.engine.load(LIBRARY_PATH)) as Library
+    expect(merged.notebooks).toHaveLength(7)
+    for (const nb of mine.notebooks) expect(merged.notebooks.some((n) => n.id === nb.id)).toBe(true)
+  })
+
   it('replaces a brand-new account’s untouched starter shelf rather than doubling it', async () => {
     // Regression: the account's database already holds the fresh starter notebooks the app made when it opened.
     const server = new FakeServer()

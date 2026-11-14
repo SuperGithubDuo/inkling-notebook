@@ -178,6 +178,12 @@ export class SyncEngine {
     return this.state.owner
   }
 
+  /** Whether this account already has a server revision of a document. */
+  async hasCloudVersion(path: string): Promise<boolean> {
+    await this.ready()
+    return (this.state.docs[path]?.rev ?? 0) > 0
+  }
+
   // ---------------------------------------------------------------- the app's side
 
   /** Reads a document for the app. */
