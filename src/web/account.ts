@@ -129,6 +129,8 @@ export async function startSession(appUrl: string): Promise<Session> {
     document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && auto.poke(0))
   }
 
+  /** The session ended without this tab signing out: no longer used for AI. A new sign-in reloads the page. */
+  let sessionEnded = false
   const reload = async (): Promise<void> => {
     await flush()
     location.reload()
@@ -137,6 +139,9 @@ export async function startSession(appUrl: string): Promise<Session> {
     // Signed in without leaving the page (the email code), or as someone else in another tab: start over as them.
     if (event === 'SIGNED_IN' && next && next.user.id !== who?.id) void reload()
     if (event === 'SIGNED_OUT' && who && session) {
+      // Signed out in another tab, or the session was revoked: the AI stops using this account at once.
+      // The notebooks, and changes not yet synced, stay in this browser.
+      sessionEnded = true
       engine.unlink()
       message = 'You were signed out. Sign in again to keep syncing; your notebooks are still on this device.'
       emit()
@@ -224,7 +229,7 @@ export async function startSession(appUrl: string): Promise<Session> {
     },
     dismissConflict: async (path) => engine.dismissConflict(path),
     ai: {
-      userId: () => who?.id ?? null,
+      userId: () => (sessionEnded ? null : (who?.id ?? null)),
       accessToken: async (userId, refresh) => (client ? accessTokenFor(client, userId, refresh) : null)
     },
     onState: (handler) => {

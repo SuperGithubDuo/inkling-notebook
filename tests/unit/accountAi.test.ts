@@ -13,6 +13,7 @@ import { AiConfig, type SecretCipher } from '../../src/main/ai/config'
 import { AiService, type AiAccount } from '../../src/main/ai/service'
 import { GeminiProvider } from '../../src/main/ai/gemini'
 import { OllamaProvider } from '../../src/main/ai/ollama'
+import { CloudProvider } from '../../src/main/ai/cloud'
 import { accessTokenFor, type SupabaseClient } from '../../src/shared/sync/supabase'
 import { CLOUD_ANON_CONSENT_VERSION, CLOUD_CONSENT_VERSION, type AiEvent, type CloudQuota } from '../../src/shared/ai'
 import { planLabel, quotaText } from '../../src/renderer/src/ai/AiSettings'
@@ -35,7 +36,7 @@ function accounts() {
   const valid = new Map<string, { userId: string; plan: 'free' | 'pro' }>()
   const session = new Map<string, string>()
   const plans = new Map<string, 'free' | 'pro'>()
-  const s = { user: null as string | null, down: false, offline: false, refreshFails: false, gets: 0, refreshes: 0, n: 0 }
+  const s = { user: null as string | null, down: false, offline: false, refreshFails: false, gets: 0, refreshes: 0, n: 0, slow: null as string | null }
   const issue = (userId: string): string => {
     const t = `access-${userId.slice(0, 4)}-${++s.n}`
     valid.set(t, { userId, plan: plans.get(userId) ?? 'free' })
@@ -63,7 +64,12 @@ function accounts() {
     }
   }
   /** The server's verifier (beta-server/src/account.ts in production). */
-  const verify = async (token: string) => (s.down ? ('unavailable' as const) : (valid.get(token) ?? ('invalid' as const)))
+  const verify = async (token: string) => {
+    const v = valid.get(token)
+    // A deliberately slow check for one account: its answers arrive late.
+    if (v && v.userId === s.slow) await new Promise((r) => setTimeout(r, 300))
+    return s.down ? ('unavailable' as const) : (v ?? ('invalid' as const))
+  }
   return { s, valid, session, signIn, account, verify, expire: (t: string) => valid.delete(t) }
 }
 
@@ -229,6 +235,50 @@ describe('the AI tutor with an account', () => {
     await server.settled()
     await new Promise((res) => setTimeout(res, 50))
     expect(quota()?.plan).toBe('pro')
+  })
+
+  it('a status answer for the previous account that arrives after a switch changes nothing for the new one', async () => {
+    await make()
+    acc.signIn(ALICE, 'free')
+    acc.s.slow = ALICE
+    service.accountChanged()
+    // The allowance check and the connection test both start for Alice and are slowed down …
+    const refreshing = service.freshStatus()
+    const testing = service.test()
+    await new Promise((r) => setTimeout(r, 50))
+    // … and Bob signs in before either comes back.
+    acc.signIn(BOB, 'pro')
+    service.accountChanged()
+    const fromNowOn = events.length
+    const test = await testing
+    await refreshing
+    await new Promise((r) => setTimeout(r, 400))
+    await server.settled()
+    expect(test).toMatchObject({ ok: false, error: { code: 'canceled' } })
+    // Alice's late figures never reached the screen (status events), and Bob's are what is shown.
+    const shown = events.slice(fromNowOn).flatMap((e) => (e.type === 'status' ? [e.status.cloud.quota?.plan ?? null] : []))
+    expect(shown).not.toContain('free')
+    expect(quota()).toMatchObject({ plan: 'pro', installLimit: 2700 })
+    expect(service.status().cooldown).toBeNull()
+  })
+
+  it('the notice header says which notice the user agreed to; the token goes only with notice 5', async () => {
+    await make({ consent: CLOUD_ANON_CONSENT_VERSION })
+    await ask('anon on 4')
+    expect(tutorRequests().at(-1)!.headers['x-inkling-notice']).toBe(String(CLOUD_ANON_CONSENT_VERSION))
+    // Agreeing to the new notice while signed out: the next request says 5.
+    await service.setConsent(true)
+    await ask('anon on 5')
+    expect(tutorRequests().at(-1)!.headers['x-inkling-notice']).toBe(String(CLOUD_CONSENT_VERSION))
+    const t = acc.signIn(ALICE)
+    service.accountChanged()
+    await ask('signed in')
+    expect(tutorRequests().at(-1)!.headers).toMatchObject({ 'x-inkling-notice': String(CLOUD_CONSENT_VERSION), authorization: `Bearer ${t}` })
+    // Even if something asked it to, a provider on the older agreement refuses to send the token.
+    const before = server.requests.length
+    const old = new CloudProvider({ baseUrl: server.url, installId: config.installId, notice: CLOUD_ANON_CONSENT_VERSION, account: { token: async () => t } })
+    await expect(old.status()).rejects.toMatchObject({ code: 'consent_required' })
+    expect(server.requests.length).toBe(before)
   })
 
   it('a server without account verification: the token is sent, but no account allowance is shown', async () => {

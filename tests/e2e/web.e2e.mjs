@@ -570,6 +570,37 @@ try {
     await app.close()
   } else console.log('  – desktop part skipped')
 
+  // ---------------------------------------------------------------- signed out in another tab
+  // supabase-js in the other tab clears the shared session and tells this tab on its BroadcastChannel.
+  const statusBefore = beta.requests.filter((r) => r.path === '/v1/status').length
+  const elsewhere = await a.evaluate(async () => {
+    const userDbs = async () => (await indexedDB.databases()).map((d) => d.name).filter((n) => n?.startsWith('inkling-u-'))
+    const key = Object.keys(localStorage).find((k) => /^sb-.+-auth-token$/.test(k))
+    const before = { dbs: await userDbs(), plan: (await window.inkling.ai.status()).cloud.quota?.plan }
+    localStorage.removeItem(key)
+    new BroadcastChannel(key).postMessage({ event: 'SIGNED_OUT', session: null })
+    await new Promise((r) => setTimeout(r, 300))
+    return { key, before, dbs: await userDbs(), quota: (await window.inkling.ai.status()).cloud.quota, message: (await window.inkling.account.state()).sync.message }
+  })
+  assert.ok(elsewhere.key, 'the session was in this browser')
+  // The account's AI state is dropped and the allowance checked again at once, without the account's token.
+  const rechecked = beta.requests.filter((r) => r.path === '/v1/status').slice(statusBefore)
+  assert.ok(rechecked.length >= 1, 'the allowance is checked again for the new (signed-out) identity')
+  assert.ok(rechecked.every((r) => r.headers.authorization === undefined), 'without the signed-out account’s token')
+  assert.equal(elsewhere.quota?.plan, undefined, 'no account plan is shown')
+  assert.match(elsewhere.message ?? '', /You were signed out/)
+  assert.deepEqual(elsewhere.dbs, elsewhere.before.dbs, 'the account’s notebooks stay in this browser')
+  const askedBefore = beta.requests.filter((r) => r.path === '/v1/tutor').length
+  const answers = await a.locator('[data-testid="tutor-message"][data-role="model"][data-status="done"]').count()
+  if (!(await a.locator('[data-testid="tutor-panel"]').count())) await a.getByTestId('toggle-tutor').click()
+  await a.getByTestId('tutor-input').fill('And now?')
+  await a.getByTestId('tutor-input').press('Enter')
+  await a.waitForFunction((n) => document.querySelectorAll('[data-testid="tutor-message"][data-role="model"][data-status="done"]').length > n, answers, { timeout: 30_000 })
+  const after = beta.requests.filter((r) => r.path === '/v1/tutor').slice(askedBefore)
+  assert.equal(after.length, 1)
+  assert.equal(after[0].headers.authorization, undefined, 'the next question carries no token of the signed-out account')
+  step('signed out in another tab: the AI stops using the account at once; the notebooks stay')
+
   console.log('\nWeb acceptance: PASS')
 } finally {
   await browser.close()

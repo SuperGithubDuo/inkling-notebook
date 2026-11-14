@@ -82,7 +82,7 @@ export interface AiServiceOptions {
   /** Creates the local Ollama provider (default: 127.0.0.1:11434). */
   makeLocalProvider?: () => LocalProvider
   /** Creates the cloud AI provider for a server address and this installation's ID. */
-  makeCloudProvider?: (opts: { baseUrl: string; installId: string; account?: CloudAccount; onQuota: (q: CloudQuota) => void }) => BetaProvider
+  makeCloudProvider?: (opts: { baseUrl: string; installId: string; account?: CloudAccount; notice?: number; onQuota: (q: CloudQuota) => void }) => BetaProvider
   /** The signed-in Inkling account, if accounts exist in this build: its requests carry its access token. */
   account?: AiAccount
   emit: (event: AiEvent) => void
@@ -225,6 +225,11 @@ export class AiService {
     return accepted >= (this.account?.userId() ? CLOUD_CONSENT_VERSION : CLOUD_ANON_CONSENT_VERSION)
   }
 
+  /** False for a cloud provider replaced since (another account, or none): its results must not touch the current state. */
+  private isCurrent(provider: AiProvider): boolean {
+    return provider.id !== 'cloud' || this.cloud?.provider === provider
+  }
+
   /** Call whenever the signed-in account may have changed (sign in, sign out, another account). */
   accountChanged(): void {
     if (!this.checkIdentity()) return
@@ -262,6 +267,8 @@ export class AiService {
     if (!beta) return
     try {
       const st = await beta.status()
+      // The account changed while this was on its way: it describes someone else's allowance.
+      if (!this.isCurrent(beta)) return
       this.noteQuota(st.quota)
       // A new UTC day (or freed room) ends a daily-quota pause the server set earlier.
       const cd = this.cooldowns.get(CLOUD_MODEL)
@@ -373,6 +380,7 @@ export class AiService {
       if (!beta) return { ok: false, error: noCloud() }
       try {
         const s = await beta.status()
+        if (!this.isCurrent(beta)) return { ok: false, error: accountChangedError() }
         this.noteQuota(s.quota)
         return { ok: true, models: this.availability() }
       } catch (err) {
@@ -406,6 +414,7 @@ export class AiService {
       const startedAt = this.now()
       try {
         const s = await beta.status()
+        if (!this.isCurrent(beta)) return { ok: false, error: accountChangedError() }
         this.noteQuota(s.quota)
         if (s.paused) return { ok: false, error: { code: 'beta_closed', message: 'Inkling’s free AI is paused for maintenance. Try again later, or use the tutor on this computer (Ollama).' } }
         if (s.quota.approxAnswersLeft > 0) this.cooldowns.delete(CLOUD_MODEL)
@@ -501,13 +510,16 @@ export class AiService {
         throw new ProviderError('bad_response', cut ? `${name}’s answer was cut off before it was complete. Try again, perhaps with a smaller selection.` : `${name}’s answer was not in the expected format. Try again.`)
       }
       if (!text.trim()) throw new ProviderError('bad_response', `${name} returned an empty answer. Try again.`)
-      this.cooldowns.delete(model)
+      if (this.isCurrent(provider)) this.cooldowns.delete(model)
       this.emit({ requestId: id, type: 'done', text, usage: { ...usage, firstTokenMs, totalMs: this.now() - startedAt }, model })
     } catch (err) {
       const error = this.withSuggestion(model, toAiError(err))
       if (provider.id === 'ollama' && error.code === 'offline') this.ollama = { ...this.ollama, running: false }
-      if (this.last) this.last.failed = true
-      this.noteFailure(model, error)
+      // A cloud answer for an account that is no longer signed in sets no pause for the new one.
+      if (this.isCurrent(provider)) {
+        if (this.last) this.last.failed = true
+        this.noteFailure(model, error)
+      }
       this.emit({ requestId: id, type: 'error', error })
     } finally {
       if (this.active?.id === id) this.active = null
@@ -623,13 +635,16 @@ export class AiService {
     this.checkIdentity()
     const installId = this.config.installId
     const who = this.identity ?? null
-    const key = `${url}\n${installId}\n${who ?? ''}`
+    // The header says which notice the user really agreed to (4 or 5), so a new agreement makes a new provider.
+    const notice = this.config.cloudConsentVersion ?? 0
+    const key = `${url}\n${installId}\n${who ?? ''}\n${notice}`
     if (this.cloud?.key !== key) {
       const account = this.account
       // Each provider is bound to one identity: its token getter can only ever return that account's token.
       const provider: BetaProvider = this.makeCloud({
         baseUrl: url,
         installId,
+        notice,
         ...(who && account ? { account: { token: (refresh: boolean) => account.accessToken(who, refresh) } } : {}),
         // A report from a provider that is no longer current describes someone else's allowance.
         onQuota: (q) => {
@@ -680,4 +695,8 @@ function toAiError(err: unknown): AiError {
   if (err instanceof ProviderError) return err.toJSON()
   // Unexpected errors can echo a request; never let a key reach the window or a log.
   return { code: 'unknown', message: `Something went wrong: ${redactKeys((err as Error)?.message ?? String(err))}` }
+}
+
+function accountChangedError(): AiError {
+  return { code: 'canceled', message: 'The signed-in account changed while Inkling was checking. Check again.' }
 }

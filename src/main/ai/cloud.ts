@@ -38,6 +38,8 @@ export interface CloudOptions {
   baseUrl: string
   /** Signed in: the account whose token every request carries. */
   account?: CloudAccount
+  /** The data notice version the user agreed to, sent as x-inkling-notice. Default: the current one. */
+  notice?: number
   /** This installation's anonymous ID. */
   installId: string
   /** Called whenever the server reports the allowance (status and every answer). */
@@ -171,8 +173,11 @@ export class CloudProvider implements AiProvider {
 
   private async headers(refresh = false): Promise<Record<string, string>> {
     // The notice version lets the server refuse an app whose notice names a different provider.
-    const base = { 'x-inkling-install': this.options.installId, 'x-inkling-notice': String(CLOUD_CONSENT_VERSION) }
+    const notice = this.options.notice ?? CLOUD_CONSENT_VERSION
+    const base = { 'x-inkling-install': this.options.installId, 'x-inkling-notice': String(notice) }
     if (!this.options.account) return base
+    // Only the current notice describes the token: never send it under an older agreement.
+    if (notice < CLOUD_CONSENT_VERSION) throw new ProviderError('consent_required', 'Allow the updated AI notice first: signed-in questions include your account’s sign-in token. Nothing has been sent.')
     const token = await this.options.account.token(refresh)
     // Signed in without a usable session: refuse here rather than send the request anonymously.
     if (!token) throw new ProviderError('invalid_key', SIGN_IN_AGAIN)
