@@ -300,11 +300,31 @@ describe('per-account AI allowances', () => {
     expect(results.some((r) => !r.ok && r.code === 'global_quota')).toBe(true)
   })
 
-  it('the network cap and the monthly caps apply to Pro too', async () => {
-    const ledger = fresh()
-    const same = '198.51.100.1'
-    expect((await ledger.reserve(pro(1, same), 500, 500)).ok).toBe(true)
-    expect(await ledger.reserve(pro(2, same), 400, 400)).toMatchObject({ ok: false, code: 'network_quota' })
+  it('Pro is not held to its network’s shared pool, and doesn’t use it up; the monthly caps still apply', async () => {
+    const ledger = fresh({ ...limits, globalDailyNeurons: 2000 })
+    const school = '198.51.100.1'
+    const anon = (n: number): Identity => ({ install: 'inst_' + String(n).repeat(32), network: school })
+    // Free use fills most of the school's shared 800 …
+    for (const n of [1, 2, 3, 4]) {
+      const r = await ledger.reserve(anon(n), 190, 190)
+      if (!r.ok) throw new Error(r.code)
+      await ledger.settle(r.reservationId, 190)
+    }
+    expect(await ledger.reserve(anon(5), 100, 50)).toMatchObject({ ok: false, code: 'network_quota' })
+    // … yet two Pro students there still get their own 600 each,
+    for (const n of [1, 2]) {
+      const r = await ledger.reserve(pro(n, school), 500, 500)
+      expect(r.ok, `pro ${n}`).toBe(true)
+      if (r.ok) await ledger.settle(r.reservationId, 500)
+    }
+    expect((await ledger.quota(pro(1, school))).networkLimit).toBe(600)
+    // … and a Pro student's use is not taken from the free pool (still 760 of 800 used).
+    expect((await ledger.quota(anon(6))).networkUsed).toBe(760)
+    // Each Pro account is still capped by its own allowance, and everyone by the global cap.
+    expect(await ledger.reserve(pro(1, school), 200, 200)).toMatchObject({ ok: false, code: 'install_quota' })
+    expect(await ledger.reserve(pro(3, school), 300, 100)).toMatchObject({ ok: false, code: 'global_quota' })
+    // Free accounts are free to make: they stay in the shared pool.
+    expect(await ledger.reserve({ install: `acct:${ALICE}`, network: school, plan: 'free' }, 100, 50)).toMatchObject({ ok: false, code: 'network_quota' })
     const monthly = fresh({ ...limits, unit: 'usd', globalMonthly: 300 })
     expect(await monthly.reserve(pro(3), 400, 100)).toMatchObject({ ok: false, code: 'global_monthly_quota' })
     // A Pro allowance without its own monthly cap keeps everyone's.
@@ -530,7 +550,7 @@ describe('AI server with accounts', () => {
     expect(after.json.error.quota).toMatchObject({ plan: 'free', installLimit: 900 })
   })
 
-  it('the existing spending protections hold for Pro: global cap, network cap and pause', async () => {
+  it('the existing spending protections hold for Pro: global cap and pause; the shared network pool doesn’t block it', async () => {
     await start({ globalDailyNeurons: 1000, networkDailyNeurons: 5000 })
     await subscribe(BOB, { status: 'active' })
     server.ai.reply(big)
@@ -544,9 +564,11 @@ describe('AI server with accounts', () => {
     await start({ networkDailyNeurons: 1000 })
     await subscribe(BOB, { status: 'active' })
     server.ai.reply(big)
-    await post(chat('one'), { token: sb.token(BOB), ip: '192.0.2.70' })
+    // An anonymous app uses up the network's shared 1,000; Bob (Pro) on the same network is still answered.
+    await post(chat('one'), { ip: '192.0.2.70' })
     await server.settled()
-    expect((await post(chat('two'), { token: sb.token(BOB), ip: '192.0.2.70' })).json.error.scope).toBe('network_quota')
+    expect((await post(chat('two'), { install: INSTALL_B, ip: '192.0.2.70' })).json.error.scope).toBe('network_quota')
+    expect((await post(chat('pro'), { token: sb.token(BOB), ip: '192.0.2.70' })).status).toBe(200)
     await server.pause()
     expect((await post(chat('three'), { token: sb.token(BOB), ip: '192.0.2.71' })).json.error.scope).toBe('paused')
   })

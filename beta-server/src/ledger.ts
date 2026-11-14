@@ -239,6 +239,13 @@ interface Allowance {
   daily: number
   monthly?: number
   plan?: 'free' | 'pro'
+  /**
+   * A paid account (with its own allowance configured) is not counted in its network's shared daily
+   * pool: that pool exists because anonymous IDs and free accounts cost nothing to make, and a Pro
+   * student at a school would otherwise run into everyone else's use (and use up theirs). Its
+   * "network" is then the account itself. Global caps, and its own daily and monthly caps, still bound it.
+   */
+  ownNetwork?: boolean
 }
 
 interface Keys {
@@ -436,14 +443,15 @@ export class Ledger {
   /** The daily and monthly allowance of whoever is asking: a Pro account's, or everyone else's. */
   private allowance(id: Identity): Allowance {
     const pro = id.plan === 'pro' ? this.limits.pro : undefined
-    return pro ? { daily: pro.daily, monthly: pro.monthly ?? this.limits.installMonthly, plan: id.plan } : { daily: this.limits.installDailyNeurons, monthly: this.limits.installMonthly, plan: id.plan }
+    return pro ? { daily: pro.daily, monthly: pro.monthly ?? this.limits.installMonthly, plan: id.plan, ownNetwork: true } : { daily: this.limits.installDailyNeurons, monthly: this.limits.installMonthly, plan: id.plan }
   }
 
   private async keys(id: Identity, day: Day): Promise<Keys> {
     const month = await this.thisMonth()
+    const network = this.allowance(id).ownNetwork ? `pro-network|${id.install}` : `network|${networkOf(id.network)}`
     return {
       install: `i:${(await sha256Hex(`${day.salt}|install|${id.install}`)).slice(0, 32)}`,
-      network: `n:${(await sha256Hex(`${day.salt}|network|${networkOf(id.network)}`)).slice(0, 32)}`,
+      network: `n:${(await sha256Hex(`${day.salt}|${network}`)).slice(0, 32)}`,
       // A separate salt that changes every month: the monthly count can't be joined to the daily ones.
       installMonth: `mi:${(await sha256Hex(`${month.salt}|install|${id.install}`)).slice(0, 32)}`
     }
@@ -581,7 +589,7 @@ export class Ledger {
     const { cap, paced } = await this.dailyCap()
     const near = this.finite(soft) && soft < 1 && factor < 1 && (global >= soft * cap || (this.finite(this.limits.globalMonthly) && month >= soft * this.limits.globalMonthly))
     const scale = near ? Math.max(0, factor) : 1
-    return { install, network, global, month, installMonth, installLimit: a.daily * scale, networkLimit: this.limits.networkDailyNeurons * scale, reduced: near, globalCap: cap, paced }
+    return { install, network, global, month, installMonth, installLimit: a.daily * scale, networkLimit: (a.ownNetwork ? a.daily : this.limits.networkDailyNeurons) * scale, reduced: near, globalCap: cap, paced }
   }
 
   private async quotaFor(k: Keys, a: Allowance): Promise<Quota> {
