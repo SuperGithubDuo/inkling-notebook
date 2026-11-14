@@ -95,15 +95,20 @@ export function AiSettings() {
 
 // ------------------------------------------------------------- Cloud beta
 
-/** Today's allowance in words: roughly how many answers are left here. */
+/** The plan the server verified for the signed-in account; null when it counted this computer (signed out, or accounts off). */
+export const planLabel = (q: CloudQuota): string | null => (q.plan === 'pro' ? 'Pro' : q.plan === 'free' ? 'Free' : null)
+
+/** Today's allowance in words: roughly how many answers are left here (on the account, when the server verified one). */
 export function quotaText(q: CloudQuota): string {
+  const where = q.plan ? 'on your account' : 'on this computer'
+  const free = q.plan === 'pro' ? '' : 'free '
   const own = Math.max(0, Math.min(q.installLimit - q.installUsed, q.networkLimit - q.networkUsed))
   const shared = Math.max(0, q.globalLimit - q.globalUsed)
   const left = Math.min(own, shared)
   if (left <= 0 || q.approxAnswersLeft <= 0) {
-    return shared < own ? 'Inkling’s shared free AI budget for today is used up for everyone.' : 'Today’s free AI answers on this computer are used up.'
+    return shared < own ? 'Inkling’s shared free AI budget for today is used up for everyone.' : `Today’s ${free}AI answers ${where} are used up.`
   }
-  const base = `About ${q.approxAnswersLeft} free answer${q.approxAnswersLeft === 1 ? '' : 's'} left today on this computer`
+  const base = `About ${q.approxAnswersLeft} ${free}answer${q.approxAnswersLeft === 1 ? '' : 's'} left today ${where}`
   // Say plainly when the shared budget, not this computer's own allowance, is what limits the answers.
   return shared < own ? `${base}, while Inkling’s shared daily budget lasts.` : `${base}.`
 }
@@ -159,6 +164,11 @@ function CloudSettings({ status }: { status: AiStatus }) {
       <div className="rounded-xl border border-line px-3 py-2.5 text-[13px]" data-testid="ai-cloud-quota">
         {cloud.quota ? (
           <>
+            {planLabel(cloud.quota) && (
+              <span className="mr-1.5 rounded-full bg-[#eef1f6] px-1.5 py-0.5 text-[11px] font-semibold text-ink-2" data-testid="ai-cloud-plan">
+                {planLabel(cloud.quota)} plan
+              </span>
+            )}
             <span className="font-medium text-ink">{quotaText(cloud.quota)}</span>
             {quotaReason(cloud.quota) && (
               <span className="block text-[12px] text-ink-2" data-testid="ai-cloud-quota-reason">

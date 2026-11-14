@@ -18,7 +18,8 @@ import type { AccountResult, AccountState, SaveResult } from '@shared/ipc'
 import type { Library, NoteDoc, PageDoc } from '@shared/schema'
 import { LIBRARY_PATH, SyncEngine, autoSync, type LocalAssets, type LocalDocs, type StateStore, type SyncState, type SyncStatus } from '@shared/sync/engine'
 import { assetRefs, checkDoc, countPages, parsePath, withoutPristine } from '@shared/sync/docs'
-import { createSupabase, supabaseRemote, type SupabaseClient, type SupabaseConfig } from '@shared/sync/supabase'
+import { accessTokenFor, createSupabase, supabaseRemote, type SupabaseClient, type SupabaseConfig } from '@shared/sync/supabase'
+import type { AiAccount } from './ai/service'
 import type { Storage } from './storage'
 
 /** Google sends the browser back here after sign-in. Must be listed in Supabase → Authentication → URL Configuration. */
@@ -148,6 +149,8 @@ export class Account {
   private oauth: Server | null = null
   private readonly sessionFile: string
   private memorySession = new Map<string, string>()
+  /** The session ended without this app signing out: still shown as this account, but no longer used for AI. */
+  private sessionEnded = false
 
   constructor(private readonly o: AccountOptions) {
     this.sessionFile = join(o.dir, 'session.bin')
@@ -172,6 +175,9 @@ export class Account {
       : null
     this.client?.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT' && this.who) {
+        // Ended elsewhere (another device's sign-out of all sessions, a revoked refresh token): the AI stops
+        // using this account at once. The notebooks, and changes not yet synced, stay on this computer.
+        this.sessionEnded = true
         this.engine.unlink()
         this.message = 'You were signed out. Sign in again to keep syncing; your notebooks are still on this computer.'
         this.emit()
@@ -199,6 +205,12 @@ export class Account {
     else all[key] = value
     await fs.mkdir(this.o.dir, { recursive: true })
     await atomicWrite(this.sessionFile, this.o.cipher.encryptString(JSON.stringify(all)))
+  }
+
+  /** The signed-in account for the AI tutor: its ID and current access token. */
+  readonly ai: AiAccount = {
+    userId: () => (this.sessionEnded ? null : (this.who?.id ?? null)),
+    accessToken: async (userId, refresh) => (this.client ? accessTokenFor(this.client, userId, refresh) : null)
   }
 
   state(): AccountState {
@@ -254,6 +266,7 @@ export class Account {
   /** A session exists for this user: sync right away, or ask first if this computer has notebooks of its own. */
   private async signedIn(user: { id: string; email?: string | null }): Promise<void> {
     const who = { id: user.id, email: user.email ?? null }
+    this.sessionEnded = false
     const owner = this.engine.owner
     if (owner !== who.id) {
       const library = (await this.o.storage.loadLibrary()).library

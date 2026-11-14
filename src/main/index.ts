@@ -119,8 +119,11 @@ const testLimits = testHooks && process.env.INKLING_AI_LIMITS ? (JSON.parse(proc
 // Google Gemini (adults only under Google's terms) stays out of packaged builds until its terms are
 // cleared for users of all ages; development and test runs keep it.
 const geminiEnabled = !app.isPackaged || import.meta.env.MAIN_VITE_INKLING_ENABLE_GEMINI === '1'
+// The account is created further down; until then the AI sees no one signed in.
+let aiAccount: Account | null = null
 const ai = new AiService({
   geminiEnabled,
+  account: { userId: () => aiAccount?.ai.userId() ?? null, accessToken: async (id, refresh) => (aiAccount ? aiAccount.ai.accessToken(id, refresh) : null) },
   limits: testLimits,
   config: aiConfig,
   makeProvider: (apiKey) => new GeminiProvider({ apiKey, baseUrl: geminiBaseUrl }),
@@ -359,9 +362,11 @@ const account = new Account({
   flush: async () => (mainWindow ? flushRenderer(mainWindow) : { ok: true }),
   onState: (state) => {
     if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.accountChanged, state)
+    ai.accountChanged()
   },
   onDocsChanged: (paths) => void docsChanged(paths)
 })
+aiAccount = account
 const sync = account.engine
 
 /** Sync changed files on disk: bring the search index up to date, then tell the window. */

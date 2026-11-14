@@ -39,14 +39,18 @@ The AI Tutor can use one of these services, chosen in Settings → AI Tutor:
 - what you include with it: an image of your lasso selection and any typed text in it; or the current page — its title, typed text, PDF text and an image of its handwriting (of the whole page when it has a PDF); or a note page's title and text;
 - the recent conversation on that page: up to your last 5 questions with the text they included, the tutor's answers, and the most recent earlier image. Earlier messages answered by a different AI service are not sent;
 - for markups, practice and answer checks: the image or answer being checked, the practice problem and its expected answer, the topic and difficulty you chose, and the tutor's earlier explanation when you choose "Show this on my page";
-- to Inkling's server only: this installation's random ID (made by the app, not linked to your name) and your internet (IP) address, which every connection carries.
+- to Inkling's server only: this installation's random ID (made by the app, not linked to your name) and your internet (IP) address, which every connection carries;
+- to Inkling's server only, and only if you are signed in to an Inkling account: your account's short-lived sign-in (access) token. It tells the server which account is asking, so it can check your plan (Free or Pro) and count your account's allowance on all your devices. It is never your password or the long-lived key that keeps you signed in (the refresh token), which stay on your device.
 
-The allowance check sends only the installation ID (and, like any connection, your IP address); no notebook content.
+The allowance check sends only the installation ID (and, like any connection, your IP address), plus the sign-in token when you are signed in; no notebook content.
+
+Signing in to an account changes what the cloud AI notice covers, so if you allowed the cloud AI before this was added (notice version 4), Inkling asks you once more the first time you use it while signed in. Signed out, the earlier permission still applies.
 
 **What Inkling's server does with it.**
 - It doesn't store or log the content of questions, images or answers. Its logs record only the kind of an error, never content.
 - To enforce the free daily limits, it counts usage per installation ID and per network address (IPv6 grouped by its /64 block), stored only as SHA-256 hashes with a random salt. The salt and the per-installation and per-network counts are replaced with the first request the server handles after 00:00 UTC each day. A total for the whole service, with no identities, is kept for about 25 hours.
 - To enforce the monthly limit, it also counts this calendar month's usage per installation ID, under a **separate** salt that changes every month (UTC), so the monthly count can't be joined to the daily ones. The salt and the monthly counts are deleted with the first request after the month ends. A monthly total for the whole service, with no identities, is kept until the next month.
+- When a request carries a sign-in token, the server sends the token to Supabase (which runs Inkling accounts) to confirm it and read your plan, then counts usage per account instead of per installation, in the same salted, hashed form and on the same daily and monthly schedule. It doesn't store or log the token; it keeps the result of the check in memory for at most a minute. Your plan is decided by Inkling's account records, never by the app. A token that can't be confirmed is refused: the server never answers it as if you were signed out.
 - Usage is counted as tokens and an estimated cost in US dollars, never as content.
 - An answer in progress is held as a reservation (hashed IDs and a cost estimate) for at most 10 minutes.
 

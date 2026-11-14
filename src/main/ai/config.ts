@@ -190,9 +190,13 @@ export class AiConfig {
   get consented(): boolean {
     return this.settings.consent?.version === CONSENT_VERSION
   }
-  /** Consent to send content to the cloud AI. */
+  /** Consent to the cloud AI's current notice. */
   get cloudConsented(): boolean {
     return this.settings.cloudConsent?.version === CLOUD_CONSENT_VERSION
+  }
+  /** The cloud AI notice version agreed to, if any (the service decides what it covers). */
+  get cloudConsentVersion(): number | null {
+    return this.settings.cloudConsent?.version ?? null
   }
   get apiKey(): string | null {
     return this.secrets.gemini.value

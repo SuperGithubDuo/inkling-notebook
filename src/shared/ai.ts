@@ -44,9 +44,10 @@ export const CLOUD_MODEL_LABEL = 'Qwen 3.8 27B'
  *   history   – src/renderer/src/ai/turns.ts (recent exchanges, one earlier image)
  *   tasks     – markup, practice and answer-check requests
  *   metadata  – the installation ID header and the connection's IP address (Inkling's server only)
+ *   account   – signed in only: the Supabase access token, in the Authorization header (Inkling's server only)
  */
 export interface SentItem {
-  id: 'question' | 'context' | 'history' | 'tasks' | 'metadata'
+  id: 'question' | 'context' | 'history' | 'tasks' | 'metadata' | 'account'
   text: string
 }
 const SENT_CONTENT: readonly SentItem[] = [
@@ -70,6 +71,10 @@ export const CLOUD_SENT: readonly SentItem[] = [
   {
     id: 'metadata',
     text: 'This installation’s random ID (made by this app, not linked to your name) and your internet (IP) address, which every connection carries. The server uses them only to count the free daily allowance.'
+  },
+  {
+    id: 'account',
+    text: 'If you are signed in to an Inkling account: a short-lived sign-in token that tells the server which account is asking, so it can check your plan and count your account’s AI allowance on all your devices. Never your password or the key that keeps you signed in; the server does not store the token.'
   }
 ]
 /** Sent to Google with the user's own key (development builds only). */
@@ -78,7 +83,7 @@ export const GEMINI_SENT: readonly SentItem[] = SENT_CONTENT
 export const CLOUD_WHEN_SENT = 'Nothing is sent — not even a check of today’s allowance — until you allow it. After that, something is sent only when you ask the tutor, and when Inkling checks how many free answers are left.'
 /** What the cloud AI does with what it receives, shown wherever it can be chosen. */
 export const CLOUD_DATA_NOTE =
-  'Requests go to Inkling’s AI server, which has them answered by DeepInfra (an AI hosting company in the United States) or, as a backup, by Cloudflare Workers AI. Both say they do not use requests to train models and do not keep them after answering, apart from limited exceptions such as support cases and legal obligations; Inkling’s server never stores or logs their content. To share out the free allowance, the server counts usage per installation and per internet connection, in scrambled form: daily counts are deleted every day, and this installation’s monthly count at the end of each month.'
+  'Requests go to Inkling’s AI server, which has them answered by DeepInfra (an AI hosting company in the United States) or, as a backup, by Cloudflare Workers AI. Both say they do not use requests to train models and do not keep them after answering, apart from limited exceptions such as support cases and legal obligations; Inkling’s server never stores or logs their content. To share out the free allowance, the server counts usage per installation and per internet connection, in scrambled form: daily counts are deleted every day, and this installation’s monthly count at the end of each month. When you are signed in, the server asks Supabase (which runs Inkling accounts) to confirm the sign-in token and your plan, and counts your account’s usage instead of this installation’s, in the same scrambled form and on the same schedule.'
 /** Who the permission covers and what it is not: shown wherever cloud permission is asked. */
 export const CLOUD_PERMISSION_SCOPE =
   'This permission covers everyone who uses Inkling on this computer account. Inkling does not check ages, and clicking Allow does not verify a parent’s or guardian’s consent: if you are under 18, ask a parent or guardian before allowing. Notebooks work fully without the AI.'
@@ -172,8 +177,15 @@ export const CONSENT_VERSION = 3
  * 4: answered by DeepInfra (Cloudflare Workers AI as backup); a monthly count per
  * installation. Sent to the server as x-inkling-notice, which may refuse an
  * app whose notice doesn't name the provider it uses.
+ * 5: signed-in requests carry the account's access token (CLOUD_SENT 'account').
  */
-export const CLOUD_CONSENT_VERSION = 4
+export const CLOUD_CONSENT_VERSION = 5
+/**
+ * The oldest agreement that still covers anonymous requests: notice 5 only added the account
+ * token, so someone who agreed to 4 and isn't signed in is not asked again. Signed-in requests
+ * need CLOUD_CONSENT_VERSION.
+ */
+export const CLOUD_ANON_CONSENT_VERSION = 4
 
 /** This installation's anonymous ID for the cloud AI's fair-use limits (not secret, not an account). */
 export const installIdSchema = z.string().regex(/^inst_[A-Za-z0-9_-]{22,64}$/)
@@ -308,6 +320,11 @@ export interface CloudQuota {
   reduced?: boolean
   /** Today's shared budget is set lower than usual to keep enough for the rest of the month. */
   paced?: boolean
+  /**
+   * Set only when the server verified the signed-in account: its plan, and install* are then the
+   * account's figures. Absent (accounts off on the server, or signed out): this installation's.
+   */
+  plan?: 'free' | 'pro'
 }
 
 export interface CloudState {
