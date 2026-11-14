@@ -6,7 +6,8 @@
  *   POST /v1/tutor    → { task, turns } → server-sent events: delta*, then done | error
  *   GET  /admin/summary, POST /admin/pause   → operator only (ADMIN_TOKEN secret)
  *
- * Anyone may ask: there are no accounts or codes. Each request carries the
+ * Anyone may ask: no account or code is needed (a signed-in app may add its
+ * Supabase token for a per-account allowance, see identify()). Each request carries the
  * app's random installation ID (x-inkling-install); Cloudflare supplies the
  * client's IP (cf-connecting-ip, which clients can't set). The ledger limits
  * each installation, each network and the whole service per day.
@@ -30,6 +31,7 @@ import { aiRequestSchema, type AiRequest } from '../../src/shared/ai'
 import { taskSpec } from '../../src/main/ai/prompts'
 import { UPSTREAM_RETRY_MS, type Identity, type Ledger, type Quota, type RefusalCode } from './ledger'
 import type { AiBinding, ProviderId } from './provider'
+import type { Accounts } from './account'
 import { classifyUpstream, costFor, reportedCost, estimateInputTokens, inputUpperBound, parseUpstream, readSse, toMessages, type Rates, type Usage } from './upstream'
 import { chooseModel, type TextModelConfig } from './route'
 
@@ -90,6 +92,11 @@ export interface Deps {
   ai: AiBinding
   ledger: Ledger
   config: ServerConfig
+  /**
+   * Verifies a signed-in request's Supabase token and returns the account's plan (account.ts).
+   * Unset: accounts are off and every request is anonymous, whatever headers it carries.
+   */
+  accounts?: Accounts
   /** Keeps work (settling a reservation) alive after the response ends. */
   waitUntil(p: Promise<unknown>): void
   now?: () => number
@@ -116,7 +123,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
-      headers: { ...cors, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type, x-inkling-install, x-inkling-notice', 'access-control-max-age': '86400' }
+      headers: { ...cors, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'authorization, content-type, x-inkling-install, x-inkling-notice', 'access-control-max-age': '86400' }
     })
   }
   const res = await route(request, deps)
@@ -143,10 +150,24 @@ async function route(request: Request, deps: Deps): Promise<Response> {
 
 // --------------------------------------------------------------- public API
 
-function identify(request: Request): Identity | Response {
+/**
+ * Who is asking. Anonymous (installation + network) unless the request carries a Supabase access
+ * token and this server has accounts on: then the account, verified by Supabase, with the plan
+ * Supabase reports. The plan never comes from the request. A token that doesn't verify is refused
+ * (never quietly downgraded or upgraded), and so is a request whose account can't be checked.
+ */
+async function identify(request: Request, deps: Deps): Promise<Identity | Response> {
   const install = request.headers.get('x-inkling-install') ?? ''
   if (!INSTALL_ID.test(install)) return problem(400, 'bad_request', 'This version of Inkling can’t use the AI service. Update Inkling.')
-  return { install, network: request.headers.get('cf-connecting-ip') ?? 'unknown' }
+  const network = request.headers.get('cf-connecting-ip') ?? 'unknown'
+  const auth = request.headers.get('authorization')
+  if (!auth || !deps.accounts) return { install, network }
+  const token = /^Bearer ([^\s]+)$/.exec(auth)?.[1]
+  const account = token ? await deps.accounts(token) : 'invalid'
+  if (account === 'invalid') return problem(401, 'invalid_key', 'Your sign-in has expired. Sign in again to use the AI tutor with your account. Your notebooks work as usual.', undefined, { scope: 'account' })
+  if (account === 'unavailable') return problem(503, 'server', 'Inkling couldn’t check your account just now. Try again in a moment. Your notebooks work as usual.', 30, { scope: 'account_unavailable' })
+  // The account's allowance is per account, on every device; the network and global caps still apply.
+  return { install: `acct:${account.userId}`, network, plan: account.plan }
 }
 
 /** A short wait in minutes ("in about 15 minutes"), for pauses well under an hour. */
@@ -178,7 +199,7 @@ function refusal(code: RefusalCode, retryAfter: number | undefined, quota?: Quot
   const keepGoing = 'Your notebooks work as usual, and you can use the tutor on this computer (Ollama) meanwhile.'
   switch (code) {
     case 'install_quota':
-      return problem(429, 'daily_quota', `You’ve used today’s free AI answers on this computer${reducedWhy(quota)}. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
+      return problem(429, 'daily_quota', `You’ve used today’s ${quota?.plan === 'pro' ? '' : 'free '}AI answers ${quota?.plan ? 'on your account' : 'on this computer'}${reducedWhy(quota)}. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'network_quota':
       return problem(429, 'daily_quota', `Today’s free AI answers for your internet connection (shared by everyone on it, such as a school or office) are used up${reducedWhy(quota)}. More are available ${later}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'global_quota':
@@ -191,7 +212,7 @@ function refusal(code: RefusalCode, retryAfter: number | undefined, quota?: Quot
         { scope: code, quota }
       )
     case 'install_monthly_quota':
-      return problem(429, 'daily_quota', `You’ve used this month’s free AI answers on this computer. More are available ${inDays(retryAfter)}. ${keepGoing}`, retryAfter, { scope: code, quota })
+      return problem(429, 'daily_quota', `You’ve used this month’s ${quota?.plan === 'pro' ? '' : 'free '}AI answers ${quota?.plan ? 'on your account' : 'on this computer'}. More are available ${inDays(retryAfter)}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'global_monthly_quota':
       return problem(429, 'daily_quota', `Inkling’s free AI answers for this month are used up for everyone. More are available ${inDays(retryAfter)}. ${keepGoing}`, retryAfter, { scope: code, quota })
     case 'duplicate':
@@ -215,7 +236,7 @@ function refusal(code: RefusalCode, retryAfter: number | undefined, quota?: Quot
 }
 
 async function status(request: Request, deps: Deps): Promise<Response> {
-  const id = identify(request)
+  const id = await identify(request, deps)
   if (id instanceof Response) return id
   return json(200, { model: deps.config.publicModel ?? deps.config.model, paused: await deps.ledger.isPaused(), quota: await deps.ledger.quota(id) })
 }
@@ -248,7 +269,7 @@ async function readCapped(request: Request, max: number): Promise<string | null>
 async function tutor(request: Request, deps: Deps): Promise<Response> {
   const { ledger, config } = deps
   const now = deps.now ?? Date.now
-  const id = identify(request)
+  const id = await identify(request, deps)
   if (id instanceof Response) return id
   const notice = Number(request.headers.get('x-inkling-notice') ?? '0')
   if ((config.minNoticeVersion ?? 0) > 0 && !(notice >= (config.minNoticeVersion ?? 0))) {

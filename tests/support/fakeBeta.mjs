@@ -197,7 +197,7 @@ export async function startBetaServer(options = {}) {
     headers['cf-connecting-ip'] = typeof req.headers['x-test-ip'] === 'string' ? req.headers['x-test-ip'] : (req.socket.remoteAddress ?? '127.0.0.1')
     delete headers['x-test-ip']
     const request = new Request(`http://127.0.0.1${req.url}`, { method: req.method, headers, ...(body.length && req.method !== 'GET' ? { body } : {}) })
-    const response = await mod.handle(request, { ai, ledger, config, waitUntil, now })
+    const response = await mod.handle(request, { ai, ledger, config, waitUntil, now, accounts: options.accounts })
     res.writeHead(response.status, Object.fromEntries(response.headers))
     if (!response.body) return res.end()
     const reader = response.body.getReader()

@@ -54,6 +54,21 @@ When a limit is reached the app shows a friendly message (for example *"You've u
 
 **What is kept.** Nothing of what people send: the Worker never stores or logs content, and Cloudflare says Workers AI does not train on customer content or retain inputs and outputs ([data usage](https://developers.cloudflare.com/workers-ai/platform/privacy/)). The ledger stores today's totals and, per installation and network, a count under a SHA-256 hash salted with a random value that changes every UTC day; at the day's end the salt and the counts are deleted. Per-request invocation logs are off; the Worker logs only error kinds.
 
+## Accounts: Free and Pro (server side only; off until configured)
+
+With `SUPABASE_URL` and `SUPABASE_ANON_KEY` set (both public), a request may carry `Authorization: Bearer <Supabase access token>`. The Worker passes the token to Supabase's `my_entitlement()` (`supabase/migrations/20261114000000_entitlements.sql`): Supabase verifies it and RLS returns only that account's plan. The Worker never holds a service-role key or JWT secret, and never reads a plan from the request or the token's claims.
+
+| Request | Result |
+|---|---|
+| No token, or accounts off | Anonymous, exactly as above (installation + network). |
+| Verified token | Allowance per account (`acct:<user id>`, all its devices), one answer at a time per account. Free = the installation allowance; Pro = `PRO_DAILY_USD`/`PRO_MONTHLY_USD` (`PRO_DAILY_NEURONS` on Workers AI). **Unset, Pro gets the Free allowance**: set them only from a cost analysis. Network, global daily/monthly, concurrency, pause and duplicate limits apply to every plan. |
+| Invalid, expired or forged token (or not `Bearer`) | 401 `invalid_key`, scope `account`, before any reservation or model call. |
+| Supabase unreachable or failing | 503 `server`, scope `account_unavailable`, `retryAfter` 30. Never treated as Pro. |
+
+Verified results are cached in memory for at most 60 s (never past the token's expiry), so a cancelled or expired Pro subscription takes up to a minute to apply. Subscription rows are written only by the service role (the future billing webhook); clients can read their own and nothing else. Notebooks, sync, files, export and backup never consult them.
+
+No shipped app sends a token yet: the token identifies the account, so the data notice (`CLOUD_SENT` and `CLOUD_CONSENT_VERSION` in `src/shared/ai.ts`) and `docs/PRIVACY.md` must change first.
+
 ## Deploy
 
 You need a Cloudflare account on the Workers **Free** plan. Open *Workers & Pages* in the dashboard once, so the account gets its `workers.dev` subdomain.
@@ -115,6 +130,8 @@ To change a limit, edit `wrangler.jsonc` and redeploy.
 | `REASONING_EFFORT`, `DISABLE_THINKING` | `low`, `true` | Keep hidden (billed) reasoning short. |
 | `STRUCTURED` | `prompt` | `prompt` spells out the JSON schema in the instructions and streams. |
 | `IMAGE_PATCH` | `28` | Patch size used to estimate image tokens. |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | unset | Accounts on (above). Public values; never the service-role key. |
+| `PRO_DAILY_USD`, `PRO_MONTHLY_USD`, `PRO_DAILY_NEURONS` | unset | A Pro account's allowance; unset = the Free allowance. |
 
 ## API
 
