@@ -18,7 +18,8 @@ export interface Account {
 }
 /** 'invalid': the token isn't a live session (refuse). 'unavailable': Supabase couldn't be asked (refuse, retry soon). */
 export type AccountResult = Account | 'invalid' | 'unavailable'
-export type Accounts = (token: string) => Promise<AccountResult>
+/** `misconfigured`: set on the stand-in that refuses everything because the settings are incomplete (config.ts). */
+export type Accounts = ((token: string) => Promise<AccountResult>) & { misconfigured?: true }
 
 const CACHE_MS = 60_000
 const CACHE_MAX = 2000

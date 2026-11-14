@@ -5,7 +5,7 @@
  */
 import type { ServerConfig } from './handler'
 import type { LedgerLimits } from './ledger'
-import { supabaseAccounts, type Accounts } from './account'
+import { supabaseAccounts, type AccountResult, type Accounts } from './account'
 import { externalProvider, PRESETS, type AiBinding, type ExternalProviderId, type ProviderId } from './provider'
 
 export interface Env {
@@ -180,7 +180,7 @@ export function accounts(env: Env): Accounts | undefined {
   if (!url && !anonKey) return undefined
   if (!url || !anonKey || !/^https:\/\/[a-z0-9.-]+$/.test(url)) {
     console.error('accounts misconfigured: SUPABASE_URL (https) and SUPABASE_ANON_KEY must both be set')
-    return async () => 'unavailable'
+    return Object.assign(async (): Promise<AccountResult> => 'unavailable', { misconfigured: true as const })
   }
   return supabaseAccounts({ url, anonKey })
 }

@@ -463,9 +463,29 @@ describe('AI server with accounts', () => {
     for (const t of tokens) for (const part of t.split('.')) expect(logs.join('\n')).not.toContain(part)
     expect(logs.join('\n')).not.toContain(ALICE)
     expect((await server.admin('GET', '/admin/summary')).body.accounts).toBe('on')
-    await server.close()
-    server = await startBetaServer({})
-    expect((await server.admin('GET', '/admin/summary')).body.accounts).toBe('off')
+  })
+
+  it('the operator summary tells on, off and misconfigured apart, from the Worker’s own settings', async () => {
+    const summaryFor = async (env: Partial<Env>): Promise<string> => {
+      await server?.close()
+      server = await startBetaServer({ accounts: accountsFromEnv(env as Env) })
+      return (await server.admin('GET', '/admin/summary')).body.accounts
+    }
+    const orig = console.error
+    console.error = () => undefined
+    try {
+      expect(await summaryFor({ SUPABASE_URL: SUPABASE, SUPABASE_ANON_KEY: ANON_KEY })).toBe('on')
+      expect(await summaryFor({})).toBe('off')
+      expect(await summaryFor({ SUPABASE_URL: '', SUPABASE_ANON_KEY: ' ' })).toBe('off')
+      for (const env of [{ SUPABASE_URL: SUPABASE }, { SUPABASE_ANON_KEY: ANON_KEY }, { SUPABASE_URL: 'http://project.supabase.co', SUPABASE_ANON_KEY: ANON_KEY }]) {
+        expect(await summaryFor(env), JSON.stringify(env)).toBe('misconfigured')
+        // Unchanged behaviour: a signed-in request is still refused, an anonymous one still answered.
+        expect((await post(chat('hi'), { token: 'a.b.c' })).json.error.scope).toBe('account_unavailable')
+        expect((await post(chat('hi'))).status).toBe(200)
+      }
+    } finally {
+      console.error = orig
+    }
   })
 
   it('CORS lets the web app send its token', async () => {
