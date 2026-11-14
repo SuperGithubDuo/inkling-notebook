@@ -91,7 +91,21 @@ A temporary Worker, `inkling-ai-accounts-test`, defined in `beta-server/wrangler
 | Subscriptions | It can only read, with the user's own token under RLS. The Pro row in test 5 is written by you in the SQL editor, after approval. |
 | Notebooks | It never touches `docs`, `doc_versions` or Storage. |
 
-**Before.** Confirm the Cloudflare account is still on Workers **Free**. Then record production's state (all read-only):
+**From GitHub Actions (no Cloudflare access needed on your computer):** *Actions → AI accounts staging (inkling-ai-accounts-test)* (`.github/workflows/ai-accounts-staging.yml`). It replaces the Before, Deploy and After steps below; the tests below are unchanged.
+- **`check`** (read-only): the config guard, the Workers Free check, production's deployments and secret names, and the staging Worker's summary if it exists.
+- **`deploy`**: needs `confirm` = `deploy inkling-ai-accounts-test`. It deploys the committed staging config, sets the staging `ADMIN_TOKEN`, then checks that the Worker reports accounts `"on"`, a 400-Neuron cap, an anonymous 200 and a bad-token 401.
+- **`delete`**: needs `confirm` = `delete inkling-ai-accounts-test`.
+
+Every action records production (`inkling-ai-beta`) before and after, and fails with "PRODUCTION CHANGED" if its deployments or secret names differ. It runs only from `main`, in the `ai-test` environment.
+
+Setup:
+1. Create a new secret `INKLING_STAGING_ADMIN_TOKEN` (`openssl rand -base64 36`) in the `ai-test` environment or the repository. It must not be the production token; the workflow refuses the production value.
+2. Make sure `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are visible to the `ai-test` environment. The run stops if they aren't.
+3. Keep the same 32+ character value locally, for the tests' `summary` helper (`A=...`).
+
+**Risk:** `CLOUDFLARE_API_TOKEN` is account-wide (*Workers Scripts: Edit* can't be limited to one Worker), so this workflow could change production if its code were wrong. The guards and `tests/unit/stagingWorkflow.test.ts` keep every write pointed at the staging name, and the before/after comparison would show a change. Full isolation would need a separate Cloudflare account on Workers Free with its own token.
+
+**Before** (when running from your computer instead). Confirm the Cloudflare account is still on Workers **Free**. Then record production's state (all read-only):
 ```bash
 cd beta-server
 npx wrangler deployments list --name inkling-ai-beta > /tmp/prod-deployments-before.txt

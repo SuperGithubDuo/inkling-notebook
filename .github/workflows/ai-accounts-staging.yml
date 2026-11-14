@@ -1,0 +1,210 @@
+name: AI accounts staging (inkling-ai-accounts-test)
+
+# Deploys, checks or deletes the TEMPORARY staging Worker for account verification
+# (docs/AI-ACCOUNTS-ROLLOUT.md, step 3), from beta-server/wrangler.accounts-staging.jsonc only.
+#
+#   action: check   read-only: config guard, production snapshot, the staging Worker's summary if it exists
+#   action: deploy  needs confirm = "deploy inkling-ai-accounts-test"
+#   action: delete  needs confirm = "delete inkling-ai-accounts-test"
+#
+# Safety (tests/unit/stagingWorkflow.test.ts checks this file):
+#   - Manual runs on main only; one run at a time.
+#   - Every wrangler command passes -c wrangler.accounts-staging.jsonc (never the default config,
+#     which is production). The name is checked by scripts/staging-guard.mjs and again literally.
+#   - Production (inkling-ai-beta) is only READ, through the Cloudflare API (deployments and secret
+#     NAMES), before and after; the run fails if anything changed.
+#   - Workers AI Free only, with staging's own 400-Neuron daily cap; no DeepInfra key is loaded.
+#   - Secrets go to wrangler through stdin and are never echoed; GitHub masks them in logs too.
+#
+# Secrets (in the ai-test environment or the repository; the run stops if any is missing):
+#   CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN   the existing ones (account-wide: see the runbook's risk note)
+#   INKLING_STAGING_ADMIN_TOKEN                   a NEW random value of 32+ characters, only for staging;
+#                                                 refused if it equals the production INKLING_ADMIN_TOKEN
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: check (read-only), deploy or delete the staging Worker
+        type: choice
+        options: [check, deploy, delete]
+        default: check
+      confirm:
+        description: 'For deploy: "deploy inkling-ai-accounts-test". For delete: "delete inkling-ai-accounts-test".'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-accounts-staging
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    runs-on: ubuntu-24.04
+    environment: ai-test
+    timeout-minutes: 20
+    env:
+      ACTION: ${{ inputs.action }}
+      CONFIRM: ${{ inputs.confirm }}
+      PROD: inkling-ai-beta
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      STAGING_ADMIN: ${{ secrets.INKLING_STAGING_ADMIN_TOKEN }}
+    steps:
+      - name: Manual run on main, confirmed
+        shell: bash
+        run: |
+          [ "${{ github.event_name }}" = workflow_dispatch ] || { echo "::error title=Not allowed::manual runs only"; exit 1; }
+          [ "${{ github.ref }}" = refs/heads/main ] || { echo "::error title=Not allowed::run from main only"; exit 1; }
+          case "$ACTION" in
+            check) ;;
+            deploy) [ "$CONFIRM" = "deploy inkling-ai-accounts-test" ] || { echo "::error title=Not confirmed::type: deploy inkling-ai-accounts-test"; exit 1; } ;;
+            delete) [ "$CONFIRM" = "delete inkling-ai-accounts-test" ] || { echo "::error title=Not confirmed::type: delete inkling-ai-accounts-test"; exit 1; } ;;
+            *) echo "::error title=Unknown action::$ACTION"; exit 1 ;;
+          esac
+
+      - name: Required secrets
+        shell: bash
+        env:
+          PROD_ADMIN: ${{ secrets.INKLING_ADMIN_TOKEN }}
+        run: |
+          missing=()
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
+          [ ${#STAGING_ADMIN} -ge 32 ] || missing+=("INKLING_STAGING_ADMIN_TOKEN (at least 32 characters)")
+          if [ ${#missing[@]} -gt 0 ]; then echo "::error title=Missing secrets::${missing[*]} (see the top of .github/workflows/ai-accounts-staging.yml)"; exit 1; fi
+          # Compared by hash, never printed: the production admin token must not be given to the staging Worker.
+          if [ -n "$PROD_ADMIN" ] && [ "$(printf '%s' "$STAGING_ADMIN" | sha256sum)" = "$(printf '%s' "$PROD_ADMIN" | sha256sum)" ]; then
+            echo "::error title=Staging admin token::INKLING_STAGING_ADMIN_TOKEN equals the production admin token. Use a new random value."; exit 1
+          fi
+
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            beta-server/package-lock.json
+
+      - name: Staging config guard
+        id: guard
+        shell: bash
+        run: |
+          name=$(node beta-server/scripts/staging-guard.mjs)
+          [ "$name" = inkling-ai-accounts-test ] || { echo "::error title=Staging name::unexpected name"; exit 1; }
+          [ "$name" != "$PROD" ] || { echo "::error title=Staging name::is production"; exit 1; }
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Install and test
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          npm ci
+          npm --prefix beta-server ci
+          npm --prefix beta-server run typecheck
+          npx vitest run tests/unit/stagingConfig.test.ts tests/unit/stagingWorkflow.test.ts tests/unit/entitlements.test.ts
+
+      - name: Cloudflare token and plan (Workers Free only)
+        shell: bash
+        run: |
+          api() { curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4$1"; }
+          v=$(api /user/tokens/verify | jq -r '.result.status // "invalid"')
+          [ "$v" = active ] || { echo "::error title=Cloudflare token::not valid (status: $v)"; exit 1; }
+          subs=$(api "/accounts/$CLOUDFLARE_ACCOUNT_ID/subscriptions")
+          [ "$(echo "$subs" | jq -r '.success')" = true ] || { echo "::error title=Cloudflare plan::could not read the account's plan (the token needs Account › Billing: Read)"; exit 1; }
+          if echo "$subs" | jq -e '[.result[]? | (.rate_plan.id // "" | ascii_upcase) | select(test("WORKERS") and (test("FREE") | not))] | length > 0' >/dev/null; then
+            echo "::error title=Cloudflare plan::the account is on a paid Workers plan; staging runs only on Workers Free"; exit 1
+          fi
+
+      - name: Production snapshot (before; read-only)
+        id: before
+        shell: bash
+        run: |
+          snap() {
+            get() { curl -sSf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$PROD/$1"; }
+            d=$(get deployments) && s=$(get secrets) || return 1
+            jq -n --argjson d "$d" --argjson s "$s" '{deployments: [$d.result.deployments[]? | {id, created_on, versions: [.versions[]? | {version_id, percentage}]}], secret_names: ([$s.result[]? | .name] | sort)}'
+          }
+          snap > /tmp/prod-before.json || { echo "::error title=Production snapshot::could not read inkling-ai-beta (stopping)"; exit 1; }
+          jq -e '.deployments | length > 0' /tmp/prod-before.json > /dev/null || { echo "::error title=Production snapshot::no deployments read (stopping)"; exit 1; }
+          echo "### Production before" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '"Active deployment: \(.deployments[0].id) (\(.deployments[0].created_on)); versions: \([.deployments[0].versions[] | "\(.version_id[0:8]) \(.percentage)%"] | join(", ")); secret names: \(.secret_names | join(", "))"' /tmp/prod-before.json >> "$GITHUB_STEP_SUMMARY"
+          declare -f snap > /tmp/snap.sh
+
+      - name: Deploy the staging Worker
+        if: inputs.action == 'deploy'
+        working-directory: beta-server
+        shell: bash
+        run: |
+          # The committed config, unchanged: no --var overrides, so its 400-Neuron cap stays.
+          for attempt in 1 2 3; do
+            npx wrangler deploy -c wrangler.accounts-staging.jsonc > /tmp/deploy.log 2>&1 && break
+            cat /tmp/deploy.log
+            [ $attempt = 3 ] && exit 1
+            sleep 20
+          done
+          cat /tmp/deploy.log
+          url=$(grep -oE 'https://inkling-ai-accounts-test\.[a-z0-9-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          [ -n "$url" ] || { echo "::error title=Deploy::no inkling-ai-accounts-test workers.dev address printed"; exit 1; }
+          printf '%s' "$STAGING_ADMIN" | tr -d '\r\n' | npx wrangler secret put ADMIN_TOKEN -c wrangler.accounts-staging.jsonc > /dev/null 2>&1 || { echo "::error title=ADMIN_TOKEN::could not be set on staging"; exit 1; }
+          echo "$url" > /tmp/staging-url
+          echo "Staging Worker: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the staging Worker (no model calls)
+        if: inputs.action != 'delete'
+        shell: bash
+        run: |
+          url=$(cat /tmp/staging-url 2>/dev/null || true)
+          if [ -z "$url" ]; then
+            sub=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain // empty')
+            [ -n "$sub" ] && url="https://inkling-ai-accounts-test.$sub.workers.dev"
+          fi
+          [ -n "$url" ] || { echo "::error title=Staging::workers.dev subdomain unknown"; exit 1; }
+          token=$(printf '%s' "$STAGING_ADMIN" | tr -d '\r\n')
+          ok=
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /tmp/sum.json -w '%{http_code}' "$url/admin/summary" -H "Authorization: Bearer $token" || true)
+            [ "$code" = 200 ] && { ok=1; break; }
+            [ "$ACTION" = check ] && break
+            sleep 2
+          done
+          if [ -z "$ok" ]; then
+            [ "$ACTION" = check ] && { echo "Staging Worker: not deployed or not answering ($code)" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+            echo "::error title=Staging::admin summary answered $code"; exit 1
+          fi
+          jq -e '.accounts == "on" and .paused == false and .limits.globalDailyNeurons == 400 and .unit == "neurons"' /tmp/sum.json > /dev/null \
+            || { echo "::error title=Staging::expected accounts on, not paused, Neurons, a 400 cap: $(jq -c '{accounts, paused, unit, cap: .limits.globalDailyNeurons}' /tmp/sum.json)"; exit 1; }
+          inst="inst_stagingworkflowcheck0000000000"
+          anon=$(curl -sS -o /tmp/anon.json -w '%{http_code}' "$url/v1/status" -H "x-inkling-install: $inst" -H 'x-inkling-notice: 5')
+          bad=$(curl -sS -o /tmp/bad.json -w '%{http_code}' "$url/v1/status" -H "x-inkling-install: $inst" -H 'x-inkling-notice: 5' -H 'authorization: Bearer a.b.c')
+          [ "$anon" = 200 ] && jq -e '.quota.plan == null' /tmp/anon.json > /dev/null || { echo "::error title=Staging::anonymous status $anon"; exit 1; }
+          [ "$bad" = 401 ] && jq -e '.error.scope == "account"' /tmp/bad.json > /dev/null || { echo "::error title=Staging::bad token answered $bad"; exit 1; }
+          { echo "### Staging"; jq -r '"accounts: \(.accounts), paused: \(.paused), globalUsed: \(.globalUsed) / \(.globalLimit) Neurons"' /tmp/sum.json; echo "anonymous status: $anon, bad token: $bad"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete the staging Worker
+        if: inputs.action == 'delete'
+        shell: bash
+        env:
+          NAME: ${{ steps.guard.outputs.name }}
+        run: |
+          [ "$NAME" = inkling-ai-accounts-test ] && [ "$NAME" != "$PROD" ] || { echo "::error title=Delete::refusing to delete $NAME"; exit 1; }
+          res=$(curl -sS -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/inkling-ai-accounts-test?force=true")
+          if [ "$(echo "$res" | jq -r '.success')" = true ]; then echo "Deleted inkling-ai-accounts-test" >> "$GITHUB_STEP_SUMMARY"
+          elif echo "$res" | jq -e '[.errors[]?.code] | index(10007)' > /dev/null; then echo "inkling-ai-accounts-test did not exist" >> "$GITHUB_STEP_SUMMARY"
+          else echo "::error title=Delete::$(echo "$res" | jq -c '[.errors[]?.message]')"; exit 1; fi
+
+      - name: Production unchanged (after; read-only)
+        if: always() && steps.before.outcome == 'success'
+        shell: bash
+        run: |
+          source /tmp/snap.sh
+          snap > /tmp/prod-after.json || { echo "::error title=Production check::could not read inkling-ai-beta"; exit 1; }
+          if ! diff <(jq -S . /tmp/prod-before.json) <(jq -S . /tmp/prod-after.json) > /tmp/prod.diff; then
+            cat /tmp/prod.diff
+            echo "::error title=PRODUCTION CHANGED::inkling-ai-beta's deployments or secret names differ from before this run. Check it now."; exit 1
+          fi
+          echo "Production inkling-ai-beta: deployments and secret names unchanged." >> "$GITHUB_STEP_SUMMARY"
