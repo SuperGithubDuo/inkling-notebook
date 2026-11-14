@@ -61,7 +61,7 @@ With `SUPABASE_URL` and `SUPABASE_ANON_KEY` set (both public), a request may car
 | Request | Result |
 |---|---|
 | No token, or accounts off | Anonymous, exactly as above (installation + network). |
-| Verified token | Allowance per account (`acct:<user id>`, all its devices), one answer at a time per account. Free = the installation allowance; Pro = `PRO_DAILY_USD`/`PRO_MONTHLY_USD` (`PRO_DAILY_NEURONS` on Workers AI). **Unset, Pro gets the Free allowance**: set them only from a cost analysis. Network, global daily/monthly, concurrency, pause and duplicate limits apply to every plan. |
+| Verified token | Allowance per account (`acct:<user id>`, all its devices), one answer at a time per account. Free = the installation allowance; Pro = `PRO_DAILY_USD`/`PRO_MONTHLY_USD` (`PRO_DAILY_NEURONS` on Workers AI). **Unset, Pro gets the Free allowance**: set them only from a cost analysis. Global daily/monthly, concurrency, pause and duplicate limits apply to every plan; the network's shared daily pool applies to anonymous and Free requests, while a Pro account with `PRO_*` set has its own (a school's free use can't block it, and it doesn't use that pool up). Rollout: [docs/AI-ACCOUNTS-ROLLOUT.md](../docs/AI-ACCOUNTS-ROLLOUT.md). |
 | Invalid, expired or forged token (or not `Bearer`) | 401 `invalid_key`, scope `account`, before any reservation or model call. |
 | Supabase unreachable or failing | 503 `server`, scope `account_unavailable`, `retryAfter` 30. Never treated as Pro. |
 
