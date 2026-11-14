@@ -6,7 +6,7 @@
  * The URL and anon key are public by design (they identify the project); what
  * a signed-in user can reach is decided by the database's row-level security.
  */
-import { createClient, type SupabaseClient, type SupportedStorage } from '@supabase/supabase-js'
+import { createClient, isAuthRetryableFetchError, type SupabaseClient, type SupportedStorage } from '@supabase/supabase-js'
 import { IMAGE_MIME } from '../assets'
 import type { PushResult, Remote, RemoteDoc, RemoteHead, RemoteVersion } from './engine'
 
@@ -31,6 +31,19 @@ export function createSupabase(config: SupabaseConfig, options: { storage?: Supp
   return createClient(config.url, config.anonKey, {
     auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: options.detectSessionInUrl, ...(options.storage ? { storage: options.storage } : {}) }
   })
+}
+
+/**
+ * The access token of `userId`'s session, for Inkling's AI server: never the refresh token.
+ * getSession() refreshes a session near expiry by itself (no request otherwise); `refresh`
+ * forces a new token. Null when that account has no session any more; throws when the sign-in
+ * server can't be reached, so being offline isn't mistaken for being signed out.
+ */
+export async function accessTokenFor(client: SupabaseClient, userId: string, refresh: boolean): Promise<string | null> {
+  const { data, error } = refresh ? await client.auth.refreshSession() : await client.auth.getSession()
+  if (data.session?.user.id === userId) return data.session.access_token
+  if (error && isAuthRetryableFetchError(error)) throw new Error('Couldn’t reach the sign-in server.')
+  return null
 }
 
 class SyncError extends Error {

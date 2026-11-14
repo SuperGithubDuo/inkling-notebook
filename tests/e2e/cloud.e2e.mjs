@@ -129,7 +129,7 @@ try {
   await win.click('[data-testid="ai-test"]')
   await win.waitForSelector('[data-testid="ai-consent"][data-provider="cloud"]')
   const items = await win.locator('[data-testid="ai-consent-sent"] li').evaluateAll((els) => els.map((e) => e.getAttribute('data-item')))
-  assert.deepEqual(items, ['question', 'context', 'history', 'tasks', 'metadata'], 'the notice lists everything that is sent')
+  assert.deepEqual(items, ['question', 'context', 'history', 'tasks', 'metadata', 'account'], 'the notice lists everything that is sent')
   await win.locator('[data-testid="ai-consent-sent"]').getByText(/recent conversation on this page/).waitFor()
   await win.locator('[data-testid="ai-consent-scope"]').getByText(/does not verify a parent’s or guardian’s consent/).waitFor()
   await win.screenshot({ path: join(shots, 'cloud-consent-notice.png') })

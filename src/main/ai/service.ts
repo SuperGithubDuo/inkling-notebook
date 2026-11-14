@@ -34,6 +34,8 @@ import {
   type AiTestResult,
   type CloudQuota,
   type CloudState,
+  CLOUD_ANON_CONSENT_VERSION,
+  CLOUD_CONSENT_VERSION,
   type ModelAvailability
 } from '@shared/ai'
 import { parseTaskResult } from '@shared/tutor'
@@ -41,11 +43,23 @@ import type { AiConfig } from './config'
 import { ProviderError, type AiProvider, type ProviderModel } from './provider'
 import { taskSpec } from './prompts'
 import { OllamaProvider } from './ollama'
-import { CloudProvider, type CloudStatus } from './cloud'
+import { CloudProvider, type CloudAccount, type CloudStatus } from './cloud'
 
 /** What the service needs from the cloud AI provider beyond AiProvider. */
 export interface BetaProvider extends AiProvider {
   status(signal?: AbortSignal): Promise<CloudStatus>
+}
+
+/** The signed-in account as the AI service sees it (desktop: main/account.ts; web: web/account.ts). */
+export interface AiAccount {
+  /** The signed-in account's ID, or null. Stays set after the session lapses, until the user signs out. */
+  userId(): string | null
+  /**
+   * An access token for this account's current session (never its refresh token), refreshed by
+   * Supabase when near expiry, or now when `refresh`. Null when that account has no session any
+   * more (or another is signed in). Throws when the sign-in server can't be reached.
+   */
+  accessToken(userId: string, refresh: boolean): Promise<string | null>
 }
 
 /** What the service needs from a local provider beyond AiProvider. */
@@ -57,7 +71,7 @@ export interface LocalProvider extends AiProvider {
 /** The settings the service reads and changes: files and the OS keychain on the desktop, browser storage on the web. */
 export type AiConfigApi = Pick<
   AiConfig,
-  | 'provider' | 'model' | 'apiKey' | 'keyHint' | 'keyProtection' | 'consented' | 'cloudConsented' | 'cloudUrl' | 'cloudUrlFromBuild'
+  | 'provider' | 'model' | 'apiKey' | 'keyHint' | 'keyProtection' | 'consented' | 'cloudConsentVersion' | 'cloudUrl' | 'cloudUrlFromBuild'
   | 'ollamaModel' | 'installId' | 'setProvider' | 'setKey' | 'clearKey' | 'setModel' | 'setConsent' | 'setCloudConsent'
 >
 
@@ -68,7 +82,9 @@ export interface AiServiceOptions {
   /** Creates the local Ollama provider (default: 127.0.0.1:11434). */
   makeLocalProvider?: () => LocalProvider
   /** Creates the cloud AI provider for a server address and this installation's ID. */
-  makeCloudProvider?: (opts: { baseUrl: string; installId: string; onQuota: (q: CloudQuota) => void }) => BetaProvider
+  makeCloudProvider?: (opts: { baseUrl: string; installId: string; account?: CloudAccount; onQuota: (q: CloudQuota) => void }) => BetaProvider
+  /** The signed-in Inkling account, if accounts exist in this build: its requests carry its access token. */
+  account?: AiAccount
   emit: (event: AiEvent) => void
   now?: () => number
   limits?: Partial<Limits>
@@ -114,6 +130,9 @@ export class AiService {
   private providerKey: string | null = null
   private readonly makeCloud: NonNullable<AiServiceOptions['makeCloudProvider']>
   private cloud: { provider: BetaProvider; key: string } | null = null
+  private readonly account: AiAccount | undefined
+  /** The account the cloud AI state belongs to (null: signed out; undefined: not looked at yet). */
+  private identity: string | null | undefined
   private cloudInfo: { quota: CloudQuota | null; checkedAt: string | null } = { quota: null, checkedAt: null }
   /** Counts allowance reports from the server, so a request can tell whether it brought one. */
   private quotaReports = 0
@@ -130,6 +149,7 @@ export class AiService {
     this.makeProvider = options.makeProvider
     this.local = options.makeLocalProvider?.() ?? new OllamaProvider()
     this.makeCloud = options.makeCloudProvider ?? ((o) => new CloudProvider(o))
+    this.account = options.account
     this.ollama = { url: this.local.baseUrl, running: null, version: null, checkedAt: null }
     this.emit = options.emit
     this.now = options.now ?? Date.now
@@ -148,7 +168,7 @@ export class AiService {
       hasKey: !!this.config.apiKey,
       keyHint: this.config.keyHint,
       keyProtection: this.config.keyProtection,
-      consented: provider === 'gemini' ? this.config.consented : provider === 'cloud' ? this.config.cloudConsented : true,
+      consented: provider === 'gemini' ? this.config.consented : provider === 'cloud' ? this.cloudConsented() : true,
       geminiConsented: this.config.consented,
       geminiAvailable: this.geminiEnabled,
       models: this.availability(),
@@ -163,7 +183,7 @@ export class AiService {
     return {
       url: this.config.cloudUrl,
       urlFromBuild: this.config.cloudUrlFromBuild,
-      consented: this.config.cloudConsented,
+      consented: this.cloudConsented(),
       // After the UTC reset the last report no longer describes today: show nothing rather than yesterday's count.
       quota: this.quotaExpired() ? null : this.cloudInfo.quota,
       checkedAt: this.cloudInfo.checkedAt
@@ -193,7 +213,40 @@ export class AiService {
    */
   private mayContact(): boolean {
     const p = this.config.provider
-    return p === 'cloud' ? this.config.cloudConsented : p === 'gemini' ? this.config.consented : true
+    return p === 'cloud' ? this.cloudConsented() : p === 'gemini' ? this.config.consented : true
+  }
+
+  /**
+   * Whether the cloud AI may be used as things stand: a signed-in request carries the account's
+   * token, which only the current notice describes; an anonymous one is covered by notice 4 too.
+   */
+  private cloudConsented(): boolean {
+    const accepted = this.config.cloudConsentVersion ?? 0
+    return accepted >= (this.account?.userId() ? CLOUD_CONSENT_VERSION : CLOUD_ANON_CONSENT_VERSION)
+  }
+
+  /** Call whenever the signed-in account may have changed (sign in, sign out, another account). */
+  accountChanged(): void {
+    if (!this.checkIdentity()) return
+    this.emit({ type: 'status', status: this.status() })
+    void this.refreshCloudQuota()
+  }
+
+  /** Drops every piece of cloud AI state that belonged to the previous account (or to no account). True if it changed. */
+  private checkIdentity(): boolean {
+    const who = this.account?.userId() ?? null
+    if (who === this.identity) return false
+    const first = this.identity === undefined
+    this.identity = who
+    if (first) return false
+    // An answer still being written belongs to the previous identity: stop it rather than let its
+    // allowance, refusal or pause land on the new one.
+    if (this.config.provider === 'cloud') this.cancelActive()
+    this.cloud = null
+    this.cloudInfo = { quota: null, checkedAt: null }
+    this.cooldowns.delete(CLOUD_MODEL)
+    this.last = null
+    return true
   }
 
   private consentRequired(): AiError {
@@ -205,7 +258,7 @@ export class AiService {
   /** Asks the server for today's allowance. Costs no model usage; never throws. Never before consent. */
   private async refreshCloudQuota(): Promise<void> {
     // Switched to another provider meanwhile, or no permission: nothing to show, so nothing to ask.
-    const beta = this.config.provider === 'cloud' && this.config.cloudConsented ? this.getCloud() : null
+    const beta = this.config.provider === 'cloud' && this.cloudConsented() ? this.getCloud() : null
     if (!beta) return
     try {
       const st = await beta.status()
@@ -567,9 +620,24 @@ export class AiService {
   private getCloud(): BetaProvider | null {
     const url = this.config.cloudUrl
     if (!url) return null
+    this.checkIdentity()
     const installId = this.config.installId
-    const key = `${url}\n${installId}`
-    if (this.cloud?.key !== key) this.cloud = { provider: this.makeCloud({ baseUrl: url, installId, onQuota: this.noteQuota }), key }
+    const who = this.identity ?? null
+    const key = `${url}\n${installId}\n${who ?? ''}`
+    if (this.cloud?.key !== key) {
+      const account = this.account
+      // Each provider is bound to one identity: its token getter can only ever return that account's token.
+      const provider: BetaProvider = this.makeCloud({
+        baseUrl: url,
+        installId,
+        ...(who && account ? { account: { token: (refresh: boolean) => account.accessToken(who, refresh) } } : {}),
+        // A report from a provider that is no longer current describes someone else's allowance.
+        onQuota: (q) => {
+          if (this.cloud?.provider === provider) this.noteQuota(q)
+        }
+      })
+      this.cloud = { provider, key }
+    }
     return this.cloud.provider
   }
 

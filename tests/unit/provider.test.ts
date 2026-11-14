@@ -801,7 +801,7 @@ describe('app on the external provider', () => {
   })
 
   it('an older app (notice 3) gets a plain “update Inkling” error, not a crash or a retry loop', async () => {
-    await start({ server: { minNoticeVersion: 5 } })
+    await start({ server: { minNoticeVersion: CLOUD_CONSENT_VERSION + 1 } })
     const cloud = new CloudProvider({ baseUrl: server!.url, installId: INSTALL_A })
     const run = async (): Promise<void> => {
       for await (const _ of cloud.stream({ task: 'chat', turns: [{ role: 'user', parts: [{ text: 'hi' }] }] } as any)) void _

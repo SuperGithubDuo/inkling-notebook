@@ -67,7 +67,7 @@ With `SUPABASE_URL` and `SUPABASE_ANON_KEY` set (both public), a request may car
 
 Verified results are cached in memory for at most 60 s (never past the token's expiry), so a cancelled or expired Pro subscription takes up to a minute to apply. Subscription rows are written only by the service role (the future billing webhook); clients can read their own and nothing else. Notebooks, sync, files, export and backup never consult them.
 
-No shipped app sends a token yet: the token identifies the account, so the data notice (`CLOUD_SENT` and `CLOUD_CONSENT_VERSION` in `src/shared/ai.ts`) and `docs/PRIVACY.md` must change first.
+Apps from notice 5 (`CLOUD_CONSENT_VERSION` in `src/shared/ai.ts`) send the token when signed in (`src/main/ai/cloud.ts`); older apps and signed-out users send none.
 
 ## Deploy
 

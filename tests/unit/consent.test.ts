@@ -247,7 +247,10 @@ describe('no cloud contact before consent', () => {
 
 describe('the notice itself', () => {
   it('lists every kind of data, for both cloud providers', () => {
-    expect(CLOUD_SENT.map((i) => i.id)).toEqual(['question', 'context', 'history', 'tasks', 'metadata'])
+    expect(CLOUD_SENT.map((i) => i.id)).toEqual(['question', 'context', 'history', 'tasks', 'metadata', 'account'])
+    const account = CLOUD_SENT.find((x) => x.id === 'account')!.text
+    expect(account).toMatch(/sign-in token/)
+    expect(account).toMatch(/Never your password/)
     // Google gets the content but not Inkling's installation ID.
     expect(GEMINI_SENT.map((i) => i.id)).toEqual(['question', 'context', 'history', 'tasks'])
     expect(CLOUD_WHEN_SENT).toMatch(/not even a check of today’s allowance/)
@@ -272,7 +275,7 @@ describe('the notice itself', () => {
     const text = JSON.stringify([CLOUD_SENT, CLOUD_WHEN_SENT, CLOUD_DATA_NOTE, CLOUD_PERMISSION_SCOPE])
     const hash = createHash('sha256').update(text).digest('hex').slice(0, 16)
     // If this fails, the notice changed: raise CLOUD_CONSENT_VERSION in src/shared/ai.ts, then record the new hash here.
-    expect({ version: CLOUD_CONSENT_VERSION, hash }).toEqual({ version: 4, hash: NOTICE_HASH_V4 })
+    expect({ version: CLOUD_CONSENT_VERSION, hash }).toEqual({ version: 5, hash: NOTICE_HASH_V5 })
   })
 })
 
@@ -294,4 +297,5 @@ describe('tutor history and the provider', () => {
 
 /** sha256 (first 16 hex) of the cloud notice at CLOUD_CONSENT_VERSION 4 (DeepInfra, Workers AI as backup, monthly count). */
 // v4 is unreleased (main and every published app are on v3), so its wording could still be corrected without a v5.
-const NOTICE_HASH_V4 = '79703d6f2f73086b'
+// 5: the account token item (CLOUD_SENT 'account') and the account sentence in CLOUD_DATA_NOTE.
+const NOTICE_HASH_V5 = 'f5d5e1d3718e005b'

@@ -450,7 +450,8 @@ try {
   const asked = beta.requests.find((r) => r.path === '/v1/tutor' && r.method === 'POST')
   assert.equal(asked?.headers.origin, origin, 'the question went from the web app’s origin')
   assert.match(asked.headers['x-inkling-install'], /^inst_/)
-  assert.equal(asked.headers.authorization, undefined, 'with the anonymous installation ID only: no account token or key')
+  // Signed in: the account's short-lived access token (a JWT), never the refresh token (a UUID in the fake Supabase).
+  assert.match(asked.headers.authorization ?? '', /^Bearer [\w-]+\.[\w-]+\.[\w-]+$/, 'a signed-in question carries the account’s access token')
   step('the AI tutor works from the browser through the server’s allow-list; no key in the page')
 
   // ---------------------------------------------------------------- tablet

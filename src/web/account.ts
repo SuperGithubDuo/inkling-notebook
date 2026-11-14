@@ -13,7 +13,8 @@ import type { AccountResult, AccountState, FlushResult, InklingApi } from '@shar
 import type { Library } from '@shared/schema'
 import { LIBRARY_PATH, SyncEngine, autoSync, type SyncStatus } from '@shared/sync/engine'
 import { assetRefs, countPages, withoutPristine } from '@shared/sync/docs'
-import { createSupabase, supabaseConfig, supabaseRemote, type SupabaseClient } from '@shared/sync/supabase'
+import { accessTokenFor, createSupabase, supabaseConfig, supabaseRemote, type SupabaseClient } from '@shared/sync/supabase'
+import type { AiAccount } from '../main/ai/service'
 import { ASSETS_DB, Db, GUEST_DB, accountDb, localAssets, localDocs, stateStore } from './idb'
 import { abandonMigration, copyGuest, guestContent, migrating, settleMigration } from './migrate'
 
@@ -27,6 +28,8 @@ interface Who {
 }
 
 export type WebAccount = InklingApi['account'] & {
+  /** The signed-in account for the AI tutor: its ID and current access token. */
+  ai: AiAccount
   onDocsChanged(handler: (paths: string[]) => void): () => void
   setFlush(handler: () => Promise<FlushResult>): void
 }
@@ -220,6 +223,10 @@ export async function startSession(appUrl: string): Promise<Session> {
       return result
     },
     dismissConflict: async (path) => engine.dismissConflict(path),
+    ai: {
+      userId: () => who?.id ?? null,
+      accessToken: async (userId, refresh) => (client ? accessTokenFor(client, userId, refresh) : null)
+    },
     onState: (handler) => {
       stateListeners.add(handler)
       return () => stateListeners.delete(handler)

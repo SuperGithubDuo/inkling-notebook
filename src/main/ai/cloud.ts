@@ -4,9 +4,12 @@
  * who hosts the model (DeepInfra, or Workers AI as a backup); the app only
  * tells it which version of the data notice the user agreed to.
  *
- * No account, code or key: each request carries this installation's random
- * ID, which the server uses (with the network address) to share out the free
- * daily allowance. The app sends the task and the conversation — the same
+ * No account, code or key needed: each request carries this installation's
+ * random ID, which the server uses (with the network address) to share out the
+ * free daily allowance. When signed in, it also carries the account's
+ * short-lived access token (never the refresh token), and the server counts
+ * the account's allowance instead; a refused token is refreshed once, and a
+ * signed-in request is never sent without its token. The app sends the task and the conversation — the same
  * validated request every provider gets — and the server chooses the
  * instructions, output format and token caps. It reports what is left with
  * every answer.
@@ -23,8 +26,18 @@ const FIRST_TOKEN_TIMEOUT_MS = 120_000
 const IDLE_TIMEOUT_MS = 60_000
 const STATUS_TIMEOUT_MS = 15_000
 
+/** The signed-in account a provider is bound to. */
+export interface CloudAccount {
+  /** The account's current access token (`refresh`: get a new one first); null when its session is gone. */
+  token(refresh: boolean): Promise<string | null>
+}
+
+const SIGN_IN_AGAIN = 'Your sign-in has expired. Sign in again (Settings → Account and sync) to use the AI tutor with your account. Your notebooks work as usual.'
+
 export interface CloudOptions {
   baseUrl: string
+  /** Signed in: the account whose token every request carries. */
+  account?: CloudAccount
   /** This installation's anonymous ID. */
   installId: string
   /** Called whenever the server reports the allowance (status and every answer). */
@@ -60,7 +73,8 @@ export class CloudProvider implements AiProvider {
     const timeout = AbortSignal.timeout(STATUS_TIMEOUT_MS)
     let res: Response
     try {
-      res = await fetch(`${this.baseUrl}/v1/status`, { headers: this.headers(), signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
+      const s = signal ? AbortSignal.any([signal, timeout]) : timeout
+      res = await this.authed((headers) => fetch(`${this.baseUrl}/v1/status`, { headers, signal: s }))
     } catch (err) {
       throw networkError(err, { aborted: !!signal?.aborted, timedOut: timeout.aborted && !signal?.aborted })
     }
@@ -92,13 +106,9 @@ export class CloudProvider implements AiProvider {
     arm(FIRST_TOKEN_TIMEOUT_MS)
     let res: Response
     try {
-      res = await fetch(`${this.baseUrl}/v1/tutor`, {
-        method: 'POST',
-        headers: { ...this.headers(), 'content-type': 'application/json', accept: 'text/event-stream' },
-        // Only the task and the conversation: the server owns the instructions.
-        body: JSON.stringify({ task: request.task, turns: request.turns }),
-        signal: outer
-      })
+      // Only the task and the conversation: the server owns the instructions.
+      const body = JSON.stringify({ task: request.task, turns: request.turns })
+      res = await this.authed((headers) => fetch(`${this.baseUrl}/v1/tutor`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json', accept: 'text/event-stream' }, body, signal: outer }))
     } catch (err) {
       if (timer) clearTimeout(timer)
       throw networkError(err, { aborted: !!signal?.aborted, timedOut })
@@ -159,9 +169,25 @@ export class CloudProvider implements AiProvider {
     }
   }
 
-  private headers(): Record<string, string> {
+  private async headers(refresh = false): Promise<Record<string, string>> {
     // The notice version lets the server refuse an app whose notice names a different provider.
-    return { 'x-inkling-install': this.options.installId, 'x-inkling-notice': String(CLOUD_CONSENT_VERSION) }
+    const base = { 'x-inkling-install': this.options.installId, 'x-inkling-notice': String(CLOUD_CONSENT_VERSION) }
+    if (!this.options.account) return base
+    const token = await this.options.account.token(refresh)
+    // Signed in without a usable session: refuse here rather than send the request anonymously.
+    if (!token) throw new ProviderError('invalid_key', SIGN_IN_AGAIN)
+    return { ...base, authorization: `Bearer ${token}` }
+  }
+
+  /**
+   * Sends with the current headers. A signed-in request the server refuses as unauthorized (401,
+   * before anything is reserved or sent to the model) is sent once more with a refreshed token.
+   */
+  private async authed(send: (headers: Record<string, string>) => Promise<Response>): Promise<Response> {
+    const res = await send(await this.headers())
+    if (res.status !== 401 || !this.options.account) return res
+    await res.body?.cancel().catch(() => undefined)
+    return send(await this.headers(true))
   }
 }
 

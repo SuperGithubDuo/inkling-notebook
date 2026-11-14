@@ -18,7 +18,8 @@ import type { AccountResult, AccountState, SaveResult } from '@shared/ipc'
 import type { Library, NoteDoc, PageDoc } from '@shared/schema'
 import { LIBRARY_PATH, SyncEngine, autoSync, type LocalAssets, type LocalDocs, type StateStore, type SyncState, type SyncStatus } from '@shared/sync/engine'
 import { assetRefs, checkDoc, countPages, parsePath, withoutPristine } from '@shared/sync/docs'
-import { createSupabase, supabaseRemote, type SupabaseClient, type SupabaseConfig } from '@shared/sync/supabase'
+import { accessTokenFor, createSupabase, supabaseRemote, type SupabaseClient, type SupabaseConfig } from '@shared/sync/supabase'
+import type { AiAccount } from './ai/service'
 import type { Storage } from './storage'
 
 /** Google sends the browser back here after sign-in. Must be listed in Supabase → Authentication → URL Configuration. */
@@ -199,6 +200,12 @@ export class Account {
     else all[key] = value
     await fs.mkdir(this.o.dir, { recursive: true })
     await atomicWrite(this.sessionFile, this.o.cipher.encryptString(JSON.stringify(all)))
+  }
+
+  /** The signed-in account for the AI tutor: its ID and current access token. */
+  readonly ai: AiAccount = {
+    userId: () => this.who?.id ?? null,
+    accessToken: async (userId, refresh) => (this.client ? accessTokenFor(this.client, userId, refresh) : null)
   }
 
   state(): AccountState {

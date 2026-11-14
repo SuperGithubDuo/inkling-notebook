@@ -98,8 +98,8 @@ function webAiConfig(cloudUrl: string | null): AiConfigApi {
     keyHint: null,
     keyProtection: null,
     consented: false,
-    get cloudConsented() {
-      return read().consent === CLOUD_CONSENT_VERSION
+    get cloudConsentVersion() {
+      return read().consent ?? null
     },
     cloudUrl,
     cloudUrlFromBuild: !!cloudUrl,
@@ -136,8 +136,11 @@ export function createWebApi({ db, assets, engine, account, changed }: WebDeps):
     makeProvider: () => {
       throw new Error('Not available in the web app.')
     },
+    account: account.ai,
     emit: (event) => aiListeners.forEach((l) => l(event))
   })
+  // Signed out, or the session lapsed: none of the account's AI state may carry over.
+  account.onState(() => ai.accountChanged())
 
   const read = async (path: string): Promise<{ data: unknown | null; recovered: boolean; newer?: boolean }> => {
     const raw = await engine.load(path)
