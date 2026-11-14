@@ -1,55 +1,22 @@
-/**
- * Runs the real migration in a real Postgres (PGlite, in-process) and checks the
- * security rules as the roles Supabase uses: a signed-in user (`authenticated`,
- * identified by the JWT's `sub`) and a visitor (`anon`). Supabase's own auth and
- * storage schemas are stubbed with the same shapes the migration relies on.
- */
-import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+/** The real migrations' security rules, as Supabase's roles (supabaseDb.ts). */
 import { PGlite } from '@electric-sql/pglite'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { ALICE, BOB, applyMigrations, startSupabaseDb } from './supabaseDb'
 
-const ALICE = '11111111-1111-4111-8111-111111111111'
-const BOB = '22222222-2222-4222-8222-222222222222'
 const PAGE = 'page/notebook-1/page-000001'
 let db: PGlite
+let as: Awaited<ReturnType<typeof startSupabaseDb>>['as']
 
-const SUPABASE_STUB = `
-  create role anon nologin; create role authenticated nologin;
-  create schema auth; create schema storage;
-  create table auth.users (id uuid primary key);
-  create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
-  create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint);
-  create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text, unique (bucket_id, name));
-  alter table storage.objects enable row level security;
-  create function storage.foldername(name text) returns text[] language sql immutable as $$ select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
-  grant usage on schema public, auth, storage to anon, authenticated;
-  grant execute on function auth.uid() to anon, authenticated;
-  grant all on storage.objects to anon, authenticated;
-  insert into auth.users values ('${ALICE}'), ('${BOB}');
-`
-
-/** Runs statements as a role, the way PostgREST does for a request. */
-async function as<T = any>(user: string | null, sql: string, params: unknown[] = []): Promise<T[]> {
-  return db.transaction(async (tx) => {
-    await tx.exec(`set local role ${user ? 'authenticated' : 'anon'}; select set_config('request.jwt.claim.sub', '${user ?? ''}', true);`)
-    return (await tx.query<T>(sql, params)).rows
-  })
-}
 const push = async (user: string | null, path: string, baseRev: number, content: unknown, opts: { deleted?: boolean; keep?: boolean; device?: string } = {}): Promise<any> =>
   (await as(user, 'select public.push_doc($1, $2, $3::jsonb, $4, $5, $6) as r', [path, baseRev, content === null ? null : JSON.stringify(content), !!opts.deleted, !!opts.keep, opts.device ?? 'dev-a']))[0].r
 
 beforeAll(async () => {
-  db = new PGlite()
-  await db.exec(SUPABASE_STUB)
-  const dir = join(import.meta.dirname, '../../supabase/migrations')
-  for (const file of readdirSync(dir).sort()) await db.exec(readFileSync(join(dir, file), 'utf8'))
+  ;({ db, as } = await startSupabaseDb())
 })
 
 describe('Supabase schema', () => {
   it('can be applied twice (idempotent)', async () => {
-    const dir = join(import.meta.dirname, '../../supabase/migrations')
-    for (const file of readdirSync(dir).sort()) await db.exec(readFileSync(join(dir, file), 'utf8'))
+    await applyMigrations(db)
   })
 
   it('writes with optimistic revisions and refuses a stale write with the current row', async () => {

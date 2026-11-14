@@ -84,11 +84,19 @@ export interface LedgerLimits {
    * The day's cap is fixed for the whole day (it only uses what was spent before today).
    */
   monthlyPacing?: number
+  /**
+   * A verified Pro account's own allowance, in place of installDailyNeurons / installMonthly.
+   * Unset: Pro gets the same as Free (no allowance is raised without a cost analysis).
+   * The network, global and monthly caps apply to Pro exactly as to everyone.
+   */
+  pro?: { daily: number; monthly?: number }
 }
 
 export interface Identity {
-  /** The app's random installation ID. */
+  /** The app's random installation ID, or `acct:<user id>` for a verified account (its allowance is per account). */
   install: string
+  /** Set by the server from the verified account only, never from the request. Absent: anonymous (Free). */
+  plan?: 'free' | 'pro'
   /** The client's network (IP address, or IPv6 /64). */
   network: string
 }
@@ -110,6 +118,8 @@ export interface Quota {
   reduced?: boolean
   /** Today's whole-service cap is lower than configured, to keep budget for the rest of the month. */
   paced?: boolean
+  /** Signed-in requests: the account's plan; install* figures are then the account's. */
+  plan?: 'free' | 'pro'
 }
 
 export type RefusalCode =
@@ -223,6 +233,12 @@ interface Month {
   requests: number
   inputTokens?: number
   outputTokens?: number
+}
+
+interface Allowance {
+  daily: number
+  monthly?: number
+  plan?: 'free' | 'pro'
 }
 
 interface Keys {
@@ -417,6 +433,12 @@ export class Ledger {
     })
   }
 
+  /** The daily and monthly allowance of whoever is asking: a Pro account's, or everyone else's. */
+  private allowance(id: Identity): Allowance {
+    const pro = id.plan === 'pro' ? this.limits.pro : undefined
+    return pro ? { daily: pro.daily, monthly: pro.monthly ?? this.limits.installMonthly, plan: id.plan } : { daily: this.limits.installDailyNeurons, monthly: this.limits.installMonthly, plan: id.plan }
+  }
+
   private async keys(id: Identity, day: Day): Promise<Keys> {
     const month = await this.thisMonth()
     return {
@@ -544,7 +566,7 @@ export class Ledger {
     return share < base ? { cap: share, paced: true } : { cap: base, paced: false }
   }
 
-  private async usageFor(k: Keys): Promise<{ install: number; network: number; global: number; month: number; installMonth: number; installLimit: number; networkLimit: number; reduced: boolean; globalCap: number; paced: boolean }> {
+  private async usageFor(k: Keys, a: Allowance): Promise<{ install: number; network: number; global: number; month: number; installMonth: number; installLimit: number; networkLimit: number; reduced: boolean; globalCap: number; paced: boolean }> {
     const open = await this.openReservations()
     const reserved = (pred: (r: Reservation) => boolean): number => open.filter(pred).reduce((n, r) => n + r.neurons, 0)
     const install = (await this.counter(k.install)).neurons + reserved((r) => r.install === k.install)
@@ -559,17 +581,17 @@ export class Ledger {
     const { cap, paced } = await this.dailyCap()
     const near = this.finite(soft) && soft < 1 && factor < 1 && (global >= soft * cap || (this.finite(this.limits.globalMonthly) && month >= soft * this.limits.globalMonthly))
     const scale = near ? Math.max(0, factor) : 1
-    return { install, network, global, month, installMonth, installLimit: this.limits.installDailyNeurons * scale, networkLimit: this.limits.networkDailyNeurons * scale, reduced: near, globalCap: cap, paced }
+    return { install, network, global, month, installMonth, installLimit: a.daily * scale, networkLimit: this.limits.networkDailyNeurons * scale, reduced: near, globalCap: cap, paced }
   }
 
-  private async quotaFor(k: Keys): Promise<Quota> {
-    const u = await this.usageFor(k)
+  private async quotaFor(k: Keys, a: Allowance): Promise<Quota> {
+    const u = await this.usageFor(k, a)
     // Inkling's own daily figures, also while the provider is briefly unavailable: that pause is reported
     // as its own refusal (upstream_unavailable), never as today's allowance being used up.
     const globalLimit = u.globalCap
     const rooms = [u.installLimit - u.install, u.networkLimit - u.network, globalLimit - u.global]
     if (this.finite(this.limits.globalMonthly)) rooms.push(this.limits.globalMonthly - u.month)
-    if (this.finite(this.limits.installMonthly)) rooms.push(this.limits.installMonthly - u.installMonth)
+    if (this.finite(a.monthly)) rooms.push(a.monthly - u.installMonth)
     const left = Math.max(0, Math.min(...rooms))
     return {
       installUsed: Math.round(u.install),
@@ -580,9 +602,10 @@ export class Ledger {
       globalLimit,
       approxAnswersLeft: Math.floor(left / Math.max(1, this.limits.typicalNeuronsPerAnswer)),
       resetAt: new Date(nextUtcMidnight(this.now())).toISOString(),
-      ...(this.finite(this.limits.installMonthly) ? { installMonthUsed: Math.round(u.installMonth), installMonthLimit: this.limits.installMonthly } : {}),
+      ...(this.finite(a.monthly) ? { installMonthUsed: Math.round(u.installMonth), installMonthLimit: a.monthly } : {}),
       ...(u.reduced ? { reduced: true } : {}),
-      ...(u.paced ? { paced: true } : {})
+      ...(u.paced ? { paced: true } : {}),
+      ...(a.plan ? { plan: a.plan } : {})
     }
   }
 
@@ -592,7 +615,7 @@ export class Ledger {
     return this.exclusive(async () => {
       const day = await this.today()
       await this.expire(day)
-      return this.quotaFor(await this.keys(id, day))
+      return this.quotaFor(await this.keys(id, day), this.allowance(id))
     })
   }
 
@@ -635,8 +658,9 @@ export class Ledger {
       if (wi.length >= this.limits.installPerMinute) return { ok: false, code: 'rate_limited', retryAfter: wait(wi) }
       if (wn.length >= this.limits.networkPerMinute) return { ok: false, code: 'rate_limited', retryAfter: wait(wn) }
 
-      const q = await this.quotaFor(k)
-      const u = await this.usageFor(k)
+      const a = this.allowance(id)
+      const q = await this.quotaFor(k, a)
+      const u = await this.usageFor(k, a)
       // The provider refused for everyone a moment ago (free allocation or credit used up): stop briefly, then try again.
       if (this.upstreamBlocked(day)) return { ok: false, code: 'upstream_unavailable', retryAfter: this.upstreamRetryIn(day), quota: q }
       // Hard spending caps: the request's worst case must fit, counting every answer in progress.
@@ -646,9 +670,9 @@ export class Ledger {
         return { ok: false, code: 'global_quota', retryAfter, quota: q }
       }
       if (this.finite(this.limits.globalMonthly) && u.month + worst > this.limits.globalMonthly) return { ok: false, code: 'global_monthly_quota', retryAfter: Math.ceil((nextUtcMonth(now) - now) / 1000), quota: q }
-      if (expected > this.limits.installDailyNeurons) return { ok: false, code: 'too_large', quota: q }
+      if (expected > a.daily) return { ok: false, code: 'too_large', quota: q }
       if (u.install + expected > u.installLimit) return { ok: false, code: 'install_quota', retryAfter: resetIn, quota: q }
-      if (this.finite(this.limits.installMonthly) && u.installMonth + expected > this.limits.installMonthly) return { ok: false, code: 'install_monthly_quota', retryAfter: Math.ceil((nextUtcMonth(now) - now) / 1000), quota: q }
+      if (this.finite(a.monthly) && u.installMonth + expected > a.monthly) return { ok: false, code: 'install_monthly_quota', retryAfter: Math.ceil((nextUtcMonth(now) - now) / 1000), quota: q }
       if (u.network + expected > u.networkLimit) return { ok: false, code: 'network_quota', retryAfter: resetIn, quota: q }
 
       const r: Reservation = { id: this.randomId(), install: k.install, network: k.network, installMonth: k.installMonth, neurons: worst, day: day.day, at: now }
@@ -658,7 +682,7 @@ export class Ledger {
       wn.push(now)
       if (fingerprint) this.lastRequest.set(k.install, { fp: fingerprint, reservationId: r.id })
       if (this.lastRequest.size > 5000) this.lastRequest.delete(this.lastRequest.keys().next().value!)
-      return { ok: true, reservationId: r.id, quota: await this.quotaFor(k) }
+      return { ok: true, reservationId: r.id, quota: await this.quotaFor(k, a) }
     })
   }
 

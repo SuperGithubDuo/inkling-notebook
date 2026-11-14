@@ -57,6 +57,8 @@ export interface BetaServerOptions {
   /** Web app origins allowed to call the API from a browser. */
   allowedOrigins?: string[]
   port?: number
+  /** Verifies signed-in requests (beta-server/src/account.ts); unset: accounts off. */
+  accounts?: (token: string) => Promise<{ userId: string; plan: 'free' | 'pro' } | 'invalid' | 'unavailable'>
 }
 export interface RecordedRequest {
   method: string

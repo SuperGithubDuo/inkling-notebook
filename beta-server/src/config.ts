@@ -5,6 +5,7 @@
  */
 import type { ServerConfig } from './handler'
 import type { LedgerLimits } from './ledger'
+import { supabaseAccounts, type AccountResult, type Accounts } from './account'
 import { externalProvider, PRESETS, type AiBinding, type ExternalProviderId, type ProviderId } from './provider'
 
 export interface Env {
@@ -81,6 +82,19 @@ export interface Env {
   INPUT_ESTIMATE_MARGIN?: string
   /** Oldest app data notice accepted. Default: 4 with an external provider (its notice names it), 0 on Workers AI. */
   MIN_NOTICE_VERSION?: string
+  // ---- Accounts (unset: every request is anonymous, as before) ----
+  /** The Supabase project URL (public), e.g. https://abc.supabase.co. Signed-in requests are verified against it. */
+  SUPABASE_URL?: string
+  /** The project's public anon / publishable key (not the service-role key, which this Worker never needs). */
+  SUPABASE_ANON_KEY?: string
+  /**
+   * A verified Pro account's allowance. Unset: Pro gets the same allowance as Free. Set only from a
+   * cost analysis; the global, network and monthly caps bound Pro like everyone else.
+   */
+  PRO_DAILY_USD?: string
+  PRO_MONTHLY_USD?: string
+  /** Workers AI (Neurons) equivalent of PRO_DAILY_USD. */
+  PRO_DAILY_NEURONS?: string
   /** Secret (wrangler secret put ADMIN_TOKEN): the operator's pause switch and summary. Without it the admin API is off. */
   ADMIN_TOKEN?: string
 }
@@ -130,7 +144,8 @@ export function externalLimits(env: Env): LedgerLimits | string {
     // and when they are on the app is told (quota.reduced) and says so.
     softFraction: pos(env.SOFT_LIMIT_FRACTION),
     softFactor: pos(env.SOFT_LIMIT_FACTOR),
-    monthlyPacing: pos(env.MONTHLY_PACING)
+    monthlyPacing: pos(env.MONTHLY_PACING),
+    ...(pos(env.PRO_DAILY_USD) ? { pro: { daily: micro(pos(env.PRO_DAILY_USD)!), monthly: pos(env.PRO_MONTHLY_USD) ? micro(pos(env.PRO_MONTHLY_USD)!) : undefined } } : {})
   }
 }
 
@@ -149,8 +164,25 @@ export function limits(env: Env): LedgerLimits {
     networkConcurrent: num(env.NETWORK_CONCURRENT, 4),
     globalConcurrent: num(env.GLOBAL_CONCURRENT, 12),
     reservationTtlMs: 10 * 60_000,
-    typicalNeuronsPerAnswer: num(env.TYPICAL_NEURONS_PER_ANSWER, 90)
+    typicalNeuronsPerAnswer: num(env.TYPICAL_NEURONS_PER_ANSWER, 90),
+    ...(pos(env.PRO_DAILY_NEURONS) ? { pro: { daily: pos(env.PRO_DAILY_NEURONS)! } } : {})
   }
+}
+
+/**
+ * Verifies signed-in requests against Supabase. Neither setting: accounts off on purpose (undefined,
+ * every request anonymous). Only one, or a bad URL: a mistake, so signed-in requests are refused
+ * ('unavailable') rather than quietly answered without their account; anonymous ones are unaffected.
+ */
+export function accounts(env: Env): Accounts | undefined {
+  const url = env.SUPABASE_URL?.trim().replace(/\/+$/, '')
+  const anonKey = env.SUPABASE_ANON_KEY?.trim()
+  if (!url && !anonKey) return undefined
+  if (!url || !anonKey || !/^https:\/\/[a-z0-9.-]+$/.test(url)) {
+    console.error('accounts misconfigured: SUPABASE_URL (https) and SUPABASE_ANON_KEY must both be set')
+    return Object.assign(async (): Promise<AccountResult> => 'unavailable', { misconfigured: true as const })
+  }
+  return supabaseAccounts({ url, anonKey })
 }
 
 /** Who answers, and at what price, from the Worker's settings; a string explains a setting that is missing (serve nothing). */

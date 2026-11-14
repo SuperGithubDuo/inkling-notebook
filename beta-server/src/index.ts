@@ -20,7 +20,8 @@
 import { DurableObject } from 'cloudflare:workers'
 import { handle } from './handler'
 import { Ledger, type Identity, type LedgerLimits, type Quota, type ReserveResult, type SettleOptions, type UsageRecord } from './ledger'
-import { inference, limits, type Env } from './config'
+import { accounts, inference, limits, type Env } from './config'
+import type { Accounts } from './account'
 import { isLegacyApp, serverConfig } from './bridge'
 
 export type { Env } from './config'
@@ -89,6 +90,9 @@ function ledgerFor(stub: DurableObjectStub<LedgerObject>, l: LedgerLimits): Ledg
   } as unknown as Ledger
 }
 
+/** One verifier per isolate, so its short cache of verified tokens is shared by requests. */
+let accountsCache: Accounts | undefined
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const inf = inference(env)
@@ -97,6 +101,7 @@ export default {
       return Response.json({ error: { code: 'beta_closed', message: `Inkling’s AI server is not configured. (${inf}.)` } }, { status: 503 })
     }
     const url = new URL(request.url)
+    accountsCache ??= accounts(env)
     const external = inf.provider !== 'workers-ai'
     const bridgeOn = external && env.LEGACY_WORKERS_AI === 'true'
     // Older apps on the bridge: /v1/* without notice 4. The operator reads the bridge's ledger at /admin/legacy/*.
@@ -111,14 +116,14 @@ export default {
       } else {
         const r = legacyAdmin ? new Request(new URL(url.pathname.replace('/admin/legacy/', '/admin/') + url.search, url), request) : request
         const stub = env.LEDGER.get(env.LEDGER.idFromName('ledger-workers-ai-bridge'))
-        return handle(r, { ai: winf.ai, ledger: ledgerFor(stub, limits(wenv)), config: await serverConfig(wenv, winf, true), waitUntil: (p) => ctx.waitUntil(p) })
+        return handle(r, { ai: winf.ai, ledger: ledgerFor(stub, limits(wenv)), config: await serverConfig(wenv, winf, true), accounts: accountsCache, waitUntil: (p) => ctx.waitUntil(p) })
       }
     }
     const stub = env.LEDGER.get(env.LEDGER.idFromName('ledger'))
     // The emergency pause is one switch: with the bridge on, /admin/pause also pauses (or resumes) the
     // bridge's ledger, so older apps stop too. Only after the main pause succeeded (authorised, valid).
     const pausing = bridgeOn && url.pathname === '/admin/pause' && request.method === 'POST' ? request.clone() : null
-    const res = await handle(request, { ai: inf.ai, ledger: ledgerFor(stub, limits(env)), config: await serverConfig(env, inf, false), waitUntil: (p) => ctx.waitUntil(p) })
+    const res = await handle(request, { ai: inf.ai, ledger: ledgerFor(stub, limits(env)), config: await serverConfig(env, inf, false), accounts: accountsCache, waitUntil: (p) => ctx.waitUntil(p) })
     if (pausing && res.status === 200) {
       const body = (await pausing.json().catch(() => null)) as { paused?: unknown } | null
       if (typeof body?.paused === 'boolean') {
